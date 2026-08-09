@@ -111,9 +111,13 @@ export default function EntityAutocomplete({
           }}
         >
           {entities.map((entity) => (
-            <li key={entity.entityId}>
+            // The li is presentational so the listbox's children are the
+            // options themselves, which is what the role expects.
+            <li key={entity.entityId} role="presentation">
               <button
                 type="button"
+                role="option"
+                aria-selected={selected === entity.entityId}
                 onClick={() => selectEntity(entity.entityId)}
                 style={{
                   width: "100%",
