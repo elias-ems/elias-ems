@@ -1,0 +1,93 @@
+[
+  {
+    "entity_id": "sensor.inverter_power",
+    "state": "1234.5",
+    "attributes": {
+      "friendly_name": "Inverter power",
+      "unit_of_measurement": "W",
+      "device_class": "power",
+      "state_class": "measurement"
+    }
+  },
+  {
+    "entity_id": "sensor.inverter_energy_total",
+    "state": "8421.334",
+    "attributes": {
+      "friendly_name": "Inverter total energy",
+      "unit_of_measurement": "kWh",
+      "device_class": "energy",
+      "state_class": "total_increasing"
+    }
+  },
+  {
+    "entity_id": "sensor.garage_inverter_power",
+    "state": "312",
+    "attributes": {
+      "friendly_name": "Garage inverter power",
+      "unit_of_measurement": "W",
+      "device_class": "power",
+      "state_class": "measurement"
+    }
+  },
+  {
+    "entity_id": "sensor.garage_inverter_energy_total",
+    "state": "1902.5",
+    "attributes": {
+      "friendly_name": "Garage inverter total energy",
+      "unit_of_measurement": "kWh",
+      "device_class": "energy",
+      "state_class": "total_increasing"
+    }
+  },
+  {
+    "entity_id": "sensor.grid_power",
+    "state": "-450.2",
+    "attributes": {
+      "friendly_name": "Grid power",
+      "unit_of_measurement": "W",
+      "device_class": "power",
+      "state_class": "measurement"
+    }
+  },
+  {
+    "entity_id": "sensor.battery_state_of_charge",
+    "state": "76",
+    "attributes": {
+      "friendly_name": "Battery state of charge",
+      "unit_of_measurement": "%",
+      "device_class": "battery",
+      "state_class": "measurement"
+    }
+  },
+  {
+    "entity_id": "sensor.shed_inverter_power",
+    "state": "unavailable",
+    "attributes": {
+      "friendly_name": "Shed inverter power",
+      "unit_of_measurement": "W",
+      "device_class": "power"
+    }
+  },
+  {
+    "entity_id": "sensor.no_unit_counter",
+    "state": "42",
+    "attributes": {
+      "friendly_name": "Counter without a unit"
+    }
+  },
+  {
+    "entity_id": "binary_sensor.grid_connected",
+    "state": "on",
+    "attributes": {
+      "friendly_name": "Grid connected",
+      "device_class": "connectivity"
+    }
+  },
+  {
+    "entity_id": "switch.pv_curtailment",
+    "state": "off",
+    "attributes": {
+      "friendly_name": "PV curtailment"
+    }
+  }
+]
