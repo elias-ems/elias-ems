@@ -10,5 +10,5 @@ Requires a Supervisor-based install (Home Assistant OS or Supervised) — Core-o
 2. Click the **⋮** menu (top right) → **Repositories**.
 3. Add `https://github.com/elias-ems/elias-ems` and close the dialog.
 4. Refresh the store page — the "Elias EMS Add-ons" repository shows up with "Elias ems" listed.
-5. Open it, click **Install**, and watch the build log (first build compiles the Remix app inside Docker, so it takes a few minutes).
+5. Open it, click **Install**, and watch the build log (first build compiles the React Router app inside Docker, so it takes a few minutes).
 6. Once installed, click **Start**, then open the app from the sidebar panel — it should show "Hello World".

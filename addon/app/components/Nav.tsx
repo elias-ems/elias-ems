@@ -1,6 +1,7 @@
-import { NavLink } from "@remix-run/react";
+import type { CSSProperties } from "react";
+import { NavLink } from "react-router";
 
-const linkStyle = ({ isActive }) => ({
+const linkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
   padding: "0.5rem 1rem",
   textDecoration: "none",
   color: isActive ? "#1f2933" : "#52606d",

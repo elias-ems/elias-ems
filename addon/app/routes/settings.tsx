@@ -1,43 +1,48 @@
 import { useState } from "react";
-import { json } from "@remix-run/node";
-import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
-import { addPvEntity, listPvEntities, removePvEntity } from "../lib/pv-entities.server";
+import { Form, data, useNavigation } from "react-router";
 import EntityAutocomplete from "../components/EntityAutocomplete";
+import { addPvEntity, listPvEntities, removePvEntity } from "../lib/pv-entities.server";
+import type { Route } from "./+types/settings";
+
+type FieldErrors = {
+  powerEntityId?: string;
+  energyEntityId?: string;
+};
 
 export async function loader() {
   const pvEntities = await listPvEntities();
-  return json({ pvEntities });
+  return { pvEntities };
 }
 
-export async function action({ request }) {
+export async function action({ request }: Route.ActionArgs) {
   const formData = await request.formData();
   const intent = formData.get("intent");
 
   if (intent === "remove") {
-    await removePvEntity(formData.get("id"));
-    return json({ ok: true });
+    await removePvEntity(String(formData.get("id")));
+    return { ok: true };
   }
 
   const powerEntityId = formData.get("powerEntityId")?.toString().trim();
   const energyEntityId = formData.get("energyEntityId")?.toString().trim();
 
-  const errors = {};
-  if (!powerEntityId) errors.powerEntityId = "Pick the current power entity.";
-  if (!energyEntityId) errors.energyEntityId = "Pick the total energy entity.";
-  if (Object.keys(errors).length > 0) {
-    return json({ errors }, { status: 400 });
+  if (!powerEntityId || !energyEntityId) {
+    const errors: FieldErrors = {};
+    if (!powerEntityId) errors.powerEntityId = "Pick the current power entity.";
+    if (!energyEntityId) errors.energyEntityId = "Pick the total energy entity.";
+    return data({ errors }, { status: 400 });
   }
 
   await addPvEntity({ powerEntityId, energyEntityId });
-  return json({ ok: true });
+  return { ok: true };
 }
 
-export default function Settings() {
-  const { pvEntities } = useLoaderData();
-  const actionData = useActionData();
+export default function Settings({ loaderData, actionData }: Route.ComponentProps) {
+  const { pvEntities } = loaderData;
   const navigation = useNavigation();
   const [showForm, setShowForm] = useState(false);
 
+  const errors = actionData && "errors" in actionData ? actionData.errors : undefined;
   const isAdding =
     navigation.state !== "idle" && navigation.formData?.get("intent") !== "remove";
 
@@ -135,13 +140,13 @@ export default function Settings() {
               name="powerEntityId"
               label="Current power (W)"
               placeholder="e.g. sensor.inverter_power"
-              error={actionData?.errors?.powerEntityId}
+              error={errors?.powerEntityId}
             />
             <EntityAutocomplete
               name="energyEntityId"
               label="Total energy generated (kWh)"
               placeholder="e.g. sensor.inverter_energy_total"
-              error={actionData?.errors?.energyEntityId}
+              error={errors?.energyEntityId}
             />
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <button type="submit" disabled={isAdding}>

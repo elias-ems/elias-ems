@@ -1,13 +1,31 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher } from "react-router";
+import type { EntityOption } from "../lib/entities";
 
-export default function EntityAutocomplete({ name, label, placeholder, error }) {
+type EntitiesData = {
+  entities: EntityOption[];
+  error: string | null;
+};
+
+type EntityAutocompleteProps = {
+  name: string;
+  label: string;
+  placeholder?: string;
+  error?: string;
+};
+
+export default function EntityAutocomplete({
+  name,
+  label,
+  placeholder,
+  error,
+}: EntityAutocompleteProps) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState("");
   const [open, setOpen] = useState(false);
-  const fetcher = useFetcher();
-  const containerRef = useRef(null);
-  const debounceRef = useRef(null);
+  const fetcher = useFetcher<EntitiesData>();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const inputId = useId();
 
   useEffect(() => {
@@ -21,8 +39,8 @@ export default function EntityAutocomplete({ name, label, placeholder, error }) 
   }, [query, open]);
 
   useEffect(() => {
-    function handleClickOutside(event) {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
@@ -33,7 +51,7 @@ export default function EntityAutocomplete({ name, label, placeholder, error }) 
   const entities = fetcher.data?.entities ?? [];
   const loadError = fetcher.data?.error;
 
-  function selectEntity(entityId) {
+  function selectEntity(entityId: string) {
     setSelected(entityId);
     setQuery(entityId);
     setOpen(false);

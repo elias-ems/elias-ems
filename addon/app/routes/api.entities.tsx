@@ -1,7 +1,8 @@
-import { json } from "@remix-run/node";
+import type { EntityOption } from "../lib/entities";
 import { fetchHaStates } from "../lib/ha.server";
+import type { Route } from "./+types/api.entities";
 
-export async function loader({ request }) {
+export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
 
@@ -9,10 +10,11 @@ export async function loader({ request }) {
   try {
     states = await fetchHaStates();
   } catch (error) {
-    return json({ entities: [], error: error.message });
+    const message = error instanceof Error ? error.message : String(error);
+    return { entities: [] as EntityOption[], error: message };
   }
 
-  const entities = states
+  const entities: EntityOption[] = states
     .filter((state) => state.entity_id.startsWith("sensor."))
     .map((state) => ({
       entityId: state.entity_id,
@@ -27,5 +29,5 @@ export async function loader({ request }) {
     )
     .slice(0, 25);
 
-  return json({ entities, error: null });
+  return { entities, error: null };
 }

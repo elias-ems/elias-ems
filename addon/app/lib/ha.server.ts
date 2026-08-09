@@ -1,6 +1,16 @@
 const SUPERVISOR_API = "http://supervisor/core/api";
 
-export async function fetchHaStates() {
+export type HaState = {
+  entity_id: string;
+  state: string;
+  attributes?: {
+    friendly_name?: string;
+    unit_of_measurement?: string;
+    [key: string]: unknown;
+  };
+};
+
+export async function fetchHaStates(): Promise<HaState[]> {
   const token = process.env.SUPERVISOR_TOKEN;
   if (!token) {
     throw new Error(
@@ -19,5 +29,5 @@ export async function fetchHaStates() {
     throw new Error(`Home Assistant API request failed: ${response.status}`);
   }
 
-  return response.json();
+  return response.json() as Promise<HaState[]>;
 }
