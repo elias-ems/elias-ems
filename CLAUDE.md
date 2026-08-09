@@ -1,10 +1,23 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project description
 
-See [docs/project.md](docs/project.md) for what we're building and architecture decisions, [docs/goal.md](docs/goal.md) for current goals, and [docs/backlog.md](docs/backlog.md) for ideas not yet promoted to goals. Keep these up to date as the project evolves.
+See [docs/project.md](docs/project.md) for what we're building and architecture decisions, [docs/architecture.md](docs/architecture.md) for repo/code structure, [docs/roadmap.md](docs/roadmap.md) for current and future goals, and [docs/routines.md](docs/routines.md) for scheduled Claude routines. Keep these up to date as the project evolves.
+
+## Commands
+
+Run from `addon/`:
+
+- `npm install` — install dependencies
+- `npm run dev` — start the Remix dev server (`remix vite:dev`)
+- `npm run build` — production build (`remix vite:build`)
+- `npm run start` — run the built server (`remix-serve ./build/server/index.js`)
+
+There is no lint or test setup yet.
+
+To exercise the app inside Home Assistant itself, add this repo as a custom repository in the Add-on Store and install/rebuild "Elias-ems" (see README.md for the exact steps).
 
 ## Commit messages
 
