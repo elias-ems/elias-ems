@@ -13,7 +13,7 @@ Run from `addon/`:
 - `npm install` — install dependencies
 - `npm run dev` — start the Remix dev server (`remix vite:dev`)
 - `npm run build` — production build (`remix vite:build`)
-- `npm run start` — run the built server (`remix-serve ./build/server/index.js`)
+- `npm run start` — run the built server (`node server.js`, a small custom Express server — required because assets use relative URLs for Home Assistant ingress compatibility, which `remix-serve` doesn't handle)
 
 There is no lint or test setup yet.
 
