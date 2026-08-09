@@ -4,10 +4,11 @@
 
 ## V1 (current)
 
-- PV curtailment when negative prices
-- Battery control for a net-zero energy strategy
+- Battery control (net-zero energy strategy)
 
 ## Future
 
+- Dynamic prices (epex)
+- PV curtailment when negative prices
+- Battery control (negative prices)
 - Telemetry cloud / backend service to remotely follow up / offer support
-- EPEX prices
