@@ -1,6 +1,17 @@
-// The `supervisor` host only resolves inside Home Assistant. SUPERVISOR_API
-// lets local development point at a stub instead; unset, behaviour is unchanged.
-const SUPERVISOR_API = process.env.SUPERVISOR_API || "http://supervisor/core/api";
+const DEFAULT_SUPERVISOR_API = "http://supervisor/core/api";
+
+/**
+ * The `supervisor` host only resolves inside Home Assistant. SUPERVISOR_API
+ * lets local development point at the stub in `test/ha-mock.js` instead;
+ * unset, behaviour is unchanged.
+ *
+ * Read per call rather than at module load because the stub listens on an
+ * ephemeral port under test, and ESM hoists imports above the setup code that
+ * would otherwise have assigned the variable first.
+ */
+function supervisorApi(): string {
+  return process.env.SUPERVISOR_API || DEFAULT_SUPERVISOR_API;
+}
 
 export type HaState = {
   entity_id: string;
@@ -23,7 +34,7 @@ function supervisorToken(): string {
 }
 
 async function haFetch(path: string): Promise<Response> {
-  return fetch(`${SUPERVISOR_API}${path}`, {
+  return fetch(`${supervisorApi()}${path}`, {
     headers: {
       Authorization: `Bearer ${supervisorToken()}`,
       "Content-Type": "application/json",
