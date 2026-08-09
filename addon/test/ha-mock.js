@@ -52,7 +52,10 @@ export async function startHaMock({
 } = {}) {
   let current = states ?? (await defaultStates());
 
-  /** Every request seen, so tests can assert the app actually called out. */
+  /**
+   * Every request seen, so tests can assert the app actually called out.
+   * @type {Array<{ method: string, path: string }>}
+   */
   const requests = [];
 
   const server = http.createServer((req, res) => {

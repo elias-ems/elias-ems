@@ -16,7 +16,16 @@ Run from `addon/`:
 - `npm run typecheck` — regenerate route types and run `tsc` (`react-router typegen && tsc`)
 - `npm run start` — run the built server (`node server.js`, a small custom Express server — see [Home Assistant ingress](#home-assistant-ingress) below. `react-router-serve` can't replace it: it has no hook for per-request `basename`.)
 
-There is no lint or test setup yet.
+There is no lint setup yet.
+
+Tests, all run from `addon/`:
+
+- `npm test` — unit tests (Vitest). Fast; no build needed.
+- `npm run test:integration` — builds, then drives the real `server.js` behind a mock ingress proxy over HTTP.
+- `npm run test:e2e` — builds, then runs the same stack in Chromium via Playwright. Needs browsers: `npx playwright install chromium`.
+- `npm run test:all` — all three in order.
+
+Two commands exist for clicking around by hand: `npm run dev:mock` (Vite dev server plus a mock Home Assistant, no ingress) and `npm run start:ingress` (the full production stack behind an ingress proxy — the only one where the ingress bugs below can show up).
 
 ## Framework and toolchain
 
@@ -47,7 +56,7 @@ Two related notes:
 
 To develop against real-looking data, start [addon/test/ha-mock.js](addon/test/ha-mock.js), then set `SUPERVISOR_API` to its `apiUrl` and `SUPERVISOR_TOKEN` to its token. Unset, `SUPERVISOR_API` defaults to the real `http://supervisor/core/api`.
 
-`addon/test/` holds harness modules only — there is no test runner wired up yet, so nothing runs them automatically.
+`addon/test/` holds the harness (`ha-mock.js`, `ingress-proxy.js`, `stack.js`, `dev.js`) alongside the suites in `unit/`, `integration/`, and `e2e/`. The harness files are plain JavaScript for the same reason `server.js` is: node runs them directly, with no build step in front.
 
 To exercise the app inside Home Assistant itself, add this repo as a custom repository in the Add-on Store and install/rebuild "Elias ems" (see README.md for the exact steps).
 

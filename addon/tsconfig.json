@@ -1,6 +1,10 @@
 {
-  "include": ["**/*.ts", "**/*.tsx", ".react-router/types/**/*"],
+  // test/*.js are harness modules run straight by node, so they stay JavaScript
+  // like server.js. They're included (not checked) purely so TypeScript can
+  // infer their exports for the .ts tests that import them.
+  "include": ["**/*.ts", "**/*.tsx", "test/**/*.js", ".react-router/types/**/*"],
   "compilerOptions": {
+    "allowJs": true,
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "types": ["node", "vite/client"],
     "target": "ES2022",

@@ -86,3 +86,8 @@ addon/data/
 
 # React Router generated route types
 .react-router/
+
+# Test scratch and reports
+addon/test/.tmp/
+addon/test-results/
+addon/playwright-report/
