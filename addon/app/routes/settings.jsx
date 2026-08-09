@@ -1,12 +1,6 @@
 import { useState } from "react";
 import { json } from "@remix-run/node";
-import {
-  Form,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-  useRouteLoaderData,
-} from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { addPvEntity, listPvEntities, removePvEntity } from "../lib/pv-entities.server";
 import EntityAutocomplete from "../components/EntityAutocomplete";
 
@@ -40,11 +34,9 @@ export async function action({ request }) {
 
 export default function Settings() {
   const { pvEntities } = useLoaderData();
-  const { ingressPath } = useRouteLoaderData("root");
   const actionData = useActionData();
   const navigation = useNavigation();
   const [showForm, setShowForm] = useState(false);
-  const settingsAction = `${ingressPath}/settings`;
 
   const isAdding =
     navigation.state !== "idle" && navigation.formData?.get("intent") !== "remove";
@@ -107,7 +99,7 @@ export default function Settings() {
                     Energy: <code>{entity.energyEntityId}</code>
                   </div>
                 </div>
-                <Form method="post" action={settingsAction}>
+                <Form method="post">
                   <input type="hidden" name="intent" value="remove" />
                   <input type="hidden" name="id" value={entity.id} />
                   <button
@@ -131,7 +123,6 @@ export default function Settings() {
           <Form
             key={pvEntities.length}
             method="post"
-            action={settingsAction}
             style={{
               marginTop: "1rem",
               display: "flex",
@@ -145,14 +136,12 @@ export default function Settings() {
               label="Current power (W)"
               placeholder="e.g. sensor.inverter_power"
               error={actionData?.errors?.powerEntityId}
-              ingressPath={ingressPath}
             />
             <EntityAutocomplete
               name="energyEntityId"
               label="Total energy generated (kWh)"
               placeholder="e.g. sensor.inverter_energy_total"
               error={actionData?.errors?.energyEntityId}
-              ingressPath={ingressPath}
             />
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <button type="submit" disabled={isAdding}>

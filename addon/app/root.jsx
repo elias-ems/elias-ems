@@ -1,25 +1,13 @@
-import { json } from "@remix-run/node";
 import {
   Links,
   Meta,
   Outlet,
   Scripts,
   ScrollRestoration,
-  useLoaderData,
 } from "@remix-run/react";
 import Nav from "./components/Nav";
 
-// Home Assistant serves this app through an ingress proxy at a path that's
-// only known at request time (it strips the prefix before forwarding here).
-// Read it so links/actions/fetches can be built with the right prefix.
-export async function loader({ request }) {
-  const ingressPath = (request.headers.get("x-ingress-path") ?? "").replace(/\/+$/, "");
-  return json({ ingressPath });
-}
-
 export default function App() {
-  const { ingressPath } = useLoaderData();
-
   return (
     <html lang="en">
       <head>
@@ -29,7 +17,7 @@ export default function App() {
         <Links />
       </head>
       <body>
-        <Nav ingressPath={ingressPath} />
+        <Nav />
         <Outlet />
         <ScrollRestoration />
         <Scripts />

@@ -13,11 +13,17 @@ Run from `addon/`:
 - `npm install` — install dependencies
 - `npm run dev` — start the Remix dev server (`remix vite:dev`)
 - `npm run build` — production build (`remix vite:build`)
-- `npm run start` — run the built server (`node server.js`, a small custom Express server — required because assets use relative URLs for Home Assistant ingress compatibility, which `remix-serve` doesn't handle)
+- `npm run start` — run the built server (`node server.js`, a small custom Express server — needed because Home Assistant's ingress proxy strips its dynamic path prefix before forwarding requests here; `server.js` reads the `X-Ingress-Path` header and adds it back so Remix's server-side route matching and the `basename` it hands to the client for hydration both agree with what the browser actually sees. Without it, client-side hydration fails and the app is not interactive when run inside Home Assistant, even though it looks fine on first paint. `remix-serve` can't do this — it has no hook for per-request `basename`.)
 
 There is no lint or test setup yet.
 
-To exercise the app inside Home Assistant itself, add this repo as a custom repository in the Add-on Store and install/rebuild "Elias-ems" (see README.md for the exact steps).
+To exercise the app inside Home Assistant itself, add this repo as a custom repository in the Add-on Store and install/rebuild "Elias ems" (see README.md for the exact steps).
+
+## Naming
+
+- Display name (sidebar, Add-on Store, `name` in [addon/config.yaml](addon/config.yaml)): **Elias ems**.
+- Slug/identifier (folder-safe, used in `slug` in config.yaml, npm package name, git remotes): **elias-ems**.
+- Changing `slug` in config.yaml is a breaking change for any already-installed add-on — Supervisor treats it as a different add-on, so existing installs need manual removal/reinstall rather than an in-place update.
 
 ## Versioning
 

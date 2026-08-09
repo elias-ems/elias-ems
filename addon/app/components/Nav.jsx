@@ -1,18 +1,14 @@
-import { useLocation } from "@remix-run/react";
+import { NavLink } from "@remix-run/react";
 
-function linkStyle(isActive) {
-  return {
-    padding: "0.5rem 1rem",
-    textDecoration: "none",
-    color: isActive ? "#1f2933" : "#52606d",
-    fontWeight: isActive ? "bold" : "normal",
-    borderBottom: isActive ? "2px solid #1f2933" : "2px solid transparent",
-  };
-}
+const linkStyle = ({ isActive }) => ({
+  padding: "0.5rem 1rem",
+  textDecoration: "none",
+  color: isActive ? "#1f2933" : "#52606d",
+  fontWeight: isActive ? "bold" : "normal",
+  borderBottom: isActive ? "2px solid #1f2933" : "2px solid transparent",
+});
 
-export default function Nav({ ingressPath }) {
-  const { pathname } = useLocation();
-
+export default function Nav() {
   return (
     <nav
       style={{
@@ -23,12 +19,12 @@ export default function Nav({ ingressPath }) {
         fontFamily: "sans-serif",
       }}
     >
-      <a href={`${ingressPath}/`} style={linkStyle(pathname === "/")}>
+      <NavLink to="/" end style={linkStyle}>
         Home
-      </a>
-      <a href={`${ingressPath}/settings`} style={linkStyle(pathname === "/settings")}>
+      </NavLink>
+      <NavLink to="/settings" style={linkStyle}>
         Settings
-      </a>
+      </NavLink>
     </nav>
   );
 }

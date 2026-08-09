@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useFetcher } from "@remix-run/react";
 
-export default function EntityAutocomplete({ name, label, placeholder, error, ingressPath = "" }) {
+export default function EntityAutocomplete({ name, label, placeholder, error }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState("");
   const [open, setOpen] = useState(false);
@@ -14,7 +14,7 @@ export default function EntityAutocomplete({ name, label, placeholder, error, in
     if (!open) return undefined;
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      fetcher.load(`${ingressPath}/api/entities?q=${encodeURIComponent(query)}`);
+      fetcher.load(`/api/entities?q=${encodeURIComponent(query)}`);
     }, 200);
     return () => clearTimeout(debounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps

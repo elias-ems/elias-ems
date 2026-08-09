@@ -1,7 +1,7 @@
-name: "Elias-ems"
-version: "1.0.0-alpha.3"
-slug: "eliasems"
-description: "Minimal Home Assistant add-on serving a Hello World page built with Remix"
+name: "Elias ems"
+version: "1.0.0-alpha.5"
+slug: "elias-ems"
+description: "Home Energy Management System (HEMS) that complements and extends Home Assistant"
 arch:
   - aarch64
   - amd64
@@ -10,6 +10,6 @@ init: false
 ingress: true
 ingress_port: 3000
 homeassistant_api: true
-panel_icon: mdi:hand-wave
+panel_icon: mdi:home-analytics
 startup: application
 boot: auto
