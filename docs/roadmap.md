@@ -4,8 +4,8 @@
 
 ## V1 (current)
 
-- Battery control for a net-zero energy strategy
 - PV curtailment when negative prices
+- Battery control for a net-zero energy strategy
 
 ## Future
 
