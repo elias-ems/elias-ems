@@ -19,6 +19,14 @@ There is no lint or test setup yet.
 
 To exercise the app inside Home Assistant itself, add this repo as a custom repository in the Add-on Store and install/rebuild "Elias-ems" (see README.md for the exact steps).
 
+## Versioning
+
+The add-on version lives in the `version` field of [addon/config.yaml](addon/config.yaml). Home Assistant Supervisor detects updates purely by comparing this string to the installed version — it does not look at commits or file diffs, so a version bump is what actually surfaces "Update available" in HA.
+
+- Use semver with an incrementing pre-release counter while pre-1.0: `1.0.0-alpha.1`, `1.0.0-alpha.2`, ... → `1.0.0-beta.1`, `1.0.0-beta.2`, ... → `1.0.0` for the first stable release.
+- Bump once per meaningful release (batch related changes), not on every commit.
+- No automated version-bump pipeline yet — bump manually as part of the release commit.
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <description>`.
