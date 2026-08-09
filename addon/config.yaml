@@ -1,0 +1,14 @@
+name: "Elias-ems"
+version: "0.1.0"
+slug: "eliasems"
+description: "Minimal Home Assistant add-on serving a Hello World page built with Remix"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+ingress: true
+ingress_port: 3000
+panel_icon: mdi:hand-wave
+startup: application
+boot: auto
