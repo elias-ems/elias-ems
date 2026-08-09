@@ -14,7 +14,7 @@ Run from `addon/`:
 - `npm run dev` — start the React Router dev server (`react-router dev`)
 - `npm run build` — production build (`react-router build`)
 - `npm run typecheck` — regenerate route types and run `tsc` (`react-router typegen && tsc`)
-- `npm run start` — run the built server (`node server.js`, a small custom Express server — needed because Home Assistant's ingress proxy strips its dynamic path prefix before forwarding requests here; `server.js` reads the `X-Ingress-Path` header and adds it back so React Router's server-side route matching and the `basename` it hands to the client for hydration both agree with what the browser actually sees. Without it, client-side hydration fails and the app is not interactive when run inside Home Assistant, even though it looks fine on first paint. `react-router-serve` can't do this — it has no hook for per-request `basename`.)
+- `npm run start` — run the built server (`node server.js`, a small custom Express server — see [Home Assistant ingress](#home-assistant-ingress) below. `react-router-serve` can't replace it: it has no hook for per-request `basename`.)
 
 There is no lint or test setup yet.
 
@@ -27,6 +27,19 @@ The app is **React Router 8 in framework mode** (the successor to Remix — Remi
 - Route modules get generated per-route types in `.react-router/types` (gitignored). Import them as `import type { Route } from "./+types/<route-file-name>"` and prefer `Route.ComponentProps` over `useLoaderData`/`useActionData`. Run `npm run typecheck` after adding or renaming a route so the types exist.
 - `json()` and `defer()` were removed in v7 — return plain objects from loaders/actions, and use `data(value, { status })` when you need to set a status code.
 - `server.js` stays plain JavaScript on purpose: it is the Node entry point, it imports the generated `build/server/index.js`, and typechecking it would mean either compiling it separately or depending on Node's experimental type stripping. Everything under `addon/app/` is TypeScript.
+
+## Home Assistant ingress
+
+HA serves the add-on through a proxy at `/api/hassio_ingress/<session-token>/`, a prefix that is only known at request time and is stripped before the request reaches us. [addon/server.js](addon/server.js) reads it from the `X-Ingress-Path` header and does three things with it. All three are needed; each was a separate observed failure.
+
+1. **`basename`** — so React Router's server-side matching and the basename it embeds for client hydration agree with the browser's real URL.
+2. **Rewrites the asset manifest** — `basename` does *not* affect asset URLs. Vite bakes them in at build time from `publicPath`, which is a fixed `/`, so they render as `/assets/x.js`; the browser resolves that against the HA origin, where nothing is served, and every script 404s. The page still server-renders, so the symptom is a page that looks right but is completely inert. `server.js` prefixes `assets.url`, `assets.entry`, and every route's `module`/`imports`/`css`. Do *not* prefix `routeDiscovery.manifestPath` — React Router already resolves that against `basename`.
+3. **Gives `basename` a trailing slash** — React Router derives the `to="/"` href from `basename` verbatim, and HA 404s a bare `/api/hassio_ingress/<token>` with no trailing slash. Without it the Home link points at a URL that dies on reload.
+
+Two related notes:
+
+- Express `trust proxy` must stay **off**. HA sets no `X-Forwarded-Host`/`X-Forwarded-Proto` and forwards the browser's original `Host` header untouched, which is exactly what React Router's action-origin CSRF check needs. Turning `trust proxy` on would make Express prefer a client-suppliable header instead.
+- To reproduce ingress locally, put a proxy in front of `npm run start` that serves the app under a fake `/api/hassio_ingress/<token>/` prefix, strips it, sets `X-Ingress-Path`, passes `Host` through, and 404s anything outside the prefix. Loading the app directly on port 3000 will not surface any of the bugs above.
 
 To exercise the app inside Home Assistant itself, add this repo as a custom repository in the Add-on Store and install/rebuild "Elias ems" (see README.md for the exact steps).
 

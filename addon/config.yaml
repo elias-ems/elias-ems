@@ -1,5 +1,5 @@
 name: "Elias ems"
-version: "1.0.0-alpha.6"
+version: "1.0.0-alpha.7"
 slug: "elias-ems"
 description: "Home Energy Management System (HEMS) that complements and extends Home Assistant"
 arch:
