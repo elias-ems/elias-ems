@@ -1,10 +1,18 @@
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Form, data, useNavigation } from "react-router";
 import EntityAutocomplete from "../components/EntityAutocomplete";
-import { addPvEntity, listPvEntities, removePvEntity } from "../lib/pv-entities.server";
+import {
+  addPvEntity,
+  listPvEntities,
+  removePvEntity,
+  updatePvEntity,
+  type PvEntity,
+  type PvEntityFields,
+} from "../lib/pv-entities.server";
 import type { Route } from "./+types/settings";
 
 type FieldErrors = {
+  title?: string;
   powerEntityId?: string;
   energyEntityId?: string;
 };
@@ -12,6 +20,24 @@ type FieldErrors = {
 export async function loader() {
   const pvEntities = await listPvEntities();
   return { pvEntities };
+}
+
+function readFields(
+  formData: FormData,
+): { ok: true; fields: PvEntityFields } | { ok: false; errors: FieldErrors } {
+  const title = formData.get("title")?.toString().trim();
+  const powerEntityId = formData.get("powerEntityId")?.toString().trim();
+  const energyEntityId = formData.get("energyEntityId")?.toString().trim();
+
+  if (!title || !powerEntityId || !energyEntityId) {
+    const errors: FieldErrors = {};
+    if (!title) errors.title = "Give this array a name.";
+    if (!powerEntityId) errors.powerEntityId = "Pick the current power entity.";
+    if (!energyEntityId) errors.energyEntityId = "Pick the total energy entity.";
+    return { ok: false, errors };
+  }
+
+  return { ok: true, fields: { title, powerEntityId, energyEntityId } };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -23,17 +49,19 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: true };
   }
 
-  const powerEntityId = formData.get("powerEntityId")?.toString().trim();
-  const energyEntityId = formData.get("energyEntityId")?.toString().trim();
-
-  if (!powerEntityId || !energyEntityId) {
-    const errors: FieldErrors = {};
-    if (!powerEntityId) errors.powerEntityId = "Pick the current power entity.";
-    if (!energyEntityId) errors.energyEntityId = "Pick the total energy entity.";
-    return data({ errors }, { status: 400 });
+  // `entityId` tells the page which form the errors belong to: an id for the
+  // row being edited, null for the add form.
+  const entityId = intent === "update" ? String(formData.get("id")) : null;
+  const result = readFields(formData);
+  if (!result.ok) {
+    return data({ errors: result.errors, entityId }, { status: 400 });
   }
 
-  await addPvEntity({ powerEntityId, energyEntityId });
+  if (entityId) {
+    await updatePvEntity(entityId, result.fields);
+  } else {
+    await addPvEntity(result.fields);
+  }
   return { ok: true };
 }
 
@@ -41,10 +69,21 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
   const { pvEntities } = loaderData;
   const navigation = useNavigation();
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const errors = actionData && "errors" in actionData ? actionData.errors : undefined;
-  const isAdding =
-    navigation.state !== "idle" && navigation.formData?.get("intent") !== "remove";
+  const failure = actionData && "errors" in actionData ? actionData : null;
+  const submittingIntent = navigation.formData?.get("intent");
+  const isSubmitting = navigation.state !== "idle";
+  const isAdding = isSubmitting && submittingIntent === "add";
+  const savingId =
+    isSubmitting && submittingIntent === "update"
+      ? String(navigation.formData?.get("id"))
+      : null;
+
+  // A save that succeeded should put the row back into its read-only state.
+  useEffect(() => {
+    if (actionData && !("errors" in actionData)) setEditingId(null);
+  }, [actionData]);
 
   return (
     <main style={{ fontFamily: "sans-serif", padding: "2rem", maxWidth: 640 }}>
@@ -89,36 +128,65 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
               <li
                 key={entity.id}
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "0.5rem 0",
+                  padding: "0.75rem 0",
                   borderBottom: "1px solid #e4e7eb",
                 }}
               >
-                <div>
-                  <div>
-                    Power: <code>{entity.powerEntityId}</code>
-                  </div>
-                  <div>
-                    Energy: <code>{entity.energyEntityId}</code>
-                  </div>
-                </div>
-                <Form method="post">
-                  <input type="hidden" name="intent" value="remove" />
-                  <input type="hidden" name="id" value={entity.id} />
-                  <button
-                    type="submit"
+                {editingId === entity.id ? (
+                  <Form method="post" style={formStyle}>
+                    <input type="hidden" name="intent" value="update" />
+                    <input type="hidden" name="id" value={entity.id} />
+                    <EntityFields
+                      entity={entity}
+                      errors={
+                        failure?.entityId === entity.id ? failure.errors : undefined
+                      }
+                    />
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <button type="submit" disabled={savingId === entity.id}>
+                        {savingId === entity.id ? "Saving…" : "Save"}
+                      </button>
+                      <button type="button" onClick={() => setEditingId(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </Form>
+                ) : (
+                  <div
                     style={{
-                      border: "none",
-                      background: "none",
-                      color: "#e12d39",
-                      cursor: "pointer",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: "1rem",
                     }}
                   >
-                    Remove
-                  </button>
-                </Form>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{entity.title}</div>
+                      <div style={{ fontSize: "0.875rem", marginTop: "0.25rem" }}>
+                        Power: <code>{entity.powerEntityId}</code>
+                      </div>
+                      <div style={{ fontSize: "0.875rem" }}>
+                        Energy: <code>{entity.energyEntityId}</code>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "0.75rem" }}>
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(entity.id)}
+                        style={linkButtonStyle("#1f2933")}
+                      >
+                        Edit
+                      </button>
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="remove" />
+                        <input type="hidden" name="id" value={entity.id} />
+                        <button type="submit" style={linkButtonStyle("#e12d39")}>
+                          Remove
+                        </button>
+                      </Form>
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -128,25 +196,11 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
           <Form
             key={pvEntities.length}
             method="post"
-            style={{
-              marginTop: "1rem",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.75rem",
-              maxWidth: 420,
-            }}
+            style={{ ...formStyle, marginTop: "1rem" }}
           >
-            <EntityAutocomplete
-              name="powerEntityId"
-              label="Current power (W)"
-              placeholder="e.g. sensor.inverter_power"
-              error={errors?.powerEntityId}
-            />
-            <EntityAutocomplete
-              name="energyEntityId"
-              label="Total energy generated (kWh)"
-              placeholder="e.g. sensor.inverter_energy_total"
-              error={errors?.energyEntityId}
+            <input type="hidden" name="intent" value="add" />
+            <EntityFields
+              errors={failure?.entityId === null ? failure.errors : undefined}
             />
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <button type="submit" disabled={isAdding}>
@@ -160,5 +214,76 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         )}
       </section>
     </main>
+  );
+}
+
+const formStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.75rem",
+  maxWidth: 420,
+} as const;
+
+function linkButtonStyle(color: string) {
+  return {
+    border: "none",
+    background: "none",
+    padding: 0,
+    color,
+    cursor: "pointer",
+    font: "inherit",
+  };
+}
+
+function EntityFields({
+  entity,
+  errors,
+}: {
+  entity?: PvEntity;
+  errors?: FieldErrors;
+}) {
+  const titleId = useId();
+
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+        <label htmlFor={titleId} style={{ fontSize: "0.875rem", fontWeight: 600 }}>
+          Title
+        </label>
+        <input
+          id={titleId}
+          type="text"
+          name="title"
+          autoComplete="off"
+          placeholder="e.g. South roof"
+          defaultValue={entity?.title}
+          style={{
+            padding: "0.5rem",
+            border: `1px solid ${errors?.title ? "#e12d39" : "#cbd2d9"}`,
+            borderRadius: 4,
+            font: "inherit",
+          }}
+        />
+        {errors?.title && (
+          <p style={{ fontSize: "0.75rem", color: "#e12d39", margin: 0 }}>
+            {errors.title}
+          </p>
+        )}
+      </div>
+      <EntityAutocomplete
+        name="powerEntityId"
+        label="Current power (W)"
+        placeholder="e.g. sensor.inverter_power"
+        defaultValue={entity?.powerEntityId}
+        error={errors?.powerEntityId}
+      />
+      <EntityAutocomplete
+        name="energyEntityId"
+        label="Total energy generated (kWh)"
+        placeholder="e.g. sensor.inverter_energy_total"
+        defaultValue={entity?.energyEntityId}
+        error={errors?.energyEntityId}
+      />
+    </>
   );
 }

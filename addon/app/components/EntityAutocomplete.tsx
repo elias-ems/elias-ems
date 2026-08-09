@@ -12,6 +12,8 @@ type EntityAutocompleteProps = {
   label: string;
   placeholder?: string;
   error?: string;
+  /** Pre-fills the field when editing an entity that already has one. */
+  defaultValue?: string;
 };
 
 export default function EntityAutocomplete({
@@ -19,9 +21,10 @@ export default function EntityAutocomplete({
   label,
   placeholder,
   error,
+  defaultValue = "",
 }: EntityAutocompleteProps) {
-  const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState("");
+  const [query, setQuery] = useState(defaultValue);
+  const [selected, setSelected] = useState(defaultValue);
   const [open, setOpen] = useState(false);
   const fetcher = useFetcher<EntitiesData>();
   const containerRef = useRef<HTMLDivElement>(null);

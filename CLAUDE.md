@@ -41,6 +41,12 @@ Two related notes:
 - Express `trust proxy` must stay **off**. HA sets no `X-Forwarded-Host`/`X-Forwarded-Proto` and forwards the browser's original `Host` header untouched, which is exactly what React Router's action-origin CSRF check needs. Turning `trust proxy` on would make Express prefer a client-suppliable header instead.
 - To reproduce ingress locally, put a proxy in front of `npm run start` that serves the app under a fake `/api/hassio_ingress/<token>/` prefix, strips it, sets `X-Ingress-Path`, passes `Host` through, and 404s anything outside the prefix. Loading the app directly on port 3000 will not surface any of the bugs above.
 
+## Talking to Home Assistant
+
+[addon/app/lib/ha.server.ts](addon/app/lib/ha.server.ts) calls the Supervisor's proxy to the HA REST API, authenticated with the `SUPERVISOR_TOKEN` env var that Supervisor injects. Neither the token nor the `supervisor` hostname exists outside HA, so both `/states` (entity autocomplete) and `/states/<entity_id>` (live readings on the home page) fail locally by design; the UI degrades to a message rather than erroring.
+
+To develop against real-looking data, set `SUPERVISOR_TOKEN` to anything and point `SUPERVISOR_API` at a stub that serves `/states` and `/states/<entity_id>` in HA's response shape (`{ entity_id, state, attributes: { friendly_name, unit_of_measurement } }`). Unset, `SUPERVISOR_API` defaults to the real `http://supervisor/core/api`.
+
 To exercise the app inside Home Assistant itself, add this repo as a custom repository in the Add-on Store and install/rebuild "Elias ems" (see README.md for the exact steps).
 
 ## Naming
