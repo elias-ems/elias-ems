@@ -3,3 +3,12 @@ build
 .git
 .react-router
 data
+
+# Playwright's output, rewritten by every `npm run test:e2e` run and roughly
+# 70% of the build context. The build stage does `COPY . .`, so leaving these
+# in means running the tests invalidates the layer cache and forces a full
+# reinstall and rebuild on the next image build, with nothing in the source
+# having changed. Both are gitignored, so they never show up in `git status`
+# to remind you they are here.
+playwright-report
+test-results
