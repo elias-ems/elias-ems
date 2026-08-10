@@ -216,6 +216,7 @@ concatenation.
 | `test/unit/control-loop.test.ts` | scheduling, on a fake clock: starts only when enabled, ticks immediately then on the interval, picks up a changed interval, leaves an unchanged loop alone, survives an outage |
 | `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/control-log` |
 | `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy |
+| `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves |
 | `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the debug box fill |
 
 The loop tests need one non-obvious thing: a fake clock can move the interval
