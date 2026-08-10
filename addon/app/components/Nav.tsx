@@ -4,9 +4,11 @@ import { NavLink } from "react-router";
 const linkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
   padding: "0.5rem 1rem",
   textDecoration: "none",
-  color: isActive ? "#1f2933" : "#52606d",
+  color: isActive ? "var(--color-text)" : "var(--color-text-muted)",
   fontWeight: isActive ? "bold" : "normal",
-  borderBottom: isActive ? "2px solid #1f2933" : "2px solid transparent",
+  borderBottom: isActive
+    ? "2px solid var(--color-text)"
+    : "2px solid transparent",
 });
 
 export default function Nav() {
@@ -16,8 +18,7 @@ export default function Nav() {
         display: "flex",
         gap: "0.5rem",
         padding: "0 1rem",
-        borderBottom: "1px solid #e4e7eb",
-        fontFamily: "sans-serif",
+        borderBottom: "1px solid var(--color-border)",
       }}
     >
       <NavLink to="/" end style={linkStyle}>

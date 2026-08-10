@@ -1,0 +1,82 @@
+/*
+ * Theme tokens.
+ *
+ * Home Assistant renders the add-on in an ingress iframe and its CSS custom
+ * properties do not cross that boundary, so we cannot read HA's theme
+ * variables. What does cross is `color-scheme`: the browser propagates the
+ * embedding document's used color-scheme into the iframe, which is what makes
+ * `light-dark()` below follow HA's light/dark setting rather than only the OS
+ * preference.
+ *
+ * `light-dark()` is driven by the computed `color-scheme` rather than by the
+ * `prefers-color-scheme` media query, so declaring `color-scheme: light dark`
+ * once here is the single switch for the whole palette — forcing a theme later
+ * only means overriding that one property.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Page canvas, the panels that sit on it (inputs, the suggestions popover),
+     the tint that marks a chip apart from the page, and the darker tint of a
+     control that is currently pressed. */
+  --color-bg: light-dark(#ffffff, #16202a);
+  --color-surface: light-dark(#ffffff, #1f2933);
+  --color-surface-raised: light-dark(#f5f7fa, #323f4b);
+  --color-surface-active: light-dark(#e4e7eb, #3e4c59);
+
+  /* #616e7c rather than the lighter grey it replaces: the old muted colour
+     cleared 3.6:1 on white, which is under the 4.5:1 needed for body text. */
+  --color-text: light-dark(#1f2933, #f5f7fa);
+  --color-text-muted: light-dark(#616e7c, #9aa5b1);
+
+  --color-border: light-dark(#e4e7eb, #323f4b);
+  --color-border-strong: light-dark(#cbd2d9, #52606d);
+
+  --color-danger: light-dark(#cf1124, #ef4e4e);
+  --color-focus: light-dark(#2186eb, #5eaaf5);
+
+  --shadow-popover: light-dark(
+    0 4px 12px rgba(0, 0, 0, 0.08),
+    0 4px 12px rgba(0, 0, 0, 0.5)
+  );
+}
+
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+a {
+  color: inherit;
+}
+
+code {
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  font-size: 0.9em;
+}
+
+/* Inputs and buttons inherit the page colours instead of the platform's
+   light-mode defaults, which `color-scheme` alone only partly adapts. */
+input,
+button {
+  color: var(--color-text);
+}
+
+input {
+  background: var(--color-surface);
+}
+
+::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}

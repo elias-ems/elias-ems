@@ -87,17 +87,19 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   }, [arrays.length, revalidator]);
 
   return (
-    <main style={{ fontFamily: "sans-serif", padding: "2rem", maxWidth: 640 }}>
+    <main style={{ padding: "2rem", maxWidth: 640 }}>
       <h1>Solar</h1>
 
       {arrays.length === 0 ? (
-        <p style={{ color: "#7b8794" }}>
+        <p style={{ color: "var(--color-text-muted)" }}>
           No PV entities yet — add one in <Link to="/settings">Settings</Link>.
         </p>
       ) : (
         <>
           {error && (
-            <p style={{ fontSize: "0.875rem", color: "#7b8794" }}>
+            <p
+              style={{ fontSize: "0.875rem", color: "var(--color-text-muted)" }}
+            >
               Couldn't read live values from Home Assistant: {error}
             </p>
           )}
@@ -108,7 +110,7 @@ export default function Index({ loaderData }: Route.ComponentProps) {
                 key={array.id}
                 style={{
                   padding: "0.75rem 0",
-                  borderBottom: "1px solid #e4e7eb",
+                  borderBottom: "1px solid var(--color-border)",
                 }}
               >
                 <div style={{ fontWeight: 600 }}>{array.title}</div>
@@ -140,11 +142,13 @@ function Measurement({
 }) {
   return (
     <div>
-      <div style={{ fontSize: "0.75rem", color: "#7b8794" }}>{label}</div>
+      <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+        {label}
+      </div>
       <div
         style={{
           fontVariantNumeric: "tabular-nums",
-          color: reading?.ok ? "#1f2933" : "#7b8794",
+          color: reading?.ok ? "var(--color-text)" : "var(--color-text-muted)",
         }}
       >
         {reading ? reading.display : "—"}

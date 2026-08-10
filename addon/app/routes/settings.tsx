@@ -90,7 +90,7 @@ export default function Settings({
   }, [actionData]);
 
   return (
-    <main style={{ fontFamily: "sans-serif", padding: "2rem", maxWidth: 640 }}>
+    <main style={{ padding: "2rem", maxWidth: 640 }}>
       <h1>Settings</h1>
 
       <section style={{ marginTop: "1.5rem" }}>
@@ -111,8 +111,10 @@ export default function Settings({
               width: "2rem",
               height: "2rem",
               borderRadius: "999px",
-              border: "1px solid #cbd2d9",
-              background: showForm ? "#e4e7eb" : "#fff",
+              border: "1px solid var(--color-border-strong)",
+              background: showForm
+                ? "var(--color-surface-active)"
+                : "var(--color-surface)",
               fontSize: "1.25rem",
               lineHeight: 1,
               cursor: "pointer",
@@ -123,7 +125,9 @@ export default function Settings({
         </div>
 
         {pvEntities.length === 0 && !showForm && (
-          <p style={{ color: "#7b8794" }}>No PV entities yet.</p>
+          <p style={{ color: "var(--color-text-muted)" }}>
+            No PV entities yet.
+          </p>
         )}
 
         {pvEntities.length > 0 && (
@@ -133,7 +137,7 @@ export default function Settings({
                 key={entity.id}
                 style={{
                   padding: "0.75rem 0",
-                  borderBottom: "1px solid #e4e7eb",
+                  borderBottom: "1px solid var(--color-border)",
                 }}
               >
                 {editingId === entity.id ? (
@@ -181,7 +185,7 @@ export default function Settings({
                       <button
                         type="button"
                         onClick={() => setEditingId(entity.id)}
-                        style={linkButtonStyle("#1f2933")}
+                        style={linkButtonStyle("var(--color-text)")}
                       >
                         Edit
                       </button>
@@ -190,7 +194,7 @@ export default function Settings({
                         <input type="hidden" name="id" value={entity.id} />
                         <button
                           type="submit"
-                          style={linkButtonStyle("#e12d39")}
+                          style={linkButtonStyle("var(--color-danger)")}
                         >
                           Remove
                         </button>
@@ -273,13 +277,23 @@ function EntityFields({
           defaultValue={entity?.title}
           style={{
             padding: "0.5rem",
-            border: `1px solid ${errors?.title ? "#e12d39" : "#cbd2d9"}`,
+            border: `1px solid ${
+              errors?.title
+                ? "var(--color-danger)"
+                : "var(--color-border-strong)"
+            }`,
             borderRadius: 4,
             font: "inherit",
           }}
         />
         {errors?.title && (
-          <p style={{ fontSize: "0.75rem", color: "#e12d39", margin: 0 }}>
+          <p
+            style={{
+              fontSize: "0.75rem",
+              color: "var(--color-danger)",
+              margin: 0,
+            }}
+          >
             {errors.title}
           </p>
         )}

@@ -98,7 +98,9 @@ export default function EntityAutocomplete({
         onFocus={() => setOpen(true)}
         style={{
           padding: "0.5rem",
-          border: `1px solid ${error ? "#e12d39" : "#cbd2d9"}`,
+          border: `1px solid ${
+            error ? "var(--color-danger)" : "var(--color-border-strong)"
+          }`,
           borderRadius: 4,
           font: "inherit",
         }}
@@ -122,12 +124,12 @@ export default function EntityAutocomplete({
             marginTop: "0.25rem",
             padding: "0.25rem",
             listStyle: "none",
-            background: "#fff",
-            border: "1px solid #cbd2d9",
+            background: "var(--color-surface)",
+            border: "1px solid var(--color-border-strong)",
             borderRadius: 4,
             maxHeight: 220,
             overflowY: "auto",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+            boxShadow: "var(--shadow-popover)",
           }}
         >
           {entities.map((entity) => (
@@ -150,7 +152,12 @@ export default function EntityAutocomplete({
                 }}
               >
                 <div>{entity.name}</div>
-                <div style={{ fontSize: "0.75rem", color: "#7b8794" }}>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--color-text-muted)",
+                  }}
+                >
                   {entity.entityId}
                   {entity.unit ? ` · ${entity.unit}` : ""}
                 </div>
@@ -161,12 +168,24 @@ export default function EntityAutocomplete({
       )}
 
       {error && (
-        <p style={{ fontSize: "0.75rem", color: "#e12d39", margin: 0 }}>
+        <p
+          style={{
+            fontSize: "0.75rem",
+            color: "var(--color-danger)",
+            margin: 0,
+          }}
+        >
           {error}
         </p>
       )}
       {!error && open && loadError && (
-        <p style={{ fontSize: "0.75rem", color: "#7b8794", margin: 0 }}>
+        <p
+          style={{
+            fontSize: "0.75rem",
+            color: "var(--color-text-muted)",
+            margin: 0,
+          }}
+        >
           Couldn't load Home Assistant entities: {loadError}. You can still type
           an entity ID manually.
         </p>

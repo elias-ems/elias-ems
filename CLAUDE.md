@@ -96,6 +96,23 @@ Two related notes:
 - Express `trust proxy` must stay **off**. HA sets no `X-Forwarded-Host`/`X-Forwarded-Proto` and forwards the browser's original `Host` header untouched, which is exactly what React Router's action-origin CSRF check needs. Turning `trust proxy` on would make Express prefer a client-suppliable header instead.
 - To reproduce ingress locally, run [addon/test/ingress-proxy.js](addon/test/ingress-proxy.js) in front of `npm run start`. Loading the app directly on port 3000 will not surface any of the bugs above, because there is no prefix to get wrong.
 
+## Theming
+
+[addon/app/app.css](addon/app/app.css) is the only stylesheet, and it exists to hold the light/dark colour tokens. Components keep styling themselves with inline `style` objects, but every colour goes through a `var(--color-*)` — **never a literal hex**. A hardcoded colour is by definition broken in one of the two themes, which is exactly how the app ended up dark-grey-on-dark before the tokens existed.
+
+Three things make the theme actually follow Home Assistant:
+
+- **`color-scheme: light dark`** on `:root`. HA's own CSS custom properties do not cross the ingress iframe boundary, so the add-on cannot read HA's theme variables — but the browser *does* propagate the embedding document's used `color-scheme` into the iframe. That propagated value is what tells the app which theme HA is in. It also makes the browser restyle native controls (buttons, scrollbars, the page canvas) for dark, which no amount of our own CSS would do.
+- **`light-dark()`** for each token, rather than a `prefers-color-scheme` media query. `light-dark()` resolves against the computed `color-scheme` property, so the declaration above is the single switch for the whole palette: forcing a theme later (an explicit user preference, say) means overriding that one property and nothing else. A media query would ignore it and keep following the OS.
+- **The `<meta name="color-scheme">`** in [root.tsx](addon/app/root.tsx) duplicates the CSS declaration on purpose — it is parsed before the stylesheet loads, so the first paint of the canvas is already the right colour instead of flashing white.
+
+Two traps worth knowing:
+
+- `addon/package.json` declares `"sideEffects": ["*.css"]`. With the plain `"sideEffects": false` it had before, Rollup is entitled to tree-shake the side-effect-only `import "./app.css"` out of the client build, and the app silently ships with no styles.
+- Import the stylesheet as a side effect (`import "./app.css"`), not via a `links` export. The side-effect import lands the file in `assets.routes.<id>.css`, which is one of the fields [server.js](addon/server.js) rewrites with the ingress prefix; an href returned from `links` is not rewritten and would 404 behind ingress.
+
+Check contrast in both themes when touching colours — every piece of text should clear WCAG AA (4.5:1, or 3:1 for large text) against the surface it actually sits on.
+
 ## Talking to Home Assistant
 
 [addon/app/lib/ha.server.ts](addon/app/lib/ha.server.ts) calls the Supervisor's proxy to the HA REST API, authenticated with the `SUPERVISOR_TOKEN` env var that Supervisor injects. Neither the token nor the `supervisor` hostname exists outside HA, so both `/states` (entity autocomplete) and `/states/<entity_id>` (live readings on the home page) fail locally by design; the UI degrades to a message rather than erroring.

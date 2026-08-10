@@ -2,7 +2,9 @@
   "name": "elias-ems",
   "private": true,
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "*.css"
+  ],
   "scripts": {
     "dev": "react-router dev",
     "dev:mock": "node test/dev.js",
