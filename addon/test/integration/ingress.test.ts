@@ -40,7 +40,7 @@ afterAll(async () => {
 
 describe("the ingress prefix", () => {
   it("serves the app under the prefix", () => {
-    expect(html).toContain("<h1>Solar</h1>");
+    expect(html).toContain("<h1>Home</h1>");
   });
 
   it("serves nothing outside the prefix", async () => {
@@ -131,11 +131,77 @@ describe("Home Assistant data", () => {
   });
 });
 
+describe("battery control", () => {
+  /** Posts one of the settings forms the way the browser would. */
+  async function post(fields: Record<string, string>) {
+    const response = await fetch(`${stack.baseUrl}settings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: stack.origin,
+      },
+      body: new URLSearchParams(fields),
+      redirect: "manual",
+    });
+    expect(response.status).toBeLessThan(400);
+  }
+
+  async function controlLog(): Promise<{
+    status: { running: boolean };
+    entries: Array<{ message: string }>;
+  }> {
+    const response = await fetch(`${stack.baseUrl}api/control-log`);
+    expect(response.status).toBe(200);
+    return response.json();
+  }
+
+  it("runs in the real server process once it is switched on", async () => {
+    // The loop lives in module state inside server.js, which the unit tests
+    // reach by importing it directly. This is the one place it is exercised
+    // where "the add-on" and "the process holding the interval" are the same
+    // thing, reached over HTTP through the ingress proxy.
+    await post({
+      intent: "grid-save",
+      importEntityId: "sensor.grid_import_power",
+      exportEntityId: "sensor.grid_export_power",
+    });
+    await post({
+      intent: "battery-add",
+      title: "Home battery",
+      capacityKwh: "10",
+      minChargePercent: "10",
+      maxChargePercent: "90",
+      energyEntityId: "sensor.battery_energy_total",
+      powerEntityId: "sensor.battery_power",
+      socEntityId: "sensor.battery_state_of_charge",
+    });
+
+    expect((await controlLog()).status.running).toBe(false);
+
+    await post({
+      intent: "control-save",
+      enabled: "on",
+      strategy: "net-zero-energy",
+      intervalSeconds: "1",
+    });
+
+    // Enabling ticks once straight away, but that tick is fire-and-forget and
+    // has its own round trip to Home Assistant to make first.
+    await expect
+      .poll(async () => (await controlLog()).entries.map((e) => e.message), {
+        timeout: 5_000,
+      })
+      .toContainEqual(expect.stringContaining("Home battery: discharge at"));
+
+    expect((await controlLog()).status.running).toBe(true);
+  });
+});
+
 describe("action origin checking", () => {
   /** Posts a complete, valid form, so the origin is the only thing under test. */
   async function submit(origin: string, title: string) {
     const body = new URLSearchParams({
-      intent: "add",
+      intent: "pv-add",
       title,
       powerEntityId: "sensor.inverter_power",
       energyEntityId: "sensor.inverter_energy_total",

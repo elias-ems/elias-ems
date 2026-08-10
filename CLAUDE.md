@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 See [docs/project.md](docs/project.md) for what we're building and architecture decisions, [docs/architecture.md](docs/architecture.md) for repo/code structure, [docs/roadmap.md](docs/roadmap.md) for current and future goals, and [docs/routines.md](docs/routines.md) for scheduled Claude routines. Keep these up to date as the project evolves.
 
+Per-feature docs live beside them: [docs/feature-battery-control.md](docs/feature-battery-control.md).
+
 ## Commands
 
 Run from `addon/`:
@@ -50,6 +52,7 @@ The app is **React Router 8 in framework mode** (the successor to Remix — Remi
 - Route modules get generated per-route types in `.react-router/types` (gitignored). Import them as `import type { Route } from "./+types/<route-file-name>"` and prefer `Route.ComponentProps` over `useLoaderData`/`useActionData`. Run `npm run typecheck` after adding or renaming a route so the types exist.
 - `json()` and `defer()` were removed in v7 — return plain objects from loaders/actions, and use `data(value, { status })` when you need to set a status code.
 - `server.js` stays plain JavaScript on purpose: it is the Node entry point, it imports the generated `build/server/index.js`, and typechecking it would mean either compiling it separately or depending on Node's experimental type stripping. Everything under `addon/app/` is TypeScript.
+- [addon/app/entry.server.tsx](addon/app/entry.server.tsx) is the **stock** entry from `react-router reveal`, owned for exactly one reason: it is the only module the framework loads once when the server process starts, which is where the battery control loop is started. Keep local changes there to that one call — everything else in the file should stay diffable against the template. `app/entry.client.tsx` is deliberately *not* revealed; an unmodified copy would only be one more file to keep in step with the framework. `server.js` cannot do this job instead: it is plain JavaScript and can only import the bundled `build/server/index.js`, which exports no route or lib module.
 
 ## Linting and formatting
 

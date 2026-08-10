@@ -26,6 +26,51 @@ let dataDir: string;
  */
 const UNREACHABLE_API = "http://127.0.0.1:1/core/api";
 
+/** A battery as the settings form posts it — every field a string. */
+const postedBattery = {
+  title: "Home battery",
+  capacityKwh: "10",
+  minChargePercent: "10",
+  maxChargePercent: "90",
+  energyEntityId: "sensor.battery_energy_total",
+  powerEntityId: "sensor.battery_power",
+  socEntityId: "sensor.battery_state_of_charge",
+};
+
+/** The same battery as it should end up on disk, with real numbers. */
+const storedBattery = {
+  ...postedBattery,
+  capacityKwh: 10,
+  minChargePercent: 10,
+  maxChargePercent: 90,
+};
+
+/**
+ * Back to a blank installation. Every suite here shares one data directory, so
+ * a battery left behind by one test would show up as an extra card in another.
+ */
+async function clearStoredSettings() {
+  const [pv, batteries, grid, control] = await Promise.all([
+    import("../../app/lib/pv-entities.server"),
+    import("../../app/lib/batteries.server"),
+    import("../../app/lib/grid.server"),
+    import("../../app/lib/control-config.server"),
+  ]);
+
+  for (const entity of await pv.listPvEntities()) {
+    await pv.removePvEntity(entity.id);
+  }
+  for (const battery of await batteries.listBatteries()) {
+    await batteries.removeBattery(battery.id);
+  }
+  await grid.saveGrid({ importEntityId: "", exportEntityId: "" });
+  await control.saveControlConfig({
+    enabled: false,
+    strategy: "net-zero-energy",
+    intervalSeconds: 5,
+  });
+}
+
 beforeAll(async () => {
   ha = await startHaMock();
   dataDir = await mkdtemp(path.join(os.tmpdir(), "elias-ems-routes-"));
@@ -128,16 +173,85 @@ describe("GET / (dashboard)", () => {
   }
 
   beforeEach(async () => {
-    const { listPvEntities, removePvEntity } = await import(
-      "../../app/lib/pv-entities.server"
-    );
-    for (const entity of await listPvEntities())
-      await removePvEntity(entity.id);
+    await clearStoredSettings();
     vi.resetModules();
   });
 
-  it("returns nothing to show before any PV entity is configured", async () => {
-    expect(await loadIndex()).toEqual({ arrays: [], error: null });
+  it("returns nothing to show before anything is configured", async () => {
+    expect(await loadIndex()).toEqual({
+      arrays: [],
+      grid: { configured: false, consumption: null, production: null },
+      batteries: [],
+      control: {
+        enabled: false,
+        status: {
+          running: false,
+          strategy: "net-zero-energy",
+          intervalSeconds: 5,
+          lastTickAt: null,
+        },
+        entries: [],
+      },
+      error: null,
+    });
+  });
+
+  it("shows both grid readings once the sensors are configured", async () => {
+    const { saveGrid } = await import("../../app/lib/grid.server");
+    await saveGrid({
+      importEntityId: "sensor.grid_import_power",
+      exportEntityId: "sensor.grid_export_power",
+    });
+
+    const { grid } = await loadIndex();
+
+    expect(grid.configured).toBe(true);
+    expect(grid.consumption).toEqual({ display: "842 W", ok: true });
+    expect(grid.production).toEqual({ display: "0 W", ok: true });
+  });
+
+  it("shows a battery's charge window alongside its three readings", async () => {
+    const { addBattery } = await import("../../app/lib/batteries.server");
+    await addBattery(storedBattery);
+
+    const { batteries } = await loadIndex();
+
+    expect(batteries).toEqual([
+      {
+        id: expect.any(String),
+        title: "Home battery",
+        window: "10–90% of 10 kWh",
+        charge: { display: "76 %", ok: true },
+        power: { display: "0 W", ok: true },
+        energy: {
+          display: expect.stringMatching(/^2\D?450\D75 kWh$/),
+          ok: true,
+        },
+      },
+    ]);
+  });
+
+  it("reads a sensor configured in two places only once", async () => {
+    // Deduplicating matters at the interval this page refreshes on: the same
+    // meter legitimately appears as a PV array's power and as the grid import.
+    await addEntity({
+      title: "Roof",
+      powerEntityId: "sensor.grid_import_power",
+      energyEntityId: "sensor.inverter_energy_total",
+    });
+    const { saveGrid } = await import("../../app/lib/grid.server");
+    await saveGrid({
+      importEntityId: "sensor.grid_import_power",
+      exportEntityId: "sensor.grid_export_power",
+    });
+
+    ha.requests.length = 0;
+    await loadIndex();
+
+    const asked = ha.requests.filter((request) =>
+      request.path.endsWith("sensor.grid_import_power"),
+    );
+    expect(asked).toHaveLength(1);
   });
 
   it("formats readings with their unit, grouped and rounded", async () => {
@@ -204,5 +318,183 @@ describe("GET / (dashboard)", () => {
     expect(arrays).toEqual([
       { id: expect.any(String), title: "Roof", power: null, energy: null },
     ]);
+  });
+});
+
+describe("GET /api/control-log", () => {
+  it("reports the loop's state and its log without touching Home Assistant", async () => {
+    // The debug box polls this every couple of seconds while it is open, so it
+    // must not be doing a round of entity reads behind the scenes.
+    const { loader } = await import("../../app/routes/api.control-log");
+    ha.requests.length = 0;
+
+    const { status, entries } = await loader();
+
+    expect(status).toMatchObject({ running: false, intervalSeconds: 5 });
+    expect(entries).toEqual([]);
+    expect(ha.requests).toEqual([]);
+  });
+});
+
+describe("POST /settings", () => {
+  /** The route module and the loop module from the same fresh module graph. */
+  async function loadSettings() {
+    const [route, loop] = await Promise.all([
+      import("../../app/routes/settings"),
+      import("../../app/lib/control-loop.server"),
+    ]);
+    return { route, loop };
+  }
+
+  async function post(fields: Record<string, string>) {
+    const { route } = await loadSettings();
+    const body = new URLSearchParams(fields);
+    return route.action({
+      request: new Request("http://localhost/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      }),
+    } as Parameters<typeof route.action>[0]);
+  }
+
+  /** A 400 from the action is `data(...)`, which carries its payload and status. */
+  function failure(result: unknown) {
+    const wrapped = result as { data: unknown; init?: { status?: number } };
+    return { payload: wrapped.data, status: wrapped.init?.status };
+  }
+
+  beforeEach(async () => {
+    await clearStoredSettings();
+    vi.resetModules();
+  });
+
+  it("saves the grid sensors", async () => {
+    const result = await post({
+      intent: "grid-save",
+      importEntityId: "sensor.grid_import_power",
+      exportEntityId: "sensor.grid_export_power",
+    });
+
+    expect(result).toEqual({ section: "grid", ok: true });
+    const { readGrid } = await import("../../app/lib/grid.server");
+    expect(await readGrid()).toEqual({
+      importEntityId: "sensor.grid_import_power",
+      exportEntityId: "sensor.grid_export_power",
+    });
+  });
+
+  it("tags a rejected grid form so only that section shows the error", async () => {
+    const result = await post({
+      intent: "grid-save",
+      importEntityId: "sensor.grid_power",
+      exportEntityId: "sensor.grid_power",
+    });
+
+    const { payload, status } = failure(result);
+    expect(status).toBe(400);
+    expect(payload).toMatchObject({ section: "grid", recordId: null });
+  });
+
+  it("stores a battery's typed-in numbers as numbers", async () => {
+    const result = await post({ intent: "battery-add", ...postedBattery });
+
+    expect(result).toEqual({ section: "battery", ok: true });
+    const { listBatteries } = await import("../../app/lib/batteries.server");
+    expect(await listBatteries()).toEqual([
+      { id: expect.any(String), ...storedBattery },
+    ]);
+  });
+
+  it("points a rejected edit at the row being edited, not at the add form", async () => {
+    const { addBattery } = await import("../../app/lib/batteries.server");
+    const battery = await addBattery(storedBattery);
+
+    const result = await post({
+      intent: "battery-update",
+      id: battery.id,
+      ...postedBattery,
+      capacityKwh: "0",
+    });
+
+    const { payload, status } = failure(result);
+    expect(status).toBe(400);
+    expect(payload).toMatchObject({
+      section: "battery",
+      recordId: battery.id,
+      errors: { capacityKwh: expect.any(String) },
+    });
+  });
+
+  it("removes a battery", async () => {
+    const { addBattery, listBatteries } = await import(
+      "../../app/lib/batteries.server"
+    );
+    const battery = await addBattery(storedBattery);
+
+    await post({ intent: "battery-remove", id: battery.id });
+
+    expect(await listBatteries()).toEqual([]);
+  });
+
+  it("saves the control settings without starting a loop while it is off", async () => {
+    const result = await post({
+      intent: "control-save",
+      strategy: "net-zero-energy",
+      intervalSeconds: "10",
+    });
+
+    expect(result).toEqual({ section: "control", ok: true });
+    const { readControlConfig } = await import(
+      "../../app/lib/control-config.server"
+    );
+    expect(await readControlConfig()).toEqual({
+      enabled: false,
+      strategy: "net-zero-energy",
+      intervalSeconds: 10,
+    });
+
+    const { loop } = await loadSettings();
+    expect(loop.controlLoopStatus().running).toBe(false);
+  });
+
+  it("starts the loop as soon as the box is ticked", async () => {
+    // Waiting for a restart would be indistinguishable from the feature not
+    // working, which is the whole reason the action re-syncs the loop.
+    const { loop } = await loadSettings();
+    try {
+      await post({
+        intent: "control-save",
+        enabled: "on",
+        strategy: "net-zero-energy",
+        intervalSeconds: "5",
+      });
+
+      expect(loop.controlLoopStatus()).toMatchObject({
+        running: true,
+        intervalSeconds: 5,
+      });
+    } finally {
+      // The interval is real here; leaving it running would tick against a
+      // torn-down mock for the rest of the file.
+      await loop.pendingControlTick();
+      loop.resetControlLoop();
+    }
+  });
+
+  it("rejects an interval outside the allowed range", async () => {
+    const result = await post({
+      intent: "control-save",
+      enabled: "on",
+      strategy: "net-zero-energy",
+      intervalSeconds: "0",
+    });
+
+    const { payload, status } = failure(result);
+    expect(status).toBe(400);
+    expect(payload).toMatchObject({
+      section: "control",
+      errors: { intervalSeconds: expect.any(String) },
+    });
   });
 });

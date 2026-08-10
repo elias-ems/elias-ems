@@ -1,6 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import type { EntityOption } from "../lib/entities";
+import {
+  errorStyle,
+  fieldStyle,
+  hintStyle,
+  inputStyle,
+  labelStyle,
+} from "./form";
 
 type EntitiesData = {
   entities: EntityOption[];
@@ -69,19 +76,8 @@ export default function EntityAutocomplete({
   }
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        position: "relative",
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.25rem",
-      }}
-    >
-      <label
-        htmlFor={inputId}
-        style={{ fontSize: "0.875rem", fontWeight: 600 }}
-      >
+    <div ref={containerRef} style={{ ...fieldStyle, position: "relative" }}>
+      <label htmlFor={inputId} style={labelStyle}>
         {label}
       </label>
       <input
@@ -96,14 +92,7 @@ export default function EntityAutocomplete({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        style={{
-          padding: "0.5rem",
-          border: `1px solid ${
-            error ? "var(--color-danger)" : "var(--color-border-strong)"
-          }`,
-          borderRadius: 4,
-          font: "inherit",
-        }}
+        style={inputStyle(Boolean(error))}
       />
       <input type="hidden" name={name} value={selected || query} />
 
@@ -152,12 +141,7 @@ export default function EntityAutocomplete({
                 }}
               >
                 <div>{entity.name}</div>
-                <div
-                  style={{
-                    fontSize: "0.75rem",
-                    color: "var(--color-text-muted)",
-                  }}
-                >
+                <div style={hintStyle}>
                   {entity.entityId}
                   {entity.unit ? ` · ${entity.unit}` : ""}
                 </div>
@@ -167,25 +151,9 @@ export default function EntityAutocomplete({
         </ul>
       )}
 
-      {error && (
-        <p
-          style={{
-            fontSize: "0.75rem",
-            color: "var(--color-danger)",
-            margin: 0,
-          }}
-        >
-          {error}
-        </p>
-      )}
+      {error && <p style={errorStyle}>{error}</p>}
       {!error && open && loadError && (
-        <p
-          style={{
-            fontSize: "0.75rem",
-            color: "var(--color-text-muted)",
-            margin: 0,
-          }}
-        >
+        <p style={hintStyle}>
           Couldn't load Home Assistant entities: {loadError}. You can still type
           an entity ID manually.
         </p>

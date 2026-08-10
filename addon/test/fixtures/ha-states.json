@@ -50,6 +50,26 @@
     }
   },
   {
+    "entity_id": "sensor.grid_import_power",
+    "state": "842",
+    "attributes": {
+      "friendly_name": "Grid import power",
+      "unit_of_measurement": "W",
+      "device_class": "power",
+      "state_class": "measurement"
+    }
+  },
+  {
+    "entity_id": "sensor.grid_export_power",
+    "state": "0",
+    "attributes": {
+      "friendly_name": "Grid export power",
+      "unit_of_measurement": "W",
+      "device_class": "power",
+      "state_class": "measurement"
+    }
+  },
+  {
     "entity_id": "sensor.battery_state_of_charge",
     "state": "76",
     "attributes": {
@@ -57,6 +77,26 @@
       "unit_of_measurement": "%",
       "device_class": "battery",
       "state_class": "measurement"
+    }
+  },
+  {
+    "entity_id": "sensor.battery_power",
+    "state": "0",
+    "attributes": {
+      "friendly_name": "Battery power",
+      "unit_of_measurement": "W",
+      "device_class": "power",
+      "state_class": "measurement"
+    }
+  },
+  {
+    "entity_id": "sensor.battery_energy_total",
+    "state": "2450.75",
+    "attributes": {
+      "friendly_name": "Battery total energy charged",
+      "unit_of_measurement": "kWh",
+      "device_class": "energy",
+      "state_class": "total_increasing"
     }
   },
   {

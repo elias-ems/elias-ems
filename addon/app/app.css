@@ -33,6 +33,12 @@
   --color-border-strong: light-dark(#cbd2d9, #52606d);
 
   --color-danger: light-dark(#cf1124, #ef4e4e);
+
+  /* Warnings in the control loop's debug log — a tick that decided something,
+     but with a reading it could not trust. Both ends clear 4.5:1 against the
+     surface they are drawn on: 5.2:1 on white, 8.9:1 on the dark canvas. */
+  --color-warning: light-dark(#8d6708, #f0b429);
+
   --color-focus: light-dark(#2186eb, #5eaaf5);
 
   --shadow-popover: light-dark(

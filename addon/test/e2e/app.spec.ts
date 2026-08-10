@@ -112,3 +112,67 @@ test("a PV entity can be added, appears on the dashboard, and removed", async ({
     .click();
   await expect(page.getByText("No PV entities yet.")).toBeVisible();
 });
+
+/**
+ * The whole feature end to end: configure it the way a user would, switch it on,
+ * and check that the loop running inside server.js actually says something. Put
+ * last, because it leaves a control loop running for the rest of the run.
+ */
+test("battery control can be configured, enabled, and watched deciding", async ({
+  page,
+}) => {
+  await page.goto("./settings");
+
+  const suggestion = (id: string) =>
+    page.getByRole("option", { name: new RegExp(id) });
+
+  // Grid: two separate sensors, since the net exchange is their difference.
+  await page.getByLabel(/^Consumption/).fill("grid_import");
+  await suggestion("sensor\\.grid_import_power\\b").click();
+  await page.getByLabel(/^Production/).fill("grid_export");
+  await suggestion("sensor\\.grid_export_power\\b").click();
+  await page.getByRole("button", { name: "Save grid" }).click();
+
+  await page.getByRole("button", { name: "Add battery" }).click();
+  await page.getByLabel("Title").fill("Home battery");
+  await page.getByLabel("Capacity (kWh)").fill("10");
+  // Set explicitly rather than leaning on the prefilled defaults, so the card
+  // asserted on the dashboard below is showing what this test chose.
+  await page.getByLabel("Minimum charge (%)").fill("10");
+  await page.getByLabel("Maximum charge (%)").fill("90");
+  await page.getByLabel(/^Energy \(kWh\)/).fill("battery_energy");
+  await suggestion("sensor\\.battery_energy_total\\b").click();
+  await page.getByLabel(/^Power \(W\)/).fill("battery_power");
+  await suggestion("sensor\\.battery_power\\b").click();
+  await page.getByLabel(/^Charge/).fill("state_of_charge");
+  await suggestion("sensor\\.battery_state_of_charge\\b").click();
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+
+  await expect(
+    page.locator("li", { hasText: "sensor.battery_state_of_charge" }),
+  ).toBeVisible();
+
+  // A one-second interval so the log fills while the test is watching.
+  await page.getByLabel("Enable battery control").check();
+  await page.getByLabel("Loop interval (seconds)").fill("1");
+  await page.getByRole("button", { name: "Save battery control" }).click();
+
+  await page
+    .getByRole("navigation")
+    .getByRole("link", { name: "Home" })
+    .click();
+
+  // The battery's readings reached the dashboard.
+  await expect(page.getByText("10–90% of 10 kWh")).toBeVisible();
+  await expect(page.getByText("76 %")).toBeVisible();
+
+  // The debug box only polls while it is open, so this both expands it and is
+  // the thing that makes the log appear at all.
+  await page.getByText("Debug log").click();
+
+  // The fixture imports 842 W with the battery idle, so net zero means
+  // discharging exactly that much.
+  await expect(page.getByText(/Home battery: discharge at 842 W/)).toBeVisible({
+    timeout: 15_000,
+  });
+});
