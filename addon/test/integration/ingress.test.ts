@@ -176,7 +176,10 @@ describe("action origin checking", () => {
     // React Router answers a failed origin check with 400, which is also what a
     // validation failure looks like — so the status alone proves nothing. What
     // makes this a rejection is that the action never ran.
-    const response = await submit("http://evil.example", "Posted from elsewhere");
+    const response = await submit(
+      "http://evil.example",
+      "Posted from elsewhere",
+    );
 
     expect(response.status).toBe(400);
     expect(await storedTitles()).not.toContain("Posted from elsewhere");

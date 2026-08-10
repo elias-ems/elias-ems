@@ -11,14 +11,17 @@
  * tested is the same entry point the Dockerfile runs.
  */
 import { spawn } from "node:child_process";
-import net from "node:net";
 import { existsSync } from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startHaMock } from "./ha-mock.js";
-import { startIngressProxy, DEFAULT_INGRESS_TOKEN } from "./ingress-proxy.js";
+import { DEFAULT_INGRESS_TOKEN, startIngressProxy } from "./ingress-proxy.js";
 
-const addonDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const addonDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 const SERVER_BUILD = path.join(addonDir, "build", "server", "index.js");
 
 /** Ask the OS for a port, then hand it to the child that will actually bind it. */
@@ -54,7 +57,9 @@ function waitForListening(child, { timeout = 30_000 } = {}) {
     const timer = setTimeout(() => {
       finish(
         reject,
-        new Error(`server.js did not start within ${timeout}ms\n${stderr || stdout}`),
+        new Error(
+          `server.js did not start within ${timeout}ms\n${stderr || stdout}`,
+        ),
       );
     }, timeout);
 
@@ -68,7 +73,10 @@ function waitForListening(child, { timeout = 30_000 } = {}) {
       process.stderr.write(chunk);
     });
     child.once("exit", (code) => {
-      finish(reject, new Error(`server.js exited with code ${code}\n${stderr}`));
+      finish(
+        reject,
+        new Error(`server.js exited with code ${code}\n${stderr}`),
+      );
     });
   });
 }
@@ -151,7 +159,10 @@ export async function startStack({
 
 // CLI mode: fixed ports, so the URL printed here stays the same between runs
 // and can be bookmarked.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const stack = await startStack({
     proxyPort: Number(process.env.INGRESS_PORT) || 4000,
     appPort: Number(process.env.APP_PORT) || 4001,

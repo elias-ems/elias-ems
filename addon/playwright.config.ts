@@ -1,5 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
+import { defineConfig, devices } from "@playwright/test";
 import { DEFAULT_INGRESS_TOKEN } from "./test/ingress-proxy.js";
 
 const INGRESS_PORT = 4000;

@@ -16,7 +16,11 @@ Run from `addon/`:
 - `npm run typecheck` — regenerate route types and run `tsc` (`react-router typegen && tsc`)
 - `npm run start` — run the built server (`node server.js`, a small custom Express server — see [Home Assistant ingress](#home-assistant-ingress) below. `react-router-serve` can't replace it: it has no hook for per-request `basename`.)
 
-There is no lint setup yet.
+Linting and formatting, also from `addon/`:
+
+- `npm run lint` — check formatting, lint rules and import order (`biome check .`)
+- `npm run lint:fix` — apply the safe fixes and format (`biome check --write .`)
+- `npm run format` — format only, no lint rules (`biome format --write .`)
 
 Tests, all run from `addon/`:
 
@@ -36,6 +40,25 @@ The app is **React Router 8 in framework mode** (the successor to Remix — Remi
 - Route modules get generated per-route types in `.react-router/types` (gitignored). Import them as `import type { Route } from "./+types/<route-file-name>"` and prefer `Route.ComponentProps` over `useLoaderData`/`useActionData`. Run `npm run typecheck` after adding or renaming a route so the types exist.
 - `json()` and `defer()` were removed in v7 — return plain objects from loaders/actions, and use `data(value, { status })` when you need to set a status code.
 - `server.js` stays plain JavaScript on purpose: it is the Node entry point, it imports the generated `build/server/index.js`, and typechecking it would mean either compiling it separately or depending on Node's experimental type stripping. Everything under `addon/app/` is TypeScript.
+
+## Linting and formatting
+
+**Biome** ([addon/biome.json](addon/biome.json)) is both the linter and the formatter. There is no ESLint and no Prettier, and adding them is not a small decision:
+
+- **ESLint is currently blocked.** `typescript-eslint` imports the TypeScript compiler API and throws at import time on TypeScript >= 7 (its peer range is `>=4.8.4 <6.1.0`). This repo is on TypeScript 7, so ESLint would need a TypeScript 6 installed side by side purely to feed the linter. Biome has its own parser and never loads `typescript`, which sidesteps the problem entirely.
+- The tradeoff is that Biome has **no type-aware rules** — nothing like `no-floating-promises`. `npm run typecheck` (`tsc --strict`) is what covers that ground, so keep running it; lint is not a substitute.
+- Config matches the code that already existed rather than Biome's defaults: 2-space indent (Biome defaults to tabs), double quotes, semicolons, 80-column width.
+- Suppress a rule with `// biome-ignore lint/<group>/<rule>: <reason>`. It only binds to the **immediately following line**, so put any longer explanation in normal comments *above* it, and note that a diagnostic on a JSX attribute needs the comment inside the opening tag, next to the attribute.
+
+Two suppressions exist on purpose and should not be "fixed": the `role="listbox"` on the suggestions `ul` in [EntityAutocomplete.tsx](addon/app/components/EntityAutocomplete.tsx) is the correct ARIA combobox pattern, and the debounce effect there deliberately omits `fetcher.load` because `useFetcher` returns a new object every render.
+
+## Git hooks
+
+**lefthook** ([lefthook.yml](lefthook.yml)) runs `biome check --write` over staged files on pre-commit and re-stages what it fixed; unfixable lint errors fail the commit. It installs itself via the npm `postinstall` in `addon/`, so hooks appear after `npm install`. Skip it for one command with `LEFTHOOK=0 git commit ...`.
+
+Note that lefthook globs are matched from the **repo root** and ignore the `root:` setting, so they carry the `addon/` prefix that `root: "addon/"` then strips back off.
+
+[.gitattributes](.gitattributes) pins the working tree to LF. Without it, `core.autocrlf=true` on Windows checks files out as CRLF while Biome writes LF, so the formatter and the hook rewrite each other's line endings on every run.
 
 ## Home Assistant ingress
 

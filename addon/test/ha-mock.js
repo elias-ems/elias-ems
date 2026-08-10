@@ -12,8 +12,9 @@
  * Plain JavaScript for the same reason as server.js: it is spawned directly by
  * node, with no build step in front of it.
  */
-import http from "node:http";
+
 import { readFile } from "node:fs/promises";
+import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 

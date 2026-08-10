@@ -1,0 +1,10 @@
+# Keep the working tree LF on every platform. The repo already stores LF, the
+# Docker image is Linux, and Biome's formatter writes LF — without this, a
+# Windows checkout gets CRLF and every `biome check --write` (including the
+# pre-commit hook) rewrites files back to LF, producing endless churn.
+* text=auto eol=lf
+
+# Binary files git should never touch.
+*.png binary
+*.jpg binary
+*.ico binary

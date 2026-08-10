@@ -1,12 +1,12 @@
 import type { EntityOption } from "../lib/entities";
-import { fetchHaStates } from "../lib/ha.server";
+import { fetchHaStates, type HaState } from "../lib/ha.server";
 import type { Route } from "./+types/api.entities";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
 
-  let states;
+  let states: HaState[];
   try {
     states = await fetchHaStates();
   } catch (error) {

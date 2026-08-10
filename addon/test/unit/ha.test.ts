@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startHaMock } from "../ha-mock.js";
 import { fetchHaState, fetchHaStates } from "../../app/lib/ha.server";
+import { startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
 
@@ -39,7 +39,9 @@ describe("fetchHaStates", () => {
   it("explains itself when SUPERVISOR_TOKEN is missing entirely", async () => {
     delete process.env.SUPERVISOR_TOKEN;
 
-    await expect(fetchHaStates()).rejects.toThrow("SUPERVISOR_TOKEN is not set");
+    await expect(fetchHaStates()).rejects.toThrow(
+      "SUPERVISOR_TOKEN is not set",
+    );
 
     process.env.SUPERVISOR_TOKEN = ha.token;
   });

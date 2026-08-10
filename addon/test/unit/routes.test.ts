@@ -6,8 +6,16 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { startHaMock, defaultStates } from "../ha-mock.js";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { defaultStates, startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
 let dataDir: string;
@@ -123,7 +131,8 @@ describe("GET / (dashboard)", () => {
     const { listPvEntities, removePvEntity } = await import(
       "../../app/lib/pv-entities.server"
     );
-    for (const entity of await listPvEntities()) await removePvEntity(entity.id);
+    for (const entity of await listPvEntities())
+      await removePvEntity(entity.id);
     vi.resetModules();
   });
 

@@ -1,13 +1,13 @@
 import { useEffect, useId, useState } from "react";
-import { Form, data, useNavigation } from "react-router";
+import { data, Form, useNavigation } from "react-router";
 import EntityAutocomplete from "../components/EntityAutocomplete";
 import {
   addPvEntity,
   listPvEntities,
-  removePvEntity,
-  updatePvEntity,
   type PvEntity,
   type PvEntityFields,
+  removePvEntity,
+  updatePvEntity,
 } from "../lib/pv-entities.server";
 import type { Route } from "./+types/settings";
 
@@ -33,7 +33,8 @@ function readFields(
     const errors: FieldErrors = {};
     if (!title) errors.title = "Give this array a name.";
     if (!powerEntityId) errors.powerEntityId = "Pick the current power entity.";
-    if (!energyEntityId) errors.energyEntityId = "Pick the total energy entity.";
+    if (!energyEntityId)
+      errors.energyEntityId = "Pick the total energy entity.";
     return { ok: false, errors };
   }
 
@@ -65,7 +66,10 @@ export async function action({ request }: Route.ActionArgs) {
   return { ok: true };
 }
 
-export default function Settings({ loaderData, actionData }: Route.ComponentProps) {
+export default function Settings({
+  loaderData,
+  actionData,
+}: Route.ComponentProps) {
   const { pvEntities } = loaderData;
   const navigation = useNavigation();
   const [showForm, setShowForm] = useState(false);
@@ -139,7 +143,9 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
                     <EntityFields
                       entity={entity}
                       errors={
-                        failure?.entityId === entity.id ? failure.errors : undefined
+                        failure?.entityId === entity.id
+                          ? failure.errors
+                          : undefined
                       }
                     />
                     <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -162,7 +168,9 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
                   >
                     <div>
                       <div style={{ fontWeight: 600 }}>{entity.title}</div>
-                      <div style={{ fontSize: "0.875rem", marginTop: "0.25rem" }}>
+                      <div
+                        style={{ fontSize: "0.875rem", marginTop: "0.25rem" }}
+                      >
                         Power: <code>{entity.powerEntityId}</code>
                       </div>
                       <div style={{ fontSize: "0.875rem" }}>
@@ -180,7 +188,10 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
                       <Form method="post">
                         <input type="hidden" name="intent" value="remove" />
                         <input type="hidden" name="id" value={entity.id} />
-                        <button type="submit" style={linkButtonStyle("#e12d39")}>
+                        <button
+                          type="submit"
+                          style={linkButtonStyle("#e12d39")}
+                        >
                           Remove
                         </button>
                       </Form>
@@ -247,7 +258,10 @@ function EntityFields({
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-        <label htmlFor={titleId} style={{ fontSize: "0.875rem", fontWeight: 600 }}>
+        <label
+          htmlFor={titleId}
+          style={{ fontSize: "0.875rem", fontWeight: 600 }}
+        >
           Title
         </label>
         <input

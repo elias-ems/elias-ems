@@ -15,7 +15,10 @@
     "test:e2e": "npm run build && playwright test",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "test:unit": "vitest run --project unit",
-    "typecheck": "react-router typegen && tsc"
+    "typecheck": "react-router typegen && tsc",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write ."
   },
   "dependencies": {
     "@react-router/express": "^8.3.0",
@@ -27,6 +30,7 @@
     "react-router": "^8.3.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.7",
     "@playwright/test": "^1.62.1",
     "@react-router/dev": "^8.3.0",
     "@react-router/fs-routes": "^8.3.0",
@@ -34,6 +38,7 @@
     "@types/node": "^22.19.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "lefthook": "^2.1.10",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"

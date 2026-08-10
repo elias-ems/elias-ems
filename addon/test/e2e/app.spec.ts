@@ -8,13 +8,16 @@
  * The whole stack (mock Home Assistant, built server, ingress proxy) is started
  * by test/stack.js via `webServer` in playwright.config.ts.
  */
-import { expect, test as base } from "@playwright/test";
+import { test as base, expect } from "@playwright/test";
 
 /**
  * A 404 on a script is the signature of the asset-prefix bug. Without this it
  * would surface only indirectly, as a click that mysteriously does nothing, so
  * every test watches for it whether it asks to or not.
  */
+// Playwright types a fixture that exposes no value as `void`; this is the
+// documented signature, not a mistaken use of void as a value type.
+// biome-ignore lint/suspicious/noConfusingVoidType: see above
 const test = base.extend<{ noFailedRequests: void }>({
   noFailedRequests: [
     async ({ page }, use) => {

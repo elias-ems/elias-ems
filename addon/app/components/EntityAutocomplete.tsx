@@ -28,9 +28,15 @@ export default function EntityAutocomplete({
   const [open, setOpen] = useState(false);
   const fetcher = useFetcher<EntitiesData>();
   const containerRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const inputId = useId();
 
+  // useFetcher returns a new object every render, so depending on fetcher.load
+  // would restart the debounce on each render and refire the request. Only
+  // query and open should retrigger it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (!open) return undefined;
     clearTimeout(debounceRef.current);
@@ -38,12 +44,14 @@ export default function EntityAutocomplete({
       fetcher.load(`/api/entities?q=${encodeURIComponent(query)}`);
     }, 200);
     return () => clearTimeout(debounceRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, open]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
         setOpen(false);
       }
     }
@@ -63,9 +71,17 @@ export default function EntityAutocomplete({
   return (
     <div
       ref={containerRef}
-      style={{ position: "relative", display: "flex", flexDirection: "column", gap: "0.25rem" }}
+      style={{
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.25rem",
+      }}
     >
-      <label htmlFor={inputId} style={{ fontSize: "0.875rem", fontWeight: 600 }}>
+      <label
+        htmlFor={inputId}
+        style={{ fontSize: "0.875rem", fontWeight: 600 }}
+      >
         {label}
       </label>
       <input
@@ -91,6 +107,10 @@ export default function EntityAutocomplete({
 
       {open && entities.length > 0 && (
         <ul
+          // The ARIA combobox pattern wants exactly this — a ul carrying
+          // role=listbox wrapping li role=option. The rule doesn't model the
+          // composite widget, so it reads the ul in isolation and objects.
+          // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: see above
           role="listbox"
           style={{
             position: "absolute",
@@ -141,12 +161,14 @@ export default function EntityAutocomplete({
       )}
 
       {error && (
-        <p style={{ fontSize: "0.75rem", color: "#e12d39", margin: 0 }}>{error}</p>
+        <p style={{ fontSize: "0.75rem", color: "#e12d39", margin: 0 }}>
+          {error}
+        </p>
       )}
       {!error && open && loadError && (
         <p style={{ fontSize: "0.75rem", color: "#7b8794", margin: 0 }}>
-          Couldn't load Home Assistant entities: {loadError}. You can still type an entity ID
-          manually.
+          Couldn't load Home Assistant entities: {loadError}. You can still type
+          an entity ID manually.
         </p>
       )}
     </div>

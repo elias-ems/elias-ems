@@ -76,7 +76,10 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   useEffect(() => {
     if (arrays.length === 0) return undefined;
     const timer = setInterval(() => {
-      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+      if (
+        document.visibilityState === "visible" &&
+        revalidator.state === "idle"
+      ) {
         revalidator.revalidate();
       }
     }, REFRESH_INTERVAL);

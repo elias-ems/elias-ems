@@ -12,14 +12,22 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startHaMock } from "./ha-mock.js";
 
-const addonDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const addonDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
-const ha = await startHaMock({ port: Number(process.env.HA_MOCK_PORT) || 4002 });
+const ha = await startHaMock({
+  port: Number(process.env.HA_MOCK_PORT) || 4002,
+});
 console.log(`Mock Home Assistant Core API on ${ha.apiUrl}`);
 
 const child = spawn(
   process.execPath,
-  [path.join(addonDir, "node_modules", "@react-router", "dev", "bin.cjs"), "dev"],
+  [
+    path.join(addonDir, "node_modules", "@react-router", "dev", "bin.cjs"),
+    "dev",
+  ],
   {
     cwd: addonDir,
     env: {

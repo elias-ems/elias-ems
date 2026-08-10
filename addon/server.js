@@ -52,8 +52,8 @@ function buildForIngress(ingressPath) {
     // points at exactly that dead URL, so the app works until someone reloads
     // on it. The cost is that this build no longer matches the slashless form,
     // which is fine precisely because HA never forwards it.
-    basename: ingressPath + "/",
-    publicPath: ingressPath + build.publicPath,
+    basename: `${ingressPath}/`,
+    publicPath: `${ingressPath}${build.publicPath}`,
     assets: {
       ...build.assets,
       url: prefix(build.assets.url),
@@ -90,7 +90,10 @@ function handlerFor(ingressPath) {
 }
 
 app.use((req, res, next) => {
-  const ingressPath = String(req.headers["x-ingress-path"] || "").replace(/\/+$/, "");
+  const ingressPath = String(req.headers["x-ingress-path"] || "").replace(
+    /\/+$/,
+    "",
+  );
   if (ingressPath) {
     // @react-router/express builds the Request URL from req.originalUrl, not req.url.
     req.url = ingressPath + req.url;
