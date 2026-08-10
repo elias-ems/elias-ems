@@ -12,3 +12,22 @@ Requires a Supervisor-based install (Home Assistant OS or Supervised) — Core-o
 4. Refresh the store page — the "Elias EMS Add-ons" repository shows up with "Elias ems" listed.
 5. Open it, click **Install**, and watch the build log (first build compiles the React Router app inside Docker, so it takes a few minutes).
 6. Once installed, click **Start**, then open the app from the sidebar panel — it should show "Hello World".
+
+## Development
+
+### Tooling
+
+| Tool | Needed for | Install |
+| --- | --- | --- |
+| **Node 22.23.2** | Everything. Pinned in [mise.toml](mise.toml) — React Router 8 needs >= 22.22, and the add-on images pin `node:22-alpine`. | `mise install` |
+| **GitHub CLI (`gh`)** | Opening pull requests from the terminal. Optional — the web UI does the same job. | `winget install --id GitHub.cli`, or `mise use -g gh@latest` |
+
+Everything else — Vite, Biome, Playwright, lefthook — is an npm devDependency and arrives with `npm install`. Playwright also needs its browser downloaded once: `npx playwright install chromium`.
+
+### Getting started
+
+```bash
+cd addon && npm install && npm run dev:mock
+```
+
+`npm install` is also what installs the git hooks. See [CLAUDE.md](CLAUDE.md) for the full command list, the ingress quirks worth knowing before touching `server.js`, and why this repo uses Biome rather than ESLint.
