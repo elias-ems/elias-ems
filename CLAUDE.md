@@ -54,7 +54,20 @@ Two suppressions exist on purpose and should not be "fixed": the `role="listbox"
 
 ## Git hooks
 
-**lefthook** ([lefthook.yml](lefthook.yml)) runs `biome check --write` over staged files on pre-commit and re-stages what it fixed; unfixable lint errors fail the commit. It installs itself via the npm `postinstall` in `addon/`, so hooks appear after `npm install`. Skip it for one command with `LEFTHOOK=0 git commit ...`.
+**lefthook** ([lefthook.yml](lefthook.yml)) runs `biome check --write` over staged files on pre-commit and re-stages what it fixed; unfixable lint errors fail the commit. Skip it for one command with `LEFTHOOK=0 git commit ...`.
+
+Hooks install themselves on `npm install` in `addon/`, but the mechanism is worth being precise about: it is the **`lefthook` package's own `postinstall`** running `lefthook install -f`. [addon/package.json](addon/package.json) declares no `postinstall` of its own, so grepping for one and finding nothing does not mean a fresh clone goes unhooked — it doesn't. Two consequences:
+
+- The postinstall skips itself when `CI` is set and `LEFTHOOK` is not, so CI checkouts correctly get no hooks.
+- It still runs during the Docker build's first stage, which installs devDependencies. `.dockerignore` excludes `.git`, so `lefthook install` exits 128 with `fatal: not a git repository`. That is noise, not a failure — `postinstall.js` uses `spawnSync` and never checks the exit code — and the runtime stage installs with `--omit=dev`, so lefthook is absent there entirely.
+
+If the hooks ever do go missing, reinstall them **from `addon/`**:
+
+```bash
+npx lefthook install
+```
+
+Running that from the repo root instead would silently download a second copy of lefthook from the registry, because there is no `node_modules` there for npx to resolve against.
 
 Note that lefthook globs are matched from the **repo root** and ignore the `root:` setting, so they carry the `addon/` prefix that `root: "addon/"` then strips back off.
 

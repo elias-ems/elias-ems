@@ -1,5 +1,7 @@
-# Git hooks, run by lefthook. It is an addon/ dev dependency, and its npm
-# postinstall runs `lefthook install`, so hooks appear after `npm install`.
+# Git hooks, run by lefthook. It is an addon/ dev dependency, and the lefthook
+# *package* ships its own postinstall that runs `lefthook install -f` — nothing
+# in addon/package.json does this — so hooks appear after `npm install` there.
+# If they go missing, run `npx lefthook install` from addon/, not the repo root.
 # Set LEFTHOOK=0 to skip hooks for one command.
 #
 # Globs are matched against repo-root-relative paths and deliberately ignore
