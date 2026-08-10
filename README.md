@@ -17,10 +17,16 @@ Requires a Supervisor-based install (Home Assistant OS or Supervised) — Core-o
 
 ### Tooling
 
-| Tool | Needed for | Install |
+The tools that don't come from npm are pinned in [mise.toml](mise.toml), so [mise](https://mise.jdx.dev/) installs the lot at the right versions:
+
+```bash
+mise install
+```
+
+| Tool | Version | Needed for |
 | --- | --- | --- |
-| **Node 22.23.2** | Everything. Pinned in [mise.toml](mise.toml) — React Router 8 needs >= 22.22, and the add-on images pin `node:22-alpine`. | `mise install` |
-| **GitHub CLI (`gh`)** | Opening pull requests from the terminal. Optional — the web UI does the same job. | `winget install --id GitHub.cli`, or `mise use -g gh@latest` |
+| **Node** | 22.23.2 | Everything. React Router 8 needs >= 22.22, and the add-on images pin `node:22-alpine`. |
+| **GitHub CLI (`gh`)** | 2.97.0 | Opening pull requests and reading CI from the terminal. |
 
 Everything else — Vite, Biome, Playwright, lefthook — is an npm devDependency and arrives with `npm install`. Playwright also needs its browser downloaded once: `npx playwright install chromium`.
 
