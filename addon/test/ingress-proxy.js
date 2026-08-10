@@ -21,6 +21,7 @@
  * Plain JavaScript on purpose — see the note in test/ha-mock.js.
  */
 import http from "node:http";
+import { listen } from "./listen.js";
 
 /** Stands in for the per-session token HA mints; any opaque string will do. */
 export const DEFAULT_INGRESS_TOKEN =
@@ -83,12 +84,7 @@ export async function startIngressProxy({
     req.pipe(forwarded);
   });
 
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", resolve);
-  });
-
-  const boundPort = server.address().port;
+  const boundPort = await listen(server, port, "The ingress proxy");
   const origin = `http://127.0.0.1:${boundPort}`;
 
   return {

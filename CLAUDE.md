@@ -31,6 +31,16 @@ Tests, all run from `addon/`:
 
 Two commands exist for clicking around by hand: `npm run dev:mock` (Vite dev server plus a mock Home Assistant, no ingress) and `npm run start:ingress` (the full production stack behind an ingress proxy — the only one where the ingress bugs below can show up).
 
+Each stack owns a distinct block of ports, so all three can be up at once:
+
+| Stack | Ports |
+| --- | --- |
+| `npm run dev:mock` | 5173 Vite, 4003 HA mock |
+| `npm run start:ingress` | 4000 ingress proxy, 4001 app, 4002 HA mock |
+| `npm run test:e2e` | 4100 ingress proxy, 4101 app, 4102 HA mock |
+
+Keeping the test block separate is not tidiness. Playwright's `reuseExistingServer` cannot tell a manually started stack from one of its own, so when these overlapped, running the suite while `start:ingress` was up made it adopt that stack, ignore the `env` in [playwright.config.ts](addon/playwright.config.ts) — which only applies to a server Playwright launches itself — and run the tests against the real `addon/data` rather than a throwaway directory. Override any of them with `INGRESS_PORT`, `APP_PORT` or `HA_MOCK_PORT`.
+
 ## Framework and toolchain
 
 The app is **React Router 8 in framework mode** (the successor to Remix — Remix v2's packages were collapsed into `react-router` in v7), written in **TypeScript**.

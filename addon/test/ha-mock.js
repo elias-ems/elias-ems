@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { listen } from "./listen.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -83,12 +84,7 @@ export async function startHaMock({
     return sendJson(res, 404, { message: "Not found" });
   });
 
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", resolve);
-  });
-
-  const boundPort = server.address().port;
+  const boundPort = await listen(server, port, "The mock Home Assistant API");
 
   return {
     port: boundPort,

@@ -17,8 +17,16 @@ const addonDir = path.resolve(
   "..",
 );
 
+// 4003, not the 4002 `npm run start:ingress` uses, so both can be up at once —
+// a hot dev loop in one terminal and an ingress check in another is a normal
+// way to work, and each stack wants its own mock anyway since tests and manual
+// pokes both mutate its state.
+// A port clash is an operator mistake, not a bug worth a stack trace.
 const ha = await startHaMock({
-  port: Number(process.env.HA_MOCK_PORT) || 4002,
+  port: Number(process.env.HA_MOCK_PORT) || 4003,
+}).catch((error) => {
+  console.error(error.message);
+  process.exit(1);
 });
 console.log(`Mock Home Assistant Core API on ${ha.apiUrl}`);
 

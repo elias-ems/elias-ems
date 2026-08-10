@@ -163,11 +163,16 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
+  // A port clash or a missing build is an operator mistake, and both already
+  // explain themselves — a stack trace would only bury the explanation.
   const stack = await startStack({
     proxyPort: Number(process.env.INGRESS_PORT) || 4000,
     appPort: Number(process.env.APP_PORT) || 4001,
     haPort: Number(process.env.HA_MOCK_PORT) || 4002,
     dataDir: process.env.DATA_DIR || undefined,
+  }).catch((error) => {
+    console.error(error.message);
+    process.exit(1);
   });
 
   console.log(
