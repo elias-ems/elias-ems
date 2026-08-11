@@ -4,7 +4,7 @@ A (H)EMS (Home Energy Management System) that complements and extends Home Assis
 
 ## Installing in Home Assistant
 
-Requires a Supervisor-based install (Home Assistant OS or Supervised) — Core-only/plain Docker installs don't have an Add-on Store.
+Requires a Supervisor-based install (Home Assistant OS or Supervised) — Core-only/plain Docker installs don't have an Add-on Store. Builds are published for `aarch64` and `amd64` only; 32-bit ARM (`armv7`) is not supported, matching Home Assistant's own dropping of it.
 
 1. In the Home Assistant UI, go to **Settings → Add-ons → Add-on Store**.
 2. Click the **⋮** menu (top right) → **Repositories**.
@@ -25,7 +25,7 @@ mise install
 
 | Tool | Version | Needed for |
 | --- | --- | --- |
-| **Node** | 22.23.2 | Everything. React Router 8 needs >= 22.22, and the add-on images pin `node:22-alpine`. |
+| **Node** | 24.19.0 | Everything. The add-on requires Node >= 24 and its images pin `node:24-alpine` (which is also why it ships for `aarch64` and `amd64` only — Node 24 has no 32-bit ARM builds). |
 | **GitHub CLI (`gh`)** | 2.97.0 | Opening pull requests and reading CI from the terminal. |
 
 Everything else — Vite, Biome, Playwright, lefthook — is an npm devDependency and arrives with `npm install`. Playwright also needs its browser downloaded once: `npx playwright install chromium`.

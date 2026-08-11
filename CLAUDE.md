@@ -47,7 +47,7 @@ Keeping the test block separate is not tidiness. Playwright's `reuseExistingServ
 
 The app is **React Router 8 in framework mode** (the successor to Remix — Remix v2's packages were collapsed into `react-router` in v7), written in **TypeScript**.
 
-- React Router 8 requires **Node >= 22.22**, React >= 19.2.7, and Vite 7+. The Docker images pin `node:22-alpine`; do not move to `node:24-alpine` without dropping `armv7` from `config.yaml`, since Node 24 publishes no 32-bit ARM images.
+- React Router 8 requires **Node >= 22.22**, React >= 19.2.7, and Vite 7+, but the add-on itself asks for **Node >= 24** (`engines` in [addon/package.json](addon/package.json), `node:24-alpine` in the Dockerfile, `24.19.0` in [mise.toml](mise.toml) — the current LTS line). Node 24 publishes no 32-bit ARM builds, which is why [addon/config.yaml](addon/config.yaml) lists only `aarch64` and `amd64`: `armv7` was dropped when Home Assistant itself dropped armv7 support. Keep `@types/node` on `^24` — it tracks the Node major we run, not the newest release.
 - Routes still use Remix-style file naming under `addon/app/routes/`, wired up by `flatRoutes()` from `@react-router/fs-routes` in [addon/app/routes.ts](addon/app/routes.ts).
 - Route modules get generated per-route types in `.react-router/types` (gitignored). Import them as `import type { Route } from "./+types/<route-file-name>"` and prefer `Route.ComponentProps` over `useLoaderData`/`useActionData`. Run `npm run typecheck` after adding or renaming a route so the types exist.
 - `json()` and `defer()` were removed in v7 — return plain objects from loaders/actions, and use `data(value, { status })` when you need to set a status code.
@@ -73,6 +73,18 @@ Hooks install themselves on `npm install` in `addon/`, but the mechanism is wort
 
 - The postinstall skips itself when `CI` is set and `LEFTHOOK` is not, so CI checkouts correctly get no hooks.
 - It still runs during the Docker build's first stage, which installs devDependencies. `.dockerignore` excludes `.git`, so `lefthook install` exits 128 with `fatal: not a git repository`. That is noise, not a failure — `postinstall.js` uses `spawnSync` and never checks the exit code — and the runtime stage installs with `--omit=dev`, so lefthook is absent there entirely.
+
+That postinstall only gets to run because the project **approved it**. npm 11 (what `node:24`/mise's Node 24 ships) refuses to run a dependency's install scripts unless they are listed in the `allowScripts` block of [addon/package.json](addon/package.json), and the entry it writes is pinned to an exact version:
+
+```json
+"allowScripts": { "lefthook@2.1.10": true }
+```
+
+So **bumping lefthook re-arms the gate**. The pin no longer matches, the postinstall is skipped, and the only signal is an `npm warn allow-scripts` line at the end of `npm install` — the hooks then quietly stop installing for anyone with a fresh clone. After any lefthook bump, re-approve it from `addon/` and commit the changed pin:
+
+```bash
+npm approve-scripts lefthook
+```
 
 If the hooks ever do go missing, reinstall them **from `addon/`**:
 

@@ -37,7 +37,7 @@
     "@react-router/dev": "^8.3.0",
     "@react-router/fs-routes": "^8.3.0",
     "@types/express": "^5.0.6",
-    "@types/node": "^22.19.0",
+    "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "lefthook": "^2.1.10",
@@ -46,6 +46,9 @@
     "vitest": "^4.1.10"
   },
   "engines": {
-    "node": ">=22.22.0"
+    "node": ">=24.0.0"
+  },
+  "allowScripts": {
+    "lefthook@2.1.10": true
   }
 }
