@@ -1,6 +1,6 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 import "./app.css";
-import Nav from "./components/Nav";
+import AppHeader from "./components/AppHeader";
 
 export default function App() {
   return (
@@ -16,7 +16,7 @@ export default function App() {
         <Links />
       </head>
       <body>
-        <Nav />
+        <AppHeader />
         <Outlet />
         <ScrollRestoration />
         <Scripts />

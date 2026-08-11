@@ -106,8 +106,9 @@ HA serves the add-on through a proxy at `/api/hassio_ingress/<session-token>/`, 
 2. **Rewrites the asset manifest** — `basename` does *not* affect asset URLs. Vite bakes them in at build time from `publicPath`, which is a fixed `/`, so they render as `/assets/x.js`; the browser resolves that against the HA origin, where nothing is served, and every script 404s. The page still server-renders, so the symptom is a page that looks right but is completely inert. `server.js` prefixes `assets.url`, `assets.entry`, and every route's `module`/`imports`/`css`. Do *not* prefix `routeDiscovery.manifestPath` — React Router already resolves that against `basename`.
 3. **Gives `basename` a trailing slash** — React Router derives the `to="/"` href from `basename` verbatim, and HA 404s a bare `/api/hassio_ingress/<token>` with no trailing slash. Without it the Home link points at a URL that dies on reload.
 
-Two related notes:
+Three related notes:
 
+- **There is no HA toolbar to hook into.** HA renders the panel as a bare cross-origin iframe with no header of its own above it on desktop, and offers the add-on no way to add anything to HA's chrome. The bar ESPHome and the Matter server appear to contribute to HA's own UI is really the first element inside their iframe. Ours is [AppHeader.tsx](addon/app/components/AppHeader.tsx), which is why it styles itself as a Material top app bar rather than as page content.
 - Express `trust proxy` must stay **off**. HA sets no `X-Forwarded-Host`/`X-Forwarded-Proto` and forwards the browser's original `Host` header untouched, which is exactly what React Router's action-origin CSRF check needs. Turning `trust proxy` on would make Express prefer a client-suppliable header instead.
 - To reproduce ingress locally, run [addon/test/ingress-proxy.js](addon/test/ingress-proxy.js) in front of `npm run start`. Loading the app directly on port 3000 will not surface any of the bugs above, because there is no prefix to get wrong.
 
@@ -121,8 +122,9 @@ Three things make the theme actually follow Home Assistant:
 - **`light-dark()`** for each token, rather than a `prefers-color-scheme` media query. `light-dark()` resolves against the computed `color-scheme` property, so the declaration above is the single switch for the whole palette: forcing a theme later (an explicit user preference, say) means overriding that one property and nothing else. A media query would ignore it and keep following the OS.
 - **The `<meta name="color-scheme">`** in [root.tsx](addon/app/root.tsx) duplicates the CSS declaration on purpose — it is parsed before the stylesheet loads, so the first paint of the canvas is already the right colour instead of flashing white.
 
-Two traps worth knowing:
+Three traps worth knowing:
 
+- The top bar is the one exception to "no rules, only tokens" in app.css: `.app-header :focus-visible` overrides the focus outline colour, because the page's focus blue only manages 1.3:1 against the bar's own blue and a pseudo-class is the one thing an inline style cannot express. Its `--color-header-bg` is *not* HA's `#03a9f4` — white on that is 2.2:1 — but a darkened blue that clears AA in both themes.
 - `addon/package.json` declares `"sideEffects": ["*.css"]`. With the plain `"sideEffects": false` it had before, Rollup is entitled to tree-shake the side-effect-only `import "./app.css"` out of the client build, and the app silently ships with no styles.
 - Import the stylesheet as a side effect (`import "./app.css"`), not via a `links` export. The side-effect import lands the file in `assets.routes.<id>.css`, which is one of the fields [server.js](addon/server.js) rewrites with the ingress prefix; an href returned from `links` is not rewritten and would 404 behind ingress.
 
