@@ -42,9 +42,16 @@ Two packages need judgement before you touch them:
   but keep it exact and expect [biome.json](../../../addon/biome.json)-driven
   reformatting; if the diff spreads beyond the packages you bumped, that is why.
 - **`@types/node` tracks the Node major, not the newest release.** The Docker
-  images pin `node:22-alpine` and [config.yaml](../../../addon/config.yaml)
-  still lists `armv7`, which Node 24 publishes no image for. Keep `@types/node`
-  on `^22`.
+  images pin `node:24-alpine` and [mise.toml](../../../mise.toml) pins the same
+  major, so keep `@types/node` on `^24` — `npm outdated` will keep listing it as
+  behind `latest`, and that is correct.
+- **Bumping `lefthook` needs a follow-up.** npm only runs its postinstall — the
+  thing that installs the git hooks — because of the version-pinned
+  `allowScripts` entry in [package.json](../../../addon/package.json). A new
+  version does not match the pin, so the hooks silently stop installing. Run
+  `npm approve-scripts lefthook` from `addon/` after the bump and commit the
+  updated pin; `npm install` warning about `allow-scripts` is the tell that you
+  forgot.
 
 ## 3. Apply the in-range updates
 

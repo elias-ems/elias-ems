@@ -1,11 +1,10 @@
 name: "Elias ems"
-version: "1.0.0-alpha.11"
+version: "1.0.0-alpha.12"
 slug: "elias-ems"
 description: "Home Energy Management System (HEMS) that complements and extends Home Assistant"
 arch:
   - aarch64
   - amd64
-  - armv7
 init: false
 ingress: true
 ingress_port: 3000
