@@ -42,10 +42,7 @@ let dataDir: string;
 /** Nothing listens on port 1, so a request there fails immediately. */
 const UNREACHABLE_API = "http://127.0.0.1:1/core/api";
 
-const GRID = {
-  importEntityId: "sensor.grid_import_power",
-  exportEntityId: "sensor.grid_export_power",
-};
+const GRID = { powerEntityId: "sensor.grid_power" };
 
 const BATTERY = {
   title: "Home battery",
@@ -132,12 +129,12 @@ describe("runControlTick", () => {
   });
 
   it("says the grid is not configured rather than deciding blind", async () => {
-    await saveGrid({ importEntityId: "", exportEntityId: "" });
+    await saveGrid({ powerEntityId: "" });
     await addBattery(BATTERY);
 
     await runControlTick();
 
-    expect(logged("Grid sensors are not configured")).toBe(true);
+    expect(logged("The grid sensor is not configured")).toBe(true);
   });
 
   it("reports an unavailable battery sensor instead of guessing at it", async () => {
@@ -290,7 +287,7 @@ describe("syncControlLoop", () => {
 
 describe("the log itself", () => {
   it("collapses a repeated line instead of filling the buffer with it", async () => {
-    await saveGrid({ importEntityId: "", exportEntityId: "" });
+    await saveGrid({ powerEntityId: "" });
 
     await runControlTick();
     await runControlTick();

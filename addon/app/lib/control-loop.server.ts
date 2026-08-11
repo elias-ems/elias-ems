@@ -42,8 +42,7 @@ const state: LoopState = {
 
 /** Everything the strategies need, read fresh each tick. */
 async function readSnapshots(): Promise<{
-  gridImportW: number | null;
-  gridExportW: number | null;
+  gridPowerW: number | null;
   batteries: BatterySnapshot[];
   gridConfigured: boolean;
 }> {
@@ -52,9 +51,8 @@ async function readSnapshots(): Promise<{
 
   // One round of requests rather than a serial walk: at a five-second interval
   // a handful of sequential fetches would eat a visible slice of the budget.
-  const [gridImport, gridExport, batteryStates] = await Promise.all([
-    gridConfigured ? fetchHaState(grid.importEntityId) : null,
-    gridConfigured ? fetchHaState(grid.exportEntityId) : null,
+  const [gridPower, batteryStates] = await Promise.all([
+    gridConfigured ? fetchHaState(grid.powerEntityId) : null,
     Promise.all(
       batteries.map(async (battery) => {
         const [soc, power] = await Promise.all([
@@ -68,8 +66,7 @@ async function readSnapshots(): Promise<{
 
   return {
     gridConfigured,
-    gridImportW: toNumber(gridImport),
-    gridExportW: toNumber(gridExport),
+    gridPowerW: toNumber(gridPower),
     batteries: batteryStates.map(({ battery, soc, power }) => ({
       id: battery.id,
       title: battery.title,
@@ -92,7 +89,7 @@ export async function runControlTick(): Promise<void> {
   if (!inputs.gridConfigured) {
     appendControlLog(
       "warn",
-      "Grid sensors are not configured — nothing to balance against.",
+      "The grid sensor is not configured — nothing to balance against.",
     );
     state.lastTickAt = new Date().toISOString();
     return;

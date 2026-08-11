@@ -36,10 +36,7 @@ beforeAll(async () => {
     writeFile(path.join(dataDir, name), JSON.stringify(value));
 
   await Promise.all([
-    write("grid.json", {
-      importEntityId: "sensor.grid_import_power",
-      exportEntityId: "sensor.grid_export_power",
-    }),
+    write("grid.json", { powerEntityId: "sensor.grid_power" }),
     write("batteries.json", [
       {
         id: "b1",

@@ -126,11 +126,9 @@ test("battery control can be configured, enabled, and watched deciding", async (
   const suggestion = (id: string) =>
     page.getByRole("option", { name: new RegExp(id) });
 
-  // Grid: two separate sensors, since the net exchange is their difference.
-  await page.getByLabel(/^Consumption/).fill("grid_import");
-  await suggestion("sensor\\.grid_import_power\\b").click();
-  await page.getByLabel(/^Production/).fill("grid_export");
-  await suggestion("sensor\\.grid_export_power\\b").click();
+  // Grid: one signed sensor, which is the net exchange as it stands.
+  await page.getByLabel(/^Power/).fill("grid_power");
+  await suggestion("sensor\\.grid_power\\b").click();
   await page.getByRole("button", { name: "Save grid" }).click();
 
   await page.getByRole("button", { name: "Add battery" }).click();

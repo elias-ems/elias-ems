@@ -41,29 +41,9 @@
   },
   {
     "entity_id": "sensor.grid_power",
-    "state": "-450.2",
-    "attributes": {
-      "friendly_name": "Grid power",
-      "unit_of_measurement": "W",
-      "device_class": "power",
-      "state_class": "measurement"
-    }
-  },
-  {
-    "entity_id": "sensor.grid_import_power",
     "state": "842",
     "attributes": {
-      "friendly_name": "Grid import power",
-      "unit_of_measurement": "W",
-      "device_class": "power",
-      "state_class": "measurement"
-    }
-  },
-  {
-    "entity_id": "sensor.grid_export_power",
-    "state": "0",
-    "attributes": {
-      "friendly_name": "Grid export power",
+      "friendly_name": "Grid power",
       "unit_of_measurement": "W",
       "device_class": "power",
       "state_class": "measurement"

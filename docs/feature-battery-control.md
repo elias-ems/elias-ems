@@ -19,21 +19,21 @@ development).
 
 ### Grid — `grid.json`
 
-Two Home Assistant entities, both **instantaneous power in W, never negative**:
+One Home Assistant entity, **instantaneous power in W, signed**:
 
 | Field | Label in the UI | Meaning |
 | --- | --- | --- |
-| `importEntityId` | Consumption | power flowing *from* the grid into the house |
-| `exportEntityId` | Production | power flowing *to* the grid |
+| `powerEntityId` | Power | net grid exchange: **positive importing, negative exporting** |
 
-The net exchange every strategy works from is `import - export`. Home
-Assistant's own energy model splits the two the same way, so an installation
-already set up for the energy dashboard has both.
+That signed number *is* the net exchange every strategy works from — there is no
+arithmetic between the sensor and the decision.
 
-Meters that publish a **single signed** grid sensor are not supported yet.
-Putting that one entity in both fields is rejected rather than allowed, because
-`import - export` would then be zero on every tick and the loop would decide to
-do nothing, forever, without saying why.
+One sensor rather than an import/export pair, because that is what the common
+meters publish: P1/DSMR readers, Shelly EM and friends, and most hybrid inverters
+all expose a single signed power sensor. Home Assistant's energy dashboard wants
+the unsigned pair instead, so an installation set up for that has two sensors and
+no signed one; subtracting export from import in a template sensor gives it one,
+and that is what to point this at.
 
 ### Batteries — `batteries.json`
 
@@ -104,7 +104,7 @@ to the same reading, and the correct one.
 
 ### The rules
 
-1. `net = gridImport - gridExport`.
+1. `net` is the grid power sensor, read as-is.
 2. If `|net| < 25 W` the meter counts as balanced: hold everything where it is.
    Chasing meter noise would only cycle the battery.
 3. Otherwise `target = currentBatteryPower - net`; positive means charge,
@@ -210,7 +210,7 @@ concatenation.
 
 | Suite | What it covers |
 | --- | --- |
-| `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband, the feedback term, SoC limits, unreadable sensors, the proportional split |
+| `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split |
 | `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
 | `test/unit/control-loop.test.ts` | scheduling, on a fake clock: starts only when enabled, ticks immediately then on the interval, picks up a changed interval, leaves an unchanged loop alone, survives an outage |
@@ -229,7 +229,6 @@ currently in flight so a test can wait for it.
   rather than observation. Per-brand.
 - **A per-battery maximum charge and discharge power**, so the strategy cannot
   ask for more than the inverter can deliver. Needed before the write path.
-- **Single signed grid sensor** support.
 - **Price awareness** — dynamic prices, negative-price strategies and PV
   curtailment are separate [roadmap](roadmap.md) items.
 - **Persisting decisions** for after-the-fact analysis. That wants its own store

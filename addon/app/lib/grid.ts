@@ -1,64 +1,48 @@
 /**
- * The grid connection: the two meter readings every control strategy starts
- * from. Both are *instantaneous power in W and never negative* — `import` is
- * what the house draws from the grid, `export` is what it pushes back. The net
- * exchange the strategies balance is `import - export`.
+ * The grid connection: the one meter reading every control strategy starts
+ * from. It is *instantaneous power in W, signed* — positive when the house is
+ * drawing from the grid, negative when it is pushing back. That signed number
+ * *is* the net exchange the strategies balance, with no arithmetic in between.
  *
- * Home Assistant's own energy model splits the two the same way, so an
- * installation already set up for the energy dashboard has both. Meters that
- * publish a single *signed* sensor instead are not supported yet, and putting
- * that one entity in both fields is rejected below rather than silently netting
- * to zero forever.
+ * One sensor rather than an import/export pair, because that is what the common
+ * meters publish: P1/DSMR readers, Shelly EM and friends, and most hybrid
+ * inverters all expose a single signed power sensor. An installation that only
+ * has the unsigned pair Home Assistant's energy dashboard wants can subtract one
+ * from the other in a template sensor and point this at that.
  *
  * Pure, so the settings UI can share these types and the validation can be
  * tested without touching disk. Reading and writing live in `grid.server.ts`.
  */
 
 export type Grid = {
-  /** Power drawn from the grid, in W. */
-  importEntityId: string;
-  /** Power fed back into the grid, in W. */
-  exportEntityId: string;
+  /** Net grid power in W: positive importing, negative exporting. */
+  powerEntityId: string;
 };
 
 export type GridErrors = Partial<Record<keyof Grid, string>>;
 
-export const EMPTY_GRID: Grid = { importEntityId: "", exportEntityId: "" };
+export const EMPTY_GRID: Grid = { powerEntityId: "" };
 
 export function normalizeGrid(stored: Partial<Grid> | null): Grid {
-  return {
-    importEntityId: stored?.importEntityId?.trim() ?? "",
-    exportEntityId: stored?.exportEntityId?.trim() ?? "",
-  };
+  return { powerEntityId: stored?.powerEntityId?.trim() ?? "" };
 }
 
-/** Both sensors are needed before a net exchange can be worked out at all. */
+/** The sensor is needed before a net exchange can be worked out at all. */
 export function isGridConfigured(grid: Grid): boolean {
-  return Boolean(grid.importEntityId && grid.exportEntityId);
+  return Boolean(grid.powerEntityId);
 }
 
 export function parseGrid(
   formData: FormData,
 ): { ok: true; grid: Grid } | { ok: false; errors: GridErrors } {
-  const importEntityId =
-    formData.get("importEntityId")?.toString().trim() ?? "";
-  const exportEntityId =
-    formData.get("exportEntityId")?.toString().trim() ?? "";
+  const powerEntityId = formData.get("powerEntityId")?.toString().trim() ?? "";
 
-  const errors: GridErrors = {};
-  if (!importEntityId) {
-    errors.importEntityId = "Pick the grid consumption sensor.";
+  if (!powerEntityId) {
+    return {
+      ok: false,
+      errors: { powerEntityId: "Pick the grid power sensor." },
+    };
   }
-  if (!exportEntityId) {
-    errors.exportEntityId = "Pick the grid production sensor.";
-  }
-  if (importEntityId && importEntityId === exportEntityId) {
-    // One signed sensor in both fields nets to zero on every tick, so the loop
-    // would quietly decide to do nothing forever. Better to say why up front.
-    errors.exportEntityId =
-      "Consumption and production must be two different sensors.";
-  }
-  if (Object.keys(errors).length > 0) return { ok: false, errors };
 
-  return { ok: true, grid: { importEntityId, exportEntityId } };
+  return { ok: true, grid: { powerEntityId } };
 }

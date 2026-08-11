@@ -35,7 +35,7 @@ export default function ControlSection({
   const selected = STRATEGIES.find((option) => option.id === strategy);
 
   const missing = [
-    !ready.grid && "the grid sensors",
+    !ready.grid && "the grid sensor",
     !ready.batteries && "at least one battery",
   ].filter((item): item is string => Boolean(item));
 

@@ -63,7 +63,7 @@ async function clearStoredSettings() {
   for (const battery of await batteries.listBatteries()) {
     await batteries.removeBattery(battery.id);
   }
-  await grid.saveGrid({ importEntityId: "", exportEntityId: "" });
+  await grid.saveGrid({ powerEntityId: "" });
   await control.saveControlConfig({
     enabled: false,
     strategy: "net-zero-energy",
@@ -180,7 +180,7 @@ describe("GET / (dashboard)", () => {
   it("returns nothing to show before anything is configured", async () => {
     expect(await loadIndex()).toEqual({
       arrays: [],
-      grid: { configured: false, consumption: null, production: null },
+      grid: { configured: false, power: null },
       batteries: [],
       control: {
         enabled: false,
@@ -196,18 +196,14 @@ describe("GET / (dashboard)", () => {
     });
   });
 
-  it("shows both grid readings once the sensors are configured", async () => {
+  it("shows the grid reading once the sensor is configured", async () => {
     const { saveGrid } = await import("../../app/lib/grid.server");
-    await saveGrid({
-      importEntityId: "sensor.grid_import_power",
-      exportEntityId: "sensor.grid_export_power",
-    });
+    await saveGrid({ powerEntityId: "sensor.grid_power" });
 
     const { grid } = await loadIndex();
 
     expect(grid.configured).toBe(true);
-    expect(grid.consumption).toEqual({ display: "842 W", ok: true });
-    expect(grid.production).toEqual({ display: "0 W", ok: true });
+    expect(grid.power).toEqual({ display: "842 W", ok: true });
   });
 
   it("shows a battery's charge window alongside its three readings", async () => {
@@ -233,23 +229,20 @@ describe("GET / (dashboard)", () => {
 
   it("reads a sensor configured in two places only once", async () => {
     // Deduplicating matters at the interval this page refreshes on: the same
-    // meter legitimately appears as a PV array's power and as the grid import.
+    // meter legitimately appears as a PV array's power and as the grid sensor.
     await addEntity({
       title: "Roof",
-      powerEntityId: "sensor.grid_import_power",
+      powerEntityId: "sensor.grid_power",
       energyEntityId: "sensor.inverter_energy_total",
     });
     const { saveGrid } = await import("../../app/lib/grid.server");
-    await saveGrid({
-      importEntityId: "sensor.grid_import_power",
-      exportEntityId: "sensor.grid_export_power",
-    });
+    await saveGrid({ powerEntityId: "sensor.grid_power" });
 
     ha.requests.length = 0;
     await loadIndex();
 
     const asked = ha.requests.filter((request) =>
-      request.path.endsWith("sensor.grid_import_power"),
+      request.path.endsWith("sensor.grid_power"),
     );
     expect(asked).toHaveLength(1);
   });
@@ -369,27 +362,19 @@ describe("POST /settings", () => {
     vi.resetModules();
   });
 
-  it("saves the grid sensors", async () => {
+  it("saves the grid sensor", async () => {
     const result = await post({
       intent: "grid-save",
-      importEntityId: "sensor.grid_import_power",
-      exportEntityId: "sensor.grid_export_power",
+      powerEntityId: "sensor.grid_power",
     });
 
     expect(result).toEqual({ section: "grid", ok: true });
     const { readGrid } = await import("../../app/lib/grid.server");
-    expect(await readGrid()).toEqual({
-      importEntityId: "sensor.grid_import_power",
-      exportEntityId: "sensor.grid_export_power",
-    });
+    expect(await readGrid()).toEqual({ powerEntityId: "sensor.grid_power" });
   });
 
   it("tags a rejected grid form so only that section shows the error", async () => {
-    const result = await post({
-      intent: "grid-save",
-      importEntityId: "sensor.grid_power",
-      exportEntityId: "sensor.grid_power",
-    });
+    const result = await post({ intent: "grid-save", powerEntityId: "" });
 
     const { payload, status } = failure(result);
     expect(status).toBe(400);

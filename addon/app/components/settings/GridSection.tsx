@@ -22,23 +22,16 @@ export default function GridSection({
   return (
     <Section
       title="Grid"
-      description="Both sensors are instantaneous power in W and never negative. The net exchange the strategies balance is consumption minus production."
+      description="One sensor, instantaneous power in W and signed: positive while the house draws from the grid, negative while it feeds back. That is the net exchange the strategies balance. If your meter publishes separate consumption and production sensors, subtract one from the other in a Home Assistant template sensor and point this at that."
     >
       <Form method="post" style={{ ...formStyle, marginTop: "1rem" }}>
         <input type="hidden" name="intent" value="grid-save" />
         <EntityAutocomplete
-          name="importEntityId"
-          label="Consumption — power drawn from the grid (W)"
-          placeholder="e.g. sensor.grid_import_power"
-          defaultValue={grid.importEntityId}
-          error={errors.importEntityId}
-        />
-        <EntityAutocomplete
-          name="exportEntityId"
-          label="Production — power fed back into the grid (W)"
-          placeholder="e.g. sensor.grid_export_power"
-          defaultValue={grid.exportEntityId}
-          error={errors.exportEntityId}
+          name="powerEntityId"
+          label="Power — net grid exchange (W)"
+          placeholder="e.g. sensor.grid_power"
+          defaultValue={grid.powerEntityId}
+          error={errors.powerEntityId}
         />
         <div>
           <button type="submit" disabled={isSaving}>

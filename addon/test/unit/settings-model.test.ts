@@ -37,45 +37,21 @@ const validBattery = {
 };
 
 describe("parseGrid", () => {
-  it("accepts two distinct sensors", () => {
-    const result = parseGrid(
-      form({
-        importEntityId: " sensor.grid_import_power ",
-        exportEntityId: "sensor.grid_export_power",
-      }),
-    );
+  it("accepts the signed power sensor", () => {
+    const result = parseGrid(form({ powerEntityId: " sensor.grid_power " }));
 
     expect(result).toEqual({
       ok: true,
-      grid: {
-        importEntityId: "sensor.grid_import_power",
-        exportEntityId: "sensor.grid_export_power",
-      },
+      grid: { powerEntityId: "sensor.grid_power" },
     });
   });
 
-  it("asks for both, since a net exchange needs both", () => {
-    const result = parseGrid(form({ importEntityId: "sensor.a" }));
+  it("asks for the sensor, since there is no net exchange without it", () => {
+    const result = parseGrid(form({}));
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.errors.exportEntityId).toBeTruthy();
-    expect(result.errors.importEntityId).toBeUndefined();
-  });
-
-  it("rejects the same sensor in both fields", () => {
-    // A single signed grid sensor put in both places nets to zero on every
-    // tick, so the loop would decide to do nothing, forever, silently.
-    const result = parseGrid(
-      form({
-        importEntityId: "sensor.grid_power",
-        exportEntityId: "sensor.grid_power",
-      }),
-    );
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.errors.exportEntityId).toContain("two different sensors");
+    expect(result.errors.powerEntityId).toBeTruthy();
   });
 });
 
@@ -83,21 +59,14 @@ describe("normalizeGrid", () => {
   it("treats an absent file as nothing configured", () => {
     const grid = normalizeGrid(null);
 
-    expect(grid).toEqual({ importEntityId: "", exportEntityId: "" });
+    expect(grid).toEqual({ powerEntityId: "" });
     expect(isGridConfigured(grid)).toBe(false);
   });
 
-  it("needs both sensors before it counts as configured", () => {
+  it("counts as configured once the sensor is set", () => {
+    expect(isGridConfigured(normalizeGrid({}))).toBe(false);
     expect(
-      isGridConfigured(normalizeGrid({ importEntityId: "sensor.a" })),
-    ).toBe(false);
-    expect(
-      isGridConfigured(
-        normalizeGrid({
-          importEntityId: "sensor.a",
-          exportEntityId: "sensor.b",
-        }),
-      ),
+      isGridConfigured(normalizeGrid({ powerEntityId: "sensor.grid_power" })),
     ).toBe(true);
   });
 });

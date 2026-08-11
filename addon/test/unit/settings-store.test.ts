@@ -51,17 +51,11 @@ afterEach(async () => {
 
 describe("grid", () => {
   it("reads nothing configured before anything is saved", async () => {
-    expect(await readGrid()).toEqual({
-      importEntityId: "",
-      exportEntityId: "",
-    });
+    expect(await readGrid()).toEqual({ powerEntityId: "" });
   });
 
-  it("round-trips the two sensors", async () => {
-    const grid = {
-      importEntityId: "sensor.grid_import_power",
-      exportEntityId: "sensor.grid_export_power",
-    };
+  it("round-trips the sensor", async () => {
+    const grid = { powerEntityId: "sensor.grid_power" };
 
     await saveGrid(grid);
 
@@ -71,13 +65,10 @@ describe("grid", () => {
     ).toEqual(grid);
   });
 
-  it("tolerates a half-written file rather than throwing", async () => {
-    await writeStored("grid.json", { importEntityId: " sensor.a " });
+  it("tolerates a hand-edited file rather than throwing", async () => {
+    await writeStored("grid.json", { powerEntityId: " sensor.a " });
 
-    expect(await readGrid()).toEqual({
-      importEntityId: "sensor.a",
-      exportEntityId: "",
-    });
+    expect(await readGrid()).toEqual({ powerEntityId: "sensor.a" });
   });
 });
 

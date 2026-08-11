@@ -162,8 +162,7 @@ describe("battery control", () => {
     // thing, reached over HTTP through the ingress proxy.
     await post({
       intent: "grid-save",
-      importEntityId: "sensor.grid_import_power",
-      exportEntityId: "sensor.grid_export_power",
+      powerEntityId: "sensor.grid_power",
     });
     await post({
       intent: "battery-add",

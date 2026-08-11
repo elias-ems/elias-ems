@@ -141,13 +141,11 @@ function hold(
 }
 
 export function planNetZero(input: {
-  /** Power drawn from the grid, in W. Null when unreadable. */
-  gridImportW: number | null;
-  /** Power fed back into the grid, in W. Null when unreadable. */
-  gridExportW: number | null;
+  /** Net grid power in W: positive importing, negative exporting. Null when unreadable. */
+  gridPowerW: number | null;
   batteries: BatterySnapshot[];
 }): NetZeroPlan {
-  const { gridImportW, gridExportW, batteries } = input;
+  const { gridPowerW, batteries } = input;
   const warnings: string[] = [];
 
   // A battery whose power sensor is down still counts as present, but its
@@ -165,10 +163,7 @@ export function planNetZero(input: {
 
   if (batteries.length === 0) {
     return {
-      netW:
-        gridImportW === null || gridExportW === null
-          ? null
-          : gridImportW - gridExportW,
+      netW: gridPowerW,
       currentBatteryW: 0,
       targetBatteryW: null,
       decisions: [],
@@ -177,13 +172,7 @@ export function planNetZero(input: {
     };
   }
 
-  if (gridImportW === null || gridExportW === null) {
-    const missing =
-      gridImportW === null && gridExportW === null
-        ? "Neither grid sensor is readable"
-        : gridImportW === null
-          ? "The grid consumption sensor is not readable"
-          : "The grid production sensor is not readable";
+  if (gridPowerW === null) {
     return {
       netW: null,
       currentBatteryW,
@@ -195,12 +184,12 @@ export function planNetZero(input: {
           battery.powerW ?? 0,
         ),
       ),
-      summary: `${missing} — holding.`,
+      summary: "The grid power sensor is not readable — holding.",
       warnings,
     };
   }
 
-  const netW = gridImportW - gridExportW;
+  const netW = gridPowerW;
 
   if (Math.abs(netW) < DEADBAND_W) {
     return {

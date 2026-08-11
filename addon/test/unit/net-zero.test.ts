@@ -27,8 +27,7 @@ function battery(overrides: Partial<BatterySnapshot> = {}): BatterySnapshot {
 describe("planNetZero", () => {
   it("discharges to cover what would otherwise be imported", () => {
     const plan = planNetZero({
-      gridImportW: 800,
-      gridExportW: 0,
+      gridPowerW: 800,
       batteries: [battery()],
     });
 
@@ -41,9 +40,10 @@ describe("planNetZero", () => {
   });
 
   it("charges with what would otherwise be exported", () => {
+    // Negative is the export half of the sign convention, and the only thing
+    // that distinguishes the two directions now that it is one sensor.
     const plan = planNetZero({
-      gridImportW: 0,
-      gridExportW: 1200,
+      gridPowerW: -1200,
       batteries: [battery()],
     });
 
@@ -60,8 +60,7 @@ describe("planNetZero", () => {
     // 800 W import out of nothing. This is the case that makes the battery's
     // current power an input rather than an afterthought.
     const plan = planNetZero({
-      gridImportW: 0,
-      gridExportW: 0,
+      gridPowerW: 0,
       batteries: [battery({ powerW: -800 })],
     });
 
@@ -73,8 +72,7 @@ describe("planNetZero", () => {
 
   it("adds to a battery that is already charging when there is still export", () => {
     const plan = planNetZero({
-      gridImportW: 0,
-      gridExportW: 1200,
+      gridPowerW: -1200,
       batteries: [battery({ powerW: 500 })],
     });
 
@@ -85,8 +83,24 @@ describe("planNetZero", () => {
 
   it("holds inside the deadband rather than chasing meter noise", () => {
     const plan = planNetZero({
-      gridImportW: DEADBAND_W - 1,
-      gridExportW: 0,
+      gridPowerW: DEADBAND_W - 1,
+      batteries: [battery({ powerW: -300 })],
+    });
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "hold",
+      setpointW: -300,
+    });
+    expect(plan.summary).toContain("deadband");
+  });
+
+  it("holds inside the deadband on the export side too", () => {
+    // The deadband is on the magnitude, so a small export has to be as quiet as
+    // a small import. A one-sided check would let the battery cycle on noise in
+    // exactly one direction, which is the sort of asymmetry a signed reading
+    // makes easy to introduce.
+    const plan = planNetZero({
+      gridPowerW: -(DEADBAND_W - 1),
       batteries: [battery({ powerW: -300 })],
     });
 
@@ -99,8 +113,7 @@ describe("planNetZero", () => {
 
   it("will not discharge a battery that is at its floor", () => {
     const plan = planNetZero({
-      gridImportW: 800,
-      gridExportW: 0,
+      gridPowerW: 800,
       batteries: [battery({ socPercent: 10, minChargePercent: 10 })],
     });
 
@@ -111,8 +124,7 @@ describe("planNetZero", () => {
 
   it("will not charge a battery that is at its ceiling", () => {
     const plan = planNetZero({
-      gridImportW: 0,
-      gridExportW: 800,
+      gridPowerW: -800,
       batteries: [battery({ socPercent: 95, maxChargePercent: 90 })],
     });
 
@@ -124,8 +136,7 @@ describe("planNetZero", () => {
     // Guessing here would mean guessing about the one limit that protects the
     // hardware, so an unreadable SoC takes the battery out of the plan.
     const plan = planNetZero({
-      gridImportW: 800,
-      gridExportW: 0,
+      gridPowerW: 800,
       batteries: [battery({ socPercent: null })],
     });
 
@@ -135,8 +146,7 @@ describe("planNetZero", () => {
 
   it("splits the target across batteries in proportion to capacity", () => {
     const plan = planNetZero({
-      gridImportW: 1000,
-      gridExportW: 0,
+      gridPowerW: 1000,
       batteries: [
         battery({ id: "small", title: "Small", capacityKwh: 5 }),
         battery({ id: "big", title: "Big", capacityKwh: 15 }),
@@ -151,8 +161,7 @@ describe("planNetZero", () => {
 
   it("gives the whole target to the batteries that can still take part", () => {
     const plan = planNetZero({
-      gridImportW: 1000,
-      gridExportW: 0,
+      gridPowerW: 1000,
       batteries: [
         battery({ id: "empty", capacityKwh: 5, socPercent: 10 }),
         battery({ id: "usable", capacityKwh: 15, socPercent: 80 }),
@@ -163,17 +172,16 @@ describe("planNetZero", () => {
     expect(plan.decisions[1].setpointW).toBe(-1000);
   });
 
-  it("holds everything when a grid sensor is unreadable", () => {
+  it("holds everything when the grid sensor is unreadable", () => {
     const plan = planNetZero({
-      gridImportW: null,
-      gridExportW: 0,
+      gridPowerW: null,
       batteries: [battery({ powerW: 400 })],
     });
 
     expect(plan.netW).toBeNull();
     expect(plan.targetBatteryW).toBeNull();
     expect(plan.decisions[0]).toMatchObject({ action: "hold", setpointW: 400 });
-    expect(plan.summary).toContain("consumption sensor is not readable");
+    expect(plan.summary).toContain("grid power sensor is not readable");
   });
 
   it("warns about an unreadable battery power reading but still decides", () => {
@@ -181,8 +189,7 @@ describe("planNetZero", () => {
     // right, which is worth flagging — but refusing to act on a house that is
     // visibly importing would be worse.
     const plan = planNetZero({
-      gridImportW: 800,
-      gridExportW: 0,
+      gridPowerW: 800,
       batteries: [battery({ powerW: null })],
     });
 
@@ -194,8 +201,7 @@ describe("planNetZero", () => {
 
   it("says there is nothing to control when no battery is configured", () => {
     const plan = planNetZero({
-      gridImportW: 800,
-      gridExportW: 0,
+      gridPowerW: 800,
       batteries: [],
     });
 
@@ -205,8 +211,7 @@ describe("planNetZero", () => {
 
   it("reports the room left, so a setpoint can be sanity-checked next to it", () => {
     const plan = planNetZero({
-      gridImportW: 500,
-      gridExportW: 0,
+      gridPowerW: 500,
       batteries: [
         battery({ capacityKwh: 10, socPercent: 50, minChargePercent: 10 }),
       ],

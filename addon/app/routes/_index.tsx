@@ -58,8 +58,7 @@ export async function loader() {
       entity.powerEntityId,
       entity.energyEntityId,
     ]),
-    grid.importEntityId,
-    grid.exportEntityId,
+    grid.powerEntityId,
     ...batteries.flatMap((battery) => [
       battery.powerEntityId,
       battery.energyEntityId,
@@ -81,8 +80,7 @@ export async function loader() {
     })),
     grid: {
       configured: isGridConfigured(grid),
-      consumption: grid.importEntityId ? reading(grid.importEntityId) : null,
-      production: grid.exportEntityId ? reading(grid.exportEntityId) : null,
+      power: grid.powerEntityId ? reading(grid.powerEntityId) : null,
     },
     batteries: batteries.map((battery) => ({
       id: battery.id,
@@ -151,10 +149,9 @@ export default function Index({ loaderData }: Route.ComponentProps) {
         </ul>
       </Panel>
 
-      <Panel title="Grid" empty={grid.configured ? null : "No grid sensors"}>
+      <Panel title="Grid" empty={grid.configured ? null : "No grid sensor"}>
         <div style={{ ...measurementsStyle, marginTop: "0.75rem" }}>
-          <Measurement label="Consumption" reading={grid.consumption} />
-          <Measurement label="Production" reading={grid.production} />
+          <Measurement label="Power" reading={grid.power} />
         </div>
       </Panel>
 
@@ -220,7 +217,9 @@ function Panel({
       <h2 style={headingStyle}>{title}</h2>
       {empty ? (
         <p style={{ ...hintStyle, marginTop: "0.35rem" }}>
-          {empty} yet — add them in <Link to="/settings">Settings</Link>.
+          {/* Number-neutral on purpose: the grid is one sensor, the other two
+              panels are lists. */}
+          {empty} yet — head to <Link to="/settings">Settings</Link>.
         </p>
       ) : (
         children
