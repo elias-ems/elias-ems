@@ -9,6 +9,8 @@
  * by test/stack.js via `webServer` in playwright.config.ts.
  */
 import { test as base, expect } from "@playwright/test";
+import { HA_MOCK_PORT } from "../../playwright.config";
+import { DEFAULT_SUPERVISOR_TOKEN } from "../ha-mock.js";
 
 /**
  * A 404 on a script is the signature of the asset-prefix bug. Without this it
@@ -173,4 +175,49 @@ test("battery control can be configured, enabled, and watched deciding", async (
   await expect(page.getByText(/Home battery: discharge at 842 W/)).toBeVisible({
     timeout: 15_000,
   });
+});
+
+/**
+ * The dashboard's whole point is that its numbers are current. Nothing else in
+ * the suite would notice if the refresh stopped: every other assertion is happy
+ * with the values the page was server-rendered with.
+ *
+ * Runs after the test above, which is what configures the battery this watches.
+ */
+test("readings keep updating without the page being reloaded", async ({
+  page,
+  request,
+}) => {
+  await page.goto("./");
+  await expect(page.getByText("76 %")).toBeVisible();
+
+  // Survives a client-side refresh and not a page load, so the assertion at the
+  // end can tell the two apart.
+  await page.evaluate(() => {
+    (window as unknown as { neverReloaded?: boolean }).neverReloaded = true;
+  });
+
+  // Straight at the mock, the way Home Assistant's own API sets a state — the
+  // add-on has no way to move a sensor, and the point is that it notices when
+  // something else does.
+  const response = await request.post(
+    `http://127.0.0.1:${HA_MOCK_PORT}/core/api/states/sensor.battery_state_of_charge`,
+    {
+      headers: { Authorization: `Bearer ${DEFAULT_SUPERVISOR_TOKEN}` },
+      data: {
+        state: "41",
+        attributes: { unit_of_measurement: "%" },
+      },
+    },
+  );
+  expect(response.ok()).toBe(true);
+
+  await expect(page.getByText("41 %")).toBeVisible({ timeout: 20_000 });
+
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { neverReloaded?: boolean }).neverReloaded,
+    ),
+    "the new reading must arrive without a page load",
+  ).toBe(true);
 });

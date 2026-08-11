@@ -15,7 +15,17 @@ import { toReading } from "../lib/readings.server";
 import type { Route } from "./+types/_index";
 
 /** How often the readings refresh themselves, in milliseconds. */
-const REFRESH_INTERVAL = 10_000;
+const REFRESH_INTERVAL = 5_000;
+
+/**
+ * The same, while the browser says the page is hidden. Slower rather than
+ * stopped: the add-on panel usually sits in a background tab and there is no
+ * point polling Home Assistant for nobody, but "hidden" is not something to
+ * trust absolutely — a document embedded in an iframe reports it for reasons
+ * that have nothing to do with whether a person is looking at the page, and a
+ * refresh that stops entirely on a wrong answer never starts again.
+ */
+const HIDDEN_REFRESH_INTERVAL = 60_000;
 
 /** Enough of the log to be useful on first paint; the debug box then polls for more. */
 const INITIAL_LOG_ENTRIES = 50;
@@ -99,28 +109,72 @@ export async function loader() {
   };
 }
 
+/**
+ * Keeps the loader's readings current: power is a live value, so a number that
+ * never moves would be misleading.
+ *
+ * The next refresh is scheduled only once the previous one has come back,
+ * rather than on a fixed interval. A `setInterval` would need a guard against
+ * refreshes piling up on a slow Home Assistant, and every version of that guard
+ * is one stuck request away from skipping every refresh from then on — the page
+ * then sits there showing whatever it last managed to read, which is exactly
+ * the failure this is meant to prevent.
+ */
+function useRefreshingReadings(enabled: boolean) {
+  const { revalidate } = useRevalidator();
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let stopped = false;
+    let refreshing = false;
+
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(
+        refresh,
+        document.visibilityState === "visible"
+          ? REFRESH_INTERVAL
+          : HIDDEN_REFRESH_INTERVAL,
+      );
+    };
+
+    const refresh = async () => {
+      if (stopped || refreshing) return;
+      refreshing = true;
+      // A failed revalidation is already reported by the loader, which returns
+      // the reason instead of throwing; all that matters here is that one bad
+      // round does not end the schedule.
+      await revalidate().catch(() => {});
+      refreshing = false;
+      if (!stopped) schedule();
+    };
+
+    // Coming back to the page should show current numbers straight away rather
+    // than the minute-old ones it was left on.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+
+    schedule();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [enabled, revalidate]);
+}
+
 export default function Index({ loaderData }: Route.ComponentProps) {
   const { arrays, grid, batteries, control, error } = loaderData;
-  const revalidator = useRevalidator();
 
   const hasReadings =
     arrays.length > 0 || grid.configured || batteries.length > 0;
 
-  // Power is a live reading, so a number that never moves would be misleading.
-  // Skip hidden tabs — this polls Home Assistant, and the add-on panel is
-  // usually left open in a background tab.
-  useEffect(() => {
-    if (!hasReadings) return undefined;
-    const timer = setInterval(() => {
-      if (
-        document.visibilityState === "visible" &&
-        revalidator.state === "idle"
-      ) {
-        revalidator.revalidate();
-      }
-    }, REFRESH_INTERVAL);
-    return () => clearInterval(timer);
-  }, [hasReadings, revalidator]);
+  useRefreshingReadings(hasReadings);
 
   return (
     <main style={{ padding: "2rem", maxWidth: 640 }}>

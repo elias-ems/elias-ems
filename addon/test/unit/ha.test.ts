@@ -1,3 +1,4 @@
+import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fetchHaState, fetchHaStates } from "../../app/lib/ha.server";
 import { startHaMock } from "../ha-mock.js";
@@ -69,5 +70,45 @@ describe("fetchHaState", () => {
     expect(ha.requests.map((request) => request.path)).toContain(
       "/core/api/states/sensor.odd%20id%2Fwith%20slash",
     );
+  });
+});
+
+/**
+ * A Home Assistant that accepts the connection and then says nothing — a core
+ * restart caught mid-request looks like this. Without a deadline the promise
+ * never settles, and a caller that waits on it (the page's refresh loop, the
+ * control loop) stops for good rather than failing and trying again.
+ */
+describe("a request Home Assistant never answers", () => {
+  let silent: http.Server;
+
+  beforeAll(async () => {
+    silent = http.createServer(() => {
+      // Deliberately no response.
+    });
+    await new Promise<void>((resolve) =>
+      silent.listen(0, "127.0.0.1", resolve),
+    );
+
+    const address = silent.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    process.env.SUPERVISOR_API = `http://127.0.0.1:${port}/core/api`;
+    process.env.HA_TIMEOUT_MS = "150";
+  });
+
+  afterAll(async () => {
+    await new Promise((resolve) => silent.close(resolve));
+    process.env.SUPERVISOR_API = ha.apiUrl;
+    delete process.env.HA_TIMEOUT_MS;
+  });
+
+  it("gives up, and says so in terms the page can show", async () => {
+    await expect(fetchHaState("sensor.inverter_power")).rejects.toThrow(
+      "Home Assistant did not respond within 0.15s",
+    );
+  });
+
+  it("gives up on the full state list too", async () => {
+    await expect(fetchHaStates()).rejects.toThrow("did not respond");
   });
 });

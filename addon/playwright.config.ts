@@ -12,7 +12,8 @@ import { DEFAULT_INGRESS_TOKEN } from "./test/ingress-proxy.js";
  */
 const INGRESS_PORT = 4100;
 const APP_PORT = 4101;
-const HA_MOCK_PORT = 4102;
+/** Exported: a test that needs a reading to change talks to the mock directly. */
+export const HA_MOCK_PORT = 4102;
 const BASE_URL = `http://127.0.0.1:${INGRESS_PORT}/api/hassio_ingress/${DEFAULT_INGRESS_TOKEN}/`;
 
 export default defineConfig({

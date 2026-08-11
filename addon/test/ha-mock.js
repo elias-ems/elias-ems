@@ -32,6 +32,25 @@ export async function defaultStates() {
   return JSON.parse(contents);
 }
 
+/** @returns {Promise<object|null>} the parsed body, or null when there isn't one. */
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", (chunk) => {
+      raw += chunk;
+    });
+    req.on("error", reject);
+    req.on("end", () => {
+      if (!raw) return resolve(null);
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -75,6 +94,33 @@ export async function startHaMock({
     const match = pathname.match(/^\/core\/api\/states\/(.+)$/);
     if (match) {
       const entityId = decodeURIComponent(match[1]);
+
+      // Home Assistant's own API sets a state with a POST to the same path, and
+      // that is how a test moves a reading while a page is watching it. Copied
+      // rather than mutated in place so a `states` array a caller handed in
+      // stays theirs.
+      if (req.method === "POST") {
+        return readJson(req).then(
+          (body) => {
+            const existing = current.find(
+              (entity) => entity.entity_id === entityId,
+            );
+            const next = {
+              ...existing,
+              entity_id: entityId,
+              state: String(body?.state ?? ""),
+              attributes: body?.attributes ?? existing?.attributes,
+            };
+            current = [
+              ...current.filter((entity) => entity.entity_id !== entityId),
+              next,
+            ];
+            return sendJson(res, existing ? 200 : 201, next);
+          },
+          () => sendJson(res, 400, { message: "Invalid JSON specified." }),
+        );
+      }
+
       const state = current.find((entity) => entity.entity_id === entityId);
       return state
         ? sendJson(res, 200, state)
