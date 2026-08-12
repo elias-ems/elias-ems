@@ -41,6 +41,7 @@ const child = spawn(
     env: {
       ...process.env,
       SUPERVISOR_API: ha.apiUrl,
+      SUPERVISOR_WS: ha.wsUrl,
       SUPERVISOR_TOKEN: ha.token,
     },
     stdio: "inherit",

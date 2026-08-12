@@ -77,9 +77,20 @@ export async function startIngressProxy({
     );
 
     forwarded.on("error", (error) => {
+      // Once a streaming response has started — the readings stream is one —
+      // the status line is long gone, and the only honest thing left is to drop
+      // the connection. Trying to write a 502 over it throws instead.
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
       res.writeHead(502, { "Content-Type": "text/plain" });
       res.end(`502: ingress upstream unreachable (${error.message})`);
     });
+
+    // A browser that navigates away mid-stream leaves the upstream request
+    // hanging; real proxies hang up on it, and so must this one.
+    res.on("close", () => forwarded.destroy());
 
     req.pipe(forwarded);
   });
@@ -94,6 +105,13 @@ export async function startIngressProxy({
     origin,
     /** Trailing slash included — the form a browser must actually use. */
     baseUrl: `${origin}${prefix}/`,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    close: () =>
+      new Promise((resolve) => {
+        // `server.close` alone waits for every open connection to end, and the
+        // readings stream is designed never to end on its own. Without this a
+        // test that leaves one open hangs the whole run in teardown.
+        server.closeAllConnections();
+        server.close(resolve);
+      }),
   };
 }

@@ -117,6 +117,7 @@ export async function startStack({
       HOST: "127.0.0.1",
       PORT: String(port),
       SUPERVISOR_API: ha.apiUrl,
+      SUPERVISOR_WS: ha.wsUrl,
       SUPERVISOR_TOKEN: ha.token,
       DATA_DIR: dataDir,
     },

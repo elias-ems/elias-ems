@@ -1,17 +1,12 @@
-import { useEffect } from "react";
-import { Link, useRevalidator } from "react-router";
+import { useEffect, useState } from "react";
+import { Link, useHref, useRevalidator } from "react-router";
 import DebugBox from "../components/DebugBox";
 import { headingStyle, hintStyle, rowStyle } from "../components/form";
 import Measurement from "../components/Measurement";
-import { listBatteries } from "../lib/batteries.server";
 import { readControlConfig } from "../lib/control-config.server";
 import { readControlLog } from "../lib/control-log.server";
 import { controlLoopStatus } from "../lib/control-loop.server";
-import { isGridConfigured } from "../lib/grid";
-import { readGrid } from "../lib/grid.server";
-import { fetchHaState, type HaState } from "../lib/ha.server";
-import { listPvEntities } from "../lib/pv-entities.server";
-import { toReading } from "../lib/readings.server";
+import { type DashboardReadings, readDashboard } from "../lib/dashboard.server";
 import type { Route } from "./+types/_index";
 
 /** How often the readings refresh themselves, in milliseconds. */
@@ -30,88 +25,68 @@ const HIDDEN_REFRESH_INTERVAL = 60_000;
 /** Enough of the log to be useful on first paint; the debug box then polls for more. */
 const INITIAL_LOG_ENTRIES = 50;
 
-/**
- * Reads every entity the page needs in one round of requests, deduplicated — the
- * same sensor can legitimately be configured in two places.
- *
- * A Home Assistant that can't be reached is reported once, for the whole page,
- * rather than turning into one failure per card: the cause is the same for all
- * of them, and every reading falls back to "—".
- */
-async function readStates(ids: Array<string | undefined>): Promise<{
-  states: Map<string, HaState | null>;
-  error: string | null;
-}> {
-  const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
-
-  try {
-    const entries = await Promise.all(
-      unique.map(async (id) => [id, await fetchHaState(id)] as const),
-    );
-    return { states: new Map(entries), error: null };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { states: new Map(), error: message };
-  }
-}
-
 export async function loader() {
-  const [pvEntities, grid, batteries, config] = await Promise.all([
-    listPvEntities(),
-    readGrid(),
-    listBatteries(),
+  const [readings, config] = await Promise.all([
+    readDashboard(),
     readControlConfig(),
   ]);
 
-  const { states, error } = await readStates([
-    ...pvEntities.flatMap((entity) => [
-      entity.powerEntityId,
-      entity.energyEntityId,
-    ]),
-    grid.powerEntityId,
-    ...batteries.flatMap((battery) => [
-      battery.powerEntityId,
-      battery.energyEntityId,
-      battery.socEntityId,
-    ]),
-  ]);
-
-  // Null rather than a reading when the fetch never happened, so the card shows
-  // a dash instead of claiming the entity is missing.
-  const reading = (id: string) =>
-    states.has(id) ? toReading(states.get(id) ?? null) : null;
-
   return {
-    arrays: pvEntities.map((entity) => ({
-      id: entity.id,
-      title: entity.title,
-      power: reading(entity.powerEntityId),
-      energy: reading(entity.energyEntityId),
-    })),
-    grid: {
-      configured: isGridConfigured(grid),
-      power: grid.powerEntityId ? reading(grid.powerEntityId) : null,
-    },
-    batteries: batteries.map((battery) => ({
-      id: battery.id,
-      title: battery.title,
-      window: `${battery.minChargePercent}–${battery.maxChargePercent}% of ${battery.capacityKwh} kWh`,
-      charge: reading(battery.socEntityId),
-      power: reading(battery.powerEntityId),
-      energy: reading(battery.energyEntityId),
-    })),
+    ...readings,
     control: {
       enabled: config.enabled,
       status: controlLoopStatus(),
       entries: readControlLog(INITIAL_LOG_ENTRIES),
     },
-    error,
   };
 }
 
 /**
- * Keeps the loader's readings current: power is a live value, so a number that
- * never moves would be misleading.
+ * Subscribes to the readings stream, which pushes a fresh set every time Home
+ * Assistant says one of the entities on this page moved.
+ *
+ * Returns what to render and whether the stream is working. Until the first
+ * message lands there is nothing to render but the loader's own data, which is
+ * also what keeps hydration honest: the first client render is the server's.
+ */
+function useStreamedReadings(): {
+  readings: DashboardReadings | null;
+  streaming: boolean;
+} {
+  const [readings, setReadings] = useState<DashboardReadings | null>(null);
+  const [streaming, setStreaming] = useState(false);
+
+  // Through `useHref`, so the URL carries the ingress prefix. A bare
+  // "/api/readings" would be resolved against the Home Assistant origin, where
+  // this app is not served — the same trap the asset manifest falls into.
+  const href = useHref("/api/readings");
+
+  useEffect(() => {
+    const source = new EventSource(href);
+
+    source.addEventListener("message", (event) => {
+      setReadings(JSON.parse(event.data) as DashboardReadings);
+      setStreaming(true);
+    });
+
+    // EventSource reconnects on its own, so an error is not the end of the
+    // stream — but it does mean this one is not delivering right now, which is
+    // the moment to let polling take over. A stream that comes back says so
+    // with its next message.
+    source.addEventListener("error", () => setStreaming(false));
+
+    return () => {
+      source.close();
+      setStreaming(false);
+    };
+  }, [href]);
+
+  return { readings, streaming };
+}
+
+/**
+ * Keeps the loader's readings current when the stream cannot: power is a live
+ * value, so a number that never moves would be misleading.
  *
  * The next refresh is scheduled only once the previous one has come back,
  * rather than on a fixed interval. A `setInterval` would need a guard against
@@ -169,12 +144,20 @@ function useRefreshingReadings(enabled: boolean) {
 }
 
 export default function Index({ loaderData }: Route.ComponentProps) {
-  const { arrays, grid, batteries, control, error } = loaderData;
+  const { control } = loaderData;
+  const { readings, streaming } = useStreamedReadings();
+
+  // The stream's readings once it has sent any, the loader's until then. Both
+  // are built by the same function on the server, so they are interchangeable.
+  const { arrays, grid, batteries, error } = readings ?? loaderData;
 
   const hasReadings =
     arrays.length > 0 || grid.configured || batteries.length > 0;
 
-  useRefreshingReadings(hasReadings);
+  // Only while the stream isn't delivering. If it never connects — an ingress
+  // proxy that buffers, a browser with EventSource disabled — the page quietly
+  // goes back to polling rather than showing numbers that stopped moving.
+  useRefreshingReadings(hasReadings && !streaming);
 
   return (
     <main style={{ padding: "2rem", maxWidth: 640 }}>

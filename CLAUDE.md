@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 See [docs/project.md](docs/project.md) for what we're building and architecture decisions, [docs/architecture.md](docs/architecture.md) for repo/code structure, [docs/roadmap.md](docs/roadmap.md) for current and future goals, and [docs/routines.md](docs/routines.md) for scheduled Claude routines. Keep these up to date as the project evolves.
 
-Per-feature docs live beside them: [docs/feature-battery-control.md](docs/feature-battery-control.md).
+Per-feature docs live beside them: [docs/feature-battery-control.md](docs/feature-battery-control.md), [docs/feature-live-readings.md](docs/feature-live-readings.md).
 
 ## Commands
 
@@ -132,9 +132,14 @@ Check contrast in both themes when touching colours — every piece of text shou
 
 ## Talking to Home Assistant
 
-[addon/app/lib/ha.server.ts](addon/app/lib/ha.server.ts) calls the Supervisor's proxy to the HA REST API, authenticated with the `SUPERVISOR_TOKEN` env var that Supervisor injects. Neither the token nor the `supervisor` hostname exists outside HA, so both `/states` (entity autocomplete) and `/states/<entity_id>` (live readings on the home page) fail locally by design; the UI degrades to a message rather than erroring.
+Two modules do it, both through the Supervisor's proxy and both authenticated with the `SUPERVISOR_TOKEN` env var that Supervisor injects:
 
-To develop against real-looking data, start [addon/test/ha-mock.js](addon/test/ha-mock.js), then set `SUPERVISOR_API` to its `apiUrl` and `SUPERVISOR_TOKEN` to its token. Unset, `SUPERVISOR_API` defaults to the real `http://supervisor/core/api`.
+- [addon/app/lib/ha.server.ts](addon/app/lib/ha.server.ts) calls the **REST API** — `/states` for entity autocomplete, `/states/<entity_id>` for a single reading. Every request carries a 10-second deadline; `fetch` has none of its own, and a request HA accepts but never answers is a promise that never settles, which stalls whatever was waiting on it for good.
+- [addon/app/lib/ha-live.server.ts](addon/app/lib/ha-live.server.ts) holds one **WebSocket** per process to `ws://supervisor/core/websocket`, subscribed to `state_changed`, and keeps the cache the dashboard actually reads. [docs/feature-live-readings.md](docs/feature-live-readings.md) covers the handshake, why every reconnect re-seeds, and how each hop degrades. `homeassistant_api: true` in config.yaml is what makes both proxies reachable.
+
+Neither the token nor the `supervisor` hostname exists outside HA, so all of it fails locally by design; the UI degrades to a message rather than erroring.
+
+To develop against real-looking data, start [addon/test/ha-mock.js](addon/test/ha-mock.js), which serves both halves, then set `SUPERVISOR_API` to its `apiUrl`, `SUPERVISOR_WS` to its `wsUrl` and `SUPERVISOR_TOKEN` to its token. Unset, those default to the real `http://supervisor/core/api` and `ws://supervisor/core/websocket`. `HA_TIMEOUT_MS` overrides the REST deadline, which exists so a test can reach it in milliseconds.
 
 `addon/test/` holds the harness (`ha-mock.js`, `ingress-proxy.js`, `stack.js`, `dev.js`) alongside the suites in `unit/`, `integration/`, and `e2e/`. The harness files are plain JavaScript for the same reason `server.js` is: node runs them directly, with no build step in front.
 

@@ -9,6 +9,16 @@
  * the bearer token because sending the wrong one (or none) is exactly the
  * failure this is meant to catch before it reaches Home Assistant.
  *
+ * Both halves of that proxy are here: the REST API under `/core/api`, and the
+ * WebSocket at `/core/websocket` that the add-on subscribes to for live
+ * readings. They share one state list, and one way to change it — a `POST` to
+ * `/core/api/states/<id>`, which is also how the real API does it. A test moves
+ * a sensor once and both transports see it.
+ *
+ * `ws` is a devDependency because node ships a WebSocket *client* and no
+ * server; the add-on itself needs no such thing, since the client is the half
+ * it uses.
+ *
  * Plain JavaScript for the same reason as server.js: it is spawned directly by
  * node, with no build step in front of it.
  */
@@ -17,11 +27,15 @@ import { readFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { WebSocketServer } from "ws";
 import { listen } from "./listen.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const DEFAULT_SUPERVISOR_TOKEN = "test-supervisor-token";
+
+/** Reported in the handshake, as the real server does. Nothing reads it yet. */
+const HA_VERSION = "2026.8.0";
 
 /** The fixture the mock serves when a caller doesn't supply its own states. */
 export async function defaultStates() {
@@ -79,6 +93,45 @@ export async function startHaMock({
    */
   const requests = [];
 
+  /**
+   * Sockets that have authenticated, against the id of their `state_changed`
+   * subscription — null until they ask for one. A connection that never
+   * subscribes is still a connection, and must not be sent events.
+   * @type {Map<import("ws").WebSocket, number|null>}
+   */
+  const sockets = new Map();
+
+  /**
+   * Applies a state and tells every subscriber, the way Home Assistant would.
+   * A null `next` is a removal — the event carries `new_state: null`, which is
+   * how HA says an entity is gone rather than merely quiet.
+   */
+  function applyState(entityId, next) {
+    const old = current.find((entity) => entity.entity_id === entityId) ?? null;
+    current = [
+      ...current.filter((entity) => entity.entity_id !== entityId),
+      ...(next ? [next] : []),
+    ];
+
+    for (const [socket, subscriptionId] of sockets) {
+      if (subscriptionId === null) continue;
+      socket.send(
+        JSON.stringify({
+          id: subscriptionId,
+          type: "event",
+          event: {
+            event_type: "state_changed",
+            data: { entity_id: entityId, old_state: old, new_state: next },
+            time_fired: new Date().toISOString(),
+            origin: "LOCAL",
+          },
+        }),
+      );
+    }
+
+    return old;
+  }
+
   const server = http.createServer((req, res) => {
     const { pathname } = new URL(req.url, "http://127.0.0.1");
     requests.push({ method: req.method, path: pathname });
@@ -111,10 +164,7 @@ export async function startHaMock({
               state: String(body?.state ?? ""),
               attributes: body?.attributes ?? existing?.attributes,
             };
-            current = [
-              ...current.filter((entity) => entity.entity_id !== entityId),
-              next,
-            ];
+            applyState(entityId, next);
             return sendJson(res, existing ? 200 : 201, next);
           },
           () => sendJson(res, 400, { message: "Invalid JSON specified." }),
@@ -130,6 +180,74 @@ export async function startHaMock({
     return sendJson(res, 404, { message: "Not found" });
   });
 
+  /**
+   * The WebSocket half, on the same port under `/core/websocket` — the path the
+   * Supervisor proxies. The handshake is Home Assistant's: the server asks
+   * first, and nothing but `auth` is answered until it is satisfied.
+   */
+  const wss = new WebSocketServer({ server, path: "/core/websocket" });
+
+  wss.on("connection", (socket) => {
+    let authenticated = false;
+    socket.send(
+      JSON.stringify({ type: "auth_required", ha_version: HA_VERSION }),
+    );
+
+    socket.on("close", () => sockets.delete(socket));
+
+    socket.on("message", (raw) => {
+      let message;
+      try {
+        message = JSON.parse(raw.toString());
+      } catch {
+        return socket.send(
+          JSON.stringify({ type: "invalid_format", message: "not JSON" }),
+        );
+      }
+
+      if (!authenticated) {
+        if (message.type !== "auth") return;
+        if (message.access_token !== token) {
+          // Home Assistant says why and then hangs up, which is what makes a
+          // wrong token distinguishable from an unreachable one.
+          socket.send(
+            JSON.stringify({
+              type: "auth_invalid",
+              message: "Invalid access token",
+            }),
+          );
+          return socket.close();
+        }
+        authenticated = true;
+        sockets.set(socket, null);
+        return socket.send(
+          JSON.stringify({ type: "auth_ok", ha_version: HA_VERSION }),
+        );
+      }
+
+      const reply = (body) =>
+        socket.send(JSON.stringify({ id: message.id, ...body }));
+
+      if (message.type === "get_states") {
+        return reply({ type: "result", success: true, result: current });
+      }
+
+      if (
+        message.type === "subscribe_events" &&
+        (message.event_type ?? "state_changed") === "state_changed"
+      ) {
+        sockets.set(socket, message.id);
+        return reply({ type: "result", success: true, result: null });
+      }
+
+      return reply({
+        type: "result",
+        success: false,
+        error: { code: "unknown_command", message: message.type },
+      });
+    });
+  });
+
   const boundPort = await listen(server, port, "The mock Home Assistant API");
 
   return {
@@ -138,11 +256,51 @@ export async function startHaMock({
     url: `http://127.0.0.1:${boundPort}`,
     /** What SUPERVISOR_API should be set to. */
     apiUrl: `http://127.0.0.1:${boundPort}/core/api`,
+    /** What SUPERVISOR_WS should be set to. */
+    wsUrl: `ws://127.0.0.1:${boundPort}/core/websocket`,
     requests,
+    /** How many clients are subscribed right now — one per add-on process. */
+    subscriberCount: () =>
+      [...sockets.values()].filter((id) => id !== null).length,
     /** Swap the whole state list — for testing unavailable or missing entities. */
     setStates(next) {
       current = next;
     },
-    close: () => new Promise((resolve) => server.close(resolve)),
+    /**
+     * Set one state and push it to subscribers, as `POST /states/<id>` does.
+     * For tests that would rather not go through HTTP to move a sensor.
+     */
+    setState(entityId, state, attributes) {
+      applyState(entityId, {
+        ...current.find((entity) => entity.entity_id === entityId),
+        entity_id: entityId,
+        state: String(state),
+        attributes,
+      });
+    },
+    /** Delete an entity and push the removal, as an integration being removed does. */
+    removeState(entityId) {
+      applyState(entityId, null);
+    },
+    /**
+     * Hang up on every subscriber without closing the server — how a Home
+     * Assistant restart looks from the add-on, and the only way to test that
+     * the subscription reconnects and re-reads the states it missed.
+     */
+    dropSockets() {
+      for (const socket of sockets.keys()) socket.terminate();
+      sockets.clear();
+    },
+    close: () =>
+      new Promise((resolve) => {
+        for (const socket of sockets.keys()) socket.terminate();
+        sockets.clear();
+        wss.close(() => {
+          // Anything still connected — an add-on mid-reconnect, a request in
+          // flight — would otherwise hold `server.close` open indefinitely.
+          server.closeAllConnections();
+          server.close(resolve);
+        });
+      }),
   };
 }

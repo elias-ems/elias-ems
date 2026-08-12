@@ -179,7 +179,7 @@ test("battery control can be configured, enabled, and watched deciding", async (
 
 /**
  * The dashboard's whole point is that its numbers are current. Nothing else in
- * the suite would notice if the refresh stopped: every other assertion is happy
+ * the suite would notice if the updates stopped: every other assertion is happy
  * with the values the page was server-rendered with.
  *
  * Runs after the test above, which is what configures the battery this watches.
@@ -188,6 +188,13 @@ test("readings keep updating without the page being reloaded", async ({
   page,
   request,
 }) => {
+  // Revalidations of the home loader — the polling fallback's signature. The
+  // stream is supposed to make all of them unnecessary.
+  const polls: string[] = [];
+  page.on("request", (event) => {
+    if (event.url().includes(".data")) polls.push(event.url());
+  });
+
   await page.goto("./");
   await expect(page.getByText("76 %")).toBeVisible();
 
@@ -220,4 +227,9 @@ test("readings keep updating without the page being reloaded", async ({
     ),
     "the new reading must arrive without a page load",
   ).toBe(true);
+
+  // Home Assistant pushed it. Had the page asked, this would be non-empty —
+  // which is what the assertion is for: the fallback exists, and a stream that
+  // silently stopped delivering would otherwise look exactly like success.
+  expect(polls, "a working stream leaves nothing to poll for").toEqual([]);
 });
