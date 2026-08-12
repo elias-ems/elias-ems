@@ -20,14 +20,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { ControlLogData } from "../../app/lib/control";
 import { startStack } from "../stack.js";
 
 let stack: Awaited<ReturnType<typeof startStack>>;
-
-type ControlLogData = {
-  status: { running: boolean; intervalSeconds: number };
-  entries: Array<{ message: string }>;
-};
 
 beforeAll(async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "elias-ems-boot-"));

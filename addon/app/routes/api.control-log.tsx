@@ -6,14 +6,9 @@
  * seconds, and its ten-second cadence is far too slow to watch a five-second
  * loop with. This route touches nothing but memory.
  */
-import type { ControlLogEntry, ControlLoopStatus } from "../lib/control";
+import type { ControlLogData } from "../lib/control";
 import { readControlLog } from "../lib/control-log.server";
 import { controlLoopStatus } from "../lib/control-loop.server";
-
-export type ControlLogData = {
-  status: ControlLoopStatus;
-  entries: ControlLogEntry[];
-};
 
 export async function loader(): Promise<ControlLogData> {
   return { status: controlLoopStatus(), entries: readControlLog() };
