@@ -139,3 +139,15 @@ export type ControlLoopStatus = {
   /** ISO timestamp of the last completed tick, or null if none has finished. */
   lastTickAt: string | null;
 };
+
+/**
+ * What `/api/control-log` answers with, and what the debug box renders. Declared
+ * here rather than in the route because both ends of that request need it and
+ * neither may import the other: a component reaching into a route module would
+ * cross the boundary the wrong way, and a route importing a component's type
+ * would put the wire contract behind the UI that happens to draw it.
+ */
+export type ControlLogData = {
+  status: ControlLoopStatus;
+  entries: ControlLogEntry[];
+};

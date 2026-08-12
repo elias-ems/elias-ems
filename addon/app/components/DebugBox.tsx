@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
-import type { ControlLogEntry, ControlLoopStatus } from "../lib/control";
+import type { ControlLogData, ControlLogEntry } from "../lib/control";
 import { hintStyle } from "./form";
-
-type ControlLogData = {
-  status: ControlLoopStatus;
-  entries: ControlLogEntry[];
-};
 
 /** Fast enough to watch a five-second loop without polling for its own sake. */
 const POLL_INTERVAL = 2_000;
