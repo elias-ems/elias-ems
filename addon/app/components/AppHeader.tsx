@@ -63,6 +63,9 @@ export default function AppHeader() {
         <NavLink to="/" end style={linkStyle}>
           Home
         </NavLink>
+        <NavLink to="/tools" style={linkStyle}>
+          Tools
+        </NavLink>
         <NavLink to="/settings" style={linkStyle}>
           Settings
         </NavLink>

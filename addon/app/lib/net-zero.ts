@@ -52,7 +52,7 @@ export type BatteryDecision = {
   socPercent: number | null;
   /** Why this decision, in a few words. */
   reason: string;
-  /** The whole thing as one line, for the debug log. */
+  /** The whole thing as one line, for the diagnostics log. */
   message: string;
 };
 
@@ -80,9 +80,9 @@ function magnitude(watts: number): string {
 
 /**
  * Formatted with a fixed number of decimals rather than `toLocaleString`: these
- * strings end up in the debug log, which is compared against in tests and read
- * by whoever is diagnosing an installation, and neither wants the separators to
- * depend on the server's locale.
+ * strings end up in the diagnostics log, which is compared against in tests and
+ * read by whoever is diagnosing an installation, and neither wants the
+ * separators to depend on the server's locale.
  */
 function kwh(value: number): string {
   return `${value.toFixed(1)} kWh`;

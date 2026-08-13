@@ -71,15 +71,15 @@ above the ceiling.
 | `intervalSeconds` | `5` | 1–3600. A floor between ticks, not a schedule — see [The loop](#the-loop). |
 
 The strategy is stored as an id rather than a boolean so that the price-aware
-strategies on the [roadmap](roadmap.md) are additive: one more entry in
+strategies on the [roadmap](../roadmap.md) are additive: one more entry in
 `STRATEGIES` and one more branch in the loop, with nothing already on disk
 needing to change.
 
 ## The net-zero-energy strategy
 
-In [addon/app/lib/net-zero.ts](../addon/app/lib/net-zero.ts) — a pure function,
+In [addon/app/lib/net-zero.ts](../../addon/app/lib/net-zero.ts) — a pure function,
 no Home Assistant, no clock, no disk, which is what makes the decisions directly
-testable in [test/unit/net-zero.test.ts](../addon/test/unit/net-zero.test.ts).
+testable in [test/unit/net-zero.test.ts](../../addon/test/unit/net-zero.test.ts).
 
 ### Why the batteries' own power is an input
 
@@ -129,14 +129,14 @@ the inverter can deliver. That matters once something acts on the number; see
 
 ## The loop
 
-In [addon/app/lib/control-loop.server.ts](../addon/app/lib/control-loop.server.ts).
+In [addon/app/lib/control-loop.server.ts](../../addon/app/lib/control-loop.server.ts).
 
 - Module-level state, for the same reason as the subscription it reads from: the
   server build is loaded once per process, so "one loop per add-on" and "one
   module instance" are the same statement.
 - **Home Assistant decides when there is something to decide about.** The loop
   subscribes to the live cache
-  ([feature-live-readings.md](feature-live-readings.md)) and ticks when one of
+  ([live-readings.md](live-readings.md)) and ticks when one of
   *its* entities changes — the grid sensor, or a battery's SoC or power. A meter
   that swings is acted on in the time it takes the event to arrive, rather than
   up to a full interval later.
@@ -149,7 +149,7 @@ In [addon/app/lib/control-loop.server.ts](../addon/app/lib/control-loop.server.t
   otherwise produce no ticks, which from outside is indistinguishable from a loop
   that has died. It reads memory and costs nothing.
 - **Started at boot** from
-  [addon/app/entry.server.tsx](../addon/app/entry.server.tsx), which is the only
+  [addon/app/entry.server.tsx](../../addon/app/entry.server.tsx), which is the only
   module the framework loads exactly once when the server starts. Deliberately
   *not* started from a loader: an EMS that only runs while somebody has the Home
   Assistant panel open is not managing anything.
@@ -157,7 +157,7 @@ In [addon/app/lib/control-loop.server.ts](../addon/app/lib/control-loop.server.t
   takes effect immediately rather than at the next restart — waiting for one
   would be indistinguishable from the feature not working.
 - Each tick reads its entities through
-  [states.server.ts](../addon/app/lib/states.server.ts) — from the live cache,
+  [states.server.ts](../../addon/app/lib/states.server.ts) — from the live cache,
   with no round trip at all, or over REST when the subscription isn't up — runs
   the strategy, and appends **one** entry to the log.
 - **Ages are advisory.** The log line names its source and the age of the oldest
@@ -176,17 +176,13 @@ In [addon/app/lib/control-loop.server.ts](../addon/app/lib/control-loop.server.t
   loop that dies on the first outage is worse than no loop, because from the
   outside it still looks like it is working.
 
-## The debug box
+## Watching it decide
 
-The expandable **Debug log** on the home page. It shows whether the loop is
-running, the strategy and interval, and the log newest-first.
-
-While it is open it polls `GET /api/control-log`
-([addon/app/routes/api.control-log.tsx](../addon/app/routes/api.control-log.tsx))
-every two seconds. That route touches nothing but memory — separate from the
-home loader on purpose, since that one reads every configured entity, which is
-far too much work to repeat every couple of seconds, and its ten-second cadence
-is far too slow to watch a five-second loop with. Closed, the box costs nothing.
+Every line the loop produces goes to **diagnostics** under the
+`battery-control` origin — see [diagnostics.md](diagnostics.md) for the entry
+shape, the buffer and the download. Two places show it: the collapsed
+**Diagnostics** box under Battery control on the home page, filtered to this
+origin, and the **Tools** page, where it is merged with every other feature's.
 
 A tick looks like this:
 
@@ -206,16 +202,14 @@ produces the same lines every few seconds — logged separately they interleave,
 the collapsing would never see two identical entries in a row and the buffer
 would fill with near-duplicates instead of holding useful history.
 
-The log is an in-memory ring buffer of the last 300 entries
-([control-log.server.ts](../addon/app/lib/control-log.server.ts)) and is
-**deliberately not persisted**. At a five-second interval it produces thousands
-of lines an hour, and writing those into `/data` would buy nothing but wear on
-whatever the Home Assistant box boots from. An empty log after a restart is
-intended.
+The buffer holds the last 300 of this feature's entries and is **deliberately
+not persisted**: at a five-second interval the loop produces thousands of lines
+an hour, and an empty log after a restart is intended. Download it from Tools if
+a particular stretch is worth keeping.
 
 ## How it's stored
 
-[store.server.ts](../addon/app/lib/store.server.ts) holds the shared JSON
+[store.server.ts](../../addon/app/lib/store.server.ts) holds the shared JSON
 persistence: `readJson`/`writeJson`, plus `createJsonCollection` for the
 id-addressed lists (PV entities and batteries). Each concern is split into a pure
 model module and a `.server` module that reads and writes it:
@@ -224,7 +218,7 @@ model module and a `.server` module that reads and writes it:
 | --- | --- | --- |
 | Grid | `grid.ts` | `grid.server.ts` |
 | Batteries | `batteries.ts` | `batteries.server.ts` |
-| Control config, log entries, loop status | `control.ts` | `control-config.server.ts`, `control-log.server.ts` |
+| Control config and loop status | `control.ts` | `control-config.server.ts` |
 | PV entities | `pv-entities.ts` | `pv-entities.server.ts` |
 
 The split is what lets the settings UI share the types, the validation, and
@@ -242,11 +236,11 @@ concatenation.
 | `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split |
 | `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
-| `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, and names the source and age of what it read |
-| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/control-log` |
+| `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, and files its lines under the right origin |
+| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent |
 | `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy |
-| `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves |
-| `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the debug box fill |
+| `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves. What it reads is the diagnostics entry `syncControlLoop()` writes when it starts an interval: nothing in that process has posted the settings form, so only the boot-time call can have produced it |
+| `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the diagnostics box fill |
 
 The loop tests run on two clocks on purpose. The event-driven cases use the real
 one, because they turn on a WebSocket message arriving and no fake timer can
@@ -262,6 +256,7 @@ tick currently in flight, since advancing a clock only *starts* one.
 - **A per-battery maximum charge and discharge power**, so the strategy cannot
   ask for more than the inverter can deliver. Needed before the write path.
 - **Price awareness** — dynamic prices, negative-price strategies and PV
-  curtailment are separate [roadmap](roadmap.md) items.
+  curtailment are separate [roadmap](../roadmap.md) items.
 - **Persisting decisions** for after-the-fact analysis. That wants its own store
-  and a retention policy, not this ring buffer made durable.
+  and a retention policy, not the [diagnostics](diagnostics.md) buffer made
+  durable.

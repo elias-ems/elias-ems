@@ -166,15 +166,49 @@ test("battery control can be configured, enabled, and watched deciding", async (
   await expect(page.getByText("10–90% of 10 kWh")).toBeVisible();
   await expect(page.getByText("76 %")).toBeVisible();
 
-  // The debug box only polls while it is open, so this both expands it and is
-  // the thing that makes the log appear at all.
-  await page.getByText("Debug log").click();
+  // A diagnostics box only polls while it is open, so this both expands it and
+  // is the thing that makes the log appear at all.
+  await page.getByText("Diagnostics").click();
 
   // The fixture imports 842 W with the battery idle, so net zero means
   // discharging exactly that much.
   await expect(page.getByText(/Home battery: discharge at 842 W/)).toBeVisible({
     timeout: 15_000,
   });
+});
+
+/**
+ * Runs after the test above, which is what puts anything in the log to show and
+ * to download.
+ */
+test("the Tools page shows the log and downloads it", async ({ page }) => {
+  await page.goto("./");
+  await page
+    .getByRole("navigation")
+    .getByRole("link", { name: "Tools" })
+    .click();
+
+  // Open by default here — this page is the log, not a detail tucked under a
+  // feature — and every entry says which feature it came from.
+  await expect(
+    page.getByText(/\[Battery control\] Grid net \+842 W/).first(),
+  ).toBeVisible({ timeout: 15_000 });
+
+  const download = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: "Download" }).click(),
+  ]).then(([event]) => event);
+
+  expect(download.suggestedFilename()).toMatch(
+    /^elias-ems-diagnostics-.+\.txt$/,
+  );
+
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  expect(Buffer.concat(chunks).toString("utf-8")).toContain(
+    "Home battery: discharge at 842 W",
+  );
 });
 
 /**
