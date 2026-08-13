@@ -42,7 +42,7 @@ export default function ControlSection({
   return (
     <Section
       title="Battery control"
-      description="When enabled, a loop reconsiders what the batteries should be doing at the interval below and writes its decision to the debug log on the home page."
+      description="When enabled, a loop reconsiders what the batteries should be doing at the interval below and writes its decision to the diagnostics on the home page."
     >
       <Form method="post" style={{ ...formStyle, marginTop: "1rem" }}>
         <input type="hidden" name="intent" value="control-save" />

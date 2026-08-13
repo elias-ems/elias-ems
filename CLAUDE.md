@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 See [docs/project.md](docs/project.md) for what we're building and architecture decisions, [docs/architecture.md](docs/architecture.md) for repo/code structure, [docs/roadmap.md](docs/roadmap.md) for current and future goals, and [docs/routines.md](docs/routines.md) for scheduled Claude routines. Keep these up to date as the project evolves.
 
-Per-feature docs live beside them: [docs/feature-battery-control.md](docs/feature-battery-control.md), [docs/feature-live-readings.md](docs/feature-live-readings.md).
+Per-feature docs live in [docs/features/](docs/features), one file per feature: [battery-control.md](docs/features/battery-control.md), [live-readings.md](docs/features/live-readings.md), [diagnostics.md](docs/features/diagnostics.md).
 
 ## Commands
 
@@ -135,7 +135,7 @@ Check contrast in both themes when touching colours — every piece of text shou
 Two modules do it, both through the Supervisor's proxy and both authenticated with the `SUPERVISOR_TOKEN` env var that Supervisor injects:
 
 - [addon/app/lib/ha.server.ts](addon/app/lib/ha.server.ts) calls the **REST API** — `/states` for entity autocomplete, `/states/<entity_id>` for a single reading. Every request carries a 10-second deadline; `fetch` has none of its own, and a request HA accepts but never answers is a promise that never settles, which stalls whatever was waiting on it for good.
-- [addon/app/lib/ha-live.server.ts](addon/app/lib/ha-live.server.ts) holds one **WebSocket** per process to `ws://supervisor/core/websocket`, subscribed to `state_changed`, and keeps the cache the dashboard actually reads. [docs/feature-live-readings.md](docs/feature-live-readings.md) covers the handshake, why every reconnect re-seeds, and how each hop degrades. `homeassistant_api: true` in config.yaml is what makes both proxies reachable.
+- [addon/app/lib/ha-live.server.ts](addon/app/lib/ha-live.server.ts) holds one **WebSocket** per process to `ws://supervisor/core/websocket`, subscribed to `state_changed`, and keeps the cache the dashboard actually reads. [docs/features/live-readings.md](docs/features/live-readings.md) covers the handshake, why every reconnect re-seeds, and how each hop degrades. `homeassistant_api: true` in config.yaml is what makes both proxies reachable.
 
 Neither the token nor the `supervisor` hostname exists outside HA, so all of it fails locally by design; the UI degrades to a message rather than erroring.
 

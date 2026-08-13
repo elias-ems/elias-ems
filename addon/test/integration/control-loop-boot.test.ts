@@ -20,7 +20,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { ControlLogData } from "../../app/lib/control";
+import type { DiagnosticsData } from "../../app/lib/diagnostics";
 import { startStack } from "../stack.js";
 
 let stack: Awaited<ReturnType<typeof startStack>>;
@@ -62,24 +62,29 @@ afterAll(async () => {
   await rm(stack.dataDir, { recursive: true, force: true });
 });
 
-async function controlLog(): Promise<ControlLogData> {
-  const response = await fetch(`${stack.baseUrl}api/control-log`);
+/** Battery control's own entries, as the home page's box asks for them. */
+async function messages(): Promise<string[]> {
+  const response = await fetch(
+    `${stack.baseUrl}api/diagnostics?origin=battery-control`,
+  );
   expect(response.status).toBe(200);
-  return response.json();
+  const { entries } = (await response.json()) as DiagnosticsData;
+  return entries.map((entry) => entry.message);
 }
 
 describe("a restart with battery control already enabled", () => {
-  it("has the loop running before anything asks it to", async () => {
-    const { status } = await controlLog();
-
-    expect(status).toMatchObject({ running: true, intervalSeconds: 1 });
+  it("has started the loop before anything asks it to", async () => {
+    // The line `syncControlLoop()` writes when it starts an interval. Nothing
+    // in this process has posted the settings form, so the only thing that can
+    // have produced it is the boot-time call in `entry.server.tsx`.
+    expect(await messages()).toContainEqual(
+      "Battery control enabled — net-zero-energy, on every change and at most every 1s.",
+    );
   });
 
   it("is already deciding, not just scheduled to", async () => {
     await expect
-      .poll(async () => (await controlLog()).entries.map((e) => e.message), {
-        timeout: 5_000,
-      })
+      .poll(messages, { timeout: 5_000 })
       .toContainEqual(expect.stringContaining("Home battery: discharge at"));
   });
 });

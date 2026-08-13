@@ -190,7 +190,7 @@ describe("GET / (dashboard)", () => {
           intervalSeconds: 5,
           lastTickAt: null,
         },
-        entries: [],
+        diagnostics: [],
       },
       error: null,
       // `lastError` is left out on purpose: whether the failed connection to a
@@ -344,18 +344,85 @@ describe("GET / (dashboard)", () => {
   });
 });
 
-describe("GET /api/control-log", () => {
-  it("reports the loop's state and its log without touching Home Assistant", async () => {
-    // The debug box polls this every couple of seconds while it is open, so it
-    // must not be doing a round of entity reads behind the scenes.
-    const { loader } = await import("../../app/routes/api.control-log");
+describe("GET /api/diagnostics", () => {
+  async function loadDiagnostics(query: string) {
+    const { loader } = await import("../../app/routes/api.diagnostics");
+    return loader({
+      request: new Request(`http://localhost/api/diagnostics${query}`),
+    } as Parameters<typeof loader>[0]);
+  }
+
+  /** A fresh module graph means a fresh buffer, so each case seeds its own. */
+  async function seed() {
+    const { appendDiagnostic } = await import(
+      "../../app/lib/diagnostics.server"
+    );
+    appendDiagnostic("battery-control", "info", "A control decision");
+  }
+
+  it("answers without touching Home Assistant", async () => {
+    // A diagnostics box polls this every couple of seconds while it is open, so
+    // it must not be doing a round of entity reads behind the scenes.
+    await seed();
     ha.requests.length = 0;
 
-    const { status, entries } = await loader();
+    const { entries } = await loadDiagnostics("");
 
-    expect(status).toMatchObject({ running: false, intervalSeconds: 5 });
-    expect(entries).toEqual([]);
+    expect(entries).toMatchObject([{ origin: "battery-control" }]);
     expect(ha.requests).toEqual([]);
+  });
+
+  it("narrows to one origin when asked", async () => {
+    await seed();
+
+    expect(
+      (await loadDiagnostics("?origin=battery-control")).entries,
+    ).toHaveLength(1);
+  });
+
+  it("treats an unknown origin as no filter rather than as an error", async () => {
+    // The only thing that can produce one is a stale client after an origin was
+    // renamed; showing it the whole log beats showing it a failure.
+    await seed();
+
+    expect((await loadDiagnostics("?origin=nonsense")).entries).toHaveLength(1);
+  });
+});
+
+describe("GET /tools", () => {
+  it("hands the page every feature's entries, newest first", async () => {
+    const { appendDiagnostic } = await import(
+      "../../app/lib/diagnostics.server"
+    );
+    appendDiagnostic("battery-control", "info", "Older");
+    appendDiagnostic("battery-control", "info", "Newer");
+
+    const { loader } = await import("../../app/routes/tools");
+    const { entries } = await loader();
+
+    expect(entries.map((entry) => entry.message)).toEqual(["Newer", "Older"]);
+  });
+});
+
+describe("GET /api/diagnostics.txt", () => {
+  it("hands over a text file the browser will save", async () => {
+    const { appendDiagnostic } = await import(
+      "../../app/lib/diagnostics.server"
+    );
+    appendDiagnostic("battery-control", "warn", "Something to keep");
+
+    const { loader } = await import("../../app/routes/api.diagnostics[.]txt");
+    const response = await loader();
+
+    expect(response.headers.get("Content-Type")).toBe(
+      "text/plain; charset=utf-8",
+    );
+    expect(response.headers.get("Content-Disposition")).toMatch(
+      /^attachment; filename="elias-ems-diagnostics-[\d-]{10}T[\d-]{8}\.txt"$/,
+    );
+    expect(await response.text()).toContain(
+      "battery-control  warn\n    Something to keep",
+    );
   });
 });
 

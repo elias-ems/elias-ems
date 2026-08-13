@@ -104,14 +104,17 @@ describe("navigation links", () => {
     expect(reloaded.status).toBe(200);
   });
 
-  it("points Settings under the prefix too", async () => {
-    const settingsHref = html.match(
-      /<a[^>]+href="([^"]*)"[^>]*>Settings<\/a>/,
-    )?.[1];
+  it.each(["Tools", "Settings"])(
+    "points %s under the prefix too",
+    async (label) => {
+      const href = html.match(
+        new RegExp(`<a[^>]+href="([^"]*)"[^>]*>${label}</a>`),
+      )?.[1];
 
-    expect(settingsHref).toBe(`${stack.prefix}/settings`);
-    expect((await fetch(stack.origin + settingsHref)).status).toBe(200);
-  });
+      expect(href).toBe(`${stack.prefix}/${label.toLowerCase()}`);
+      expect((await fetch(stack.origin + href)).status).toBe(200);
+    },
+  );
 });
 
 describe("Home Assistant data", () => {
@@ -146,13 +149,15 @@ describe("battery control", () => {
     expect(response.status).toBeLessThan(400);
   }
 
-  async function controlLog(): Promise<{
-    status: { running: boolean };
-    entries: Array<{ message: string }>;
-  }> {
-    const response = await fetch(`${stack.baseUrl}api/control-log`);
+  async function messages(): Promise<string[]> {
+    const response = await fetch(
+      `${stack.baseUrl}api/diagnostics?origin=battery-control`,
+    );
     expect(response.status).toBe(200);
-    return response.json();
+    const { entries } = (await response.json()) as {
+      entries: Array<{ message: string }>;
+    };
+    return entries.map((entry) => entry.message);
   }
 
   it("runs in the real server process once it is switched on", async () => {
@@ -175,7 +180,7 @@ describe("battery control", () => {
       socEntityId: "sensor.battery_state_of_charge",
     });
 
-    expect((await controlLog()).status.running).toBe(false);
+    expect(await messages()).toEqual([]);
 
     await post({
       intent: "control-save",
@@ -187,12 +192,22 @@ describe("battery control", () => {
     // Enabling ticks once straight away, but that tick is fire-and-forget and
     // has its own round trip to Home Assistant to make first.
     await expect
-      .poll(async () => (await controlLog()).entries.map((e) => e.message), {
-        timeout: 5_000,
-      })
+      .poll(messages, { timeout: 5_000 })
       .toContainEqual(expect.stringContaining("Home battery: discharge at"));
+  });
 
-    expect((await controlLog()).status.running).toBe(true);
+  it("hands the whole log over as a text file", async () => {
+    const response = await fetch(`${stack.baseUrl}api/diagnostics.txt`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Disposition")).toContain("attachment");
+    // The escaped `[.]` in the route's filename is what keeps this a resource
+    // route rather than a child of `/api/diagnostics`; a page would come back
+    // as HTML here.
+    expect(response.headers.get("Content-Type")).toBe(
+      "text/plain; charset=utf-8",
+    );
+    expect(await response.text()).toContain("battery-control");
   });
 });
 

@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, useHref, useRevalidator } from "react-router";
-import DebugBox from "../components/DebugBox";
+import DiagnosticsBox from "../components/DiagnosticsBox";
 import { headingStyle, hintStyle, rowStyle } from "../components/form";
+import LiveHealthFacts from "../components/LiveHealthFacts";
 import LiveStatus from "../components/LiveStatus";
 import Measurement from "../components/Measurement";
 import { readControlConfig } from "../lib/control-config.server";
-import { readControlLog } from "../lib/control-log.server";
 import { controlLoopStatus } from "../lib/control-loop.server";
 import { type DashboardReadings, readDashboard } from "../lib/dashboard.server";
+import { readDiagnostics } from "../lib/diagnostics.server";
 import type { Route } from "./+types/_index";
 
 /** How often the readings refresh themselves, in milliseconds. */
@@ -23,7 +24,7 @@ const REFRESH_INTERVAL = 5_000;
  */
 const HIDDEN_REFRESH_INTERVAL = 60_000;
 
-/** Enough of the log to be useful on first paint; the debug box then polls for more. */
+/** Enough of the log to be useful on first paint; the box then polls for more. */
 const INITIAL_LOG_ENTRIES = 50;
 
 export async function loader() {
@@ -37,7 +38,12 @@ export async function loader() {
     control: {
       enabled: config.enabled,
       status: controlLoopStatus(),
-      entries: readControlLog(INITIAL_LOG_ENTRIES),
+      // Only battery control's own entries: this box sits under that heading,
+      // and the whole log is the Tools page's job.
+      diagnostics: readDiagnostics({
+        origin: "battery-control",
+        limit: INITIAL_LOG_ENTRIES,
+      }),
     },
   };
 }
@@ -222,10 +228,13 @@ export default function Index({ loaderData }: Route.ComponentProps) {
             : "Disabled."}{" "}
           <Link to="/settings">Settings</Link>
         </p>
-        <DebugBox
-          initial={{ status: control.status, entries: control.entries }}
-          health={health}
-        />
+        <DiagnosticsBox
+          origin="battery-control"
+          initialEntries={control.diagnostics}
+          subtitle={control.status.running ? "loop running" : "loop stopped"}
+        >
+          <LiveHealthFacts health={health} />
+        </DiagnosticsBox>
       </section>
     </main>
   );

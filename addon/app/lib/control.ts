@@ -1,8 +1,9 @@
 /**
- * Battery control's shared model: what the settings form edits, what the debug
- * box renders, and the validation between them. Pure, so both the server and the
- * browser bundle can have it — the loop itself, its log buffer, and reading and
- * writing the config all live in the matching `.server` modules.
+ * Battery control's shared model: what the settings form edits, what the home
+ * page reports, and the validation between them. Pure, so both the server and
+ * the browser bundle can have it — the loop itself and reading and writing the
+ * config live in the matching `.server` modules, and what the loop logs is
+ * `diagnostics.ts`'s shape, not a type of its own.
  */
 
 export type StrategyId = "net-zero-energy";
@@ -113,41 +114,10 @@ export function parseControlConfig(
   };
 }
 
-export type ControlLogLevel = "info" | "warn" | "error";
-
-export type ControlLogEntry = {
-  /** Rises monotonically within a process run; the client orders by it. */
-  seq: number;
-  /** ISO timestamp, for anyone reading the raw JSON. */
-  at: string;
-  /**
-   * `HH:MM:SS` in the server's timezone, formatted on the server for the same
-   * reason readings are: a locale- or timezone-dependent string built during
-   * render is a hydration mismatch waiting to happen.
-   */
-  time: string;
-  level: ControlLogLevel;
-  message: string;
-  /** How many times in a row this exact message was logged. */
-  repeat: number;
-};
-
 export type ControlLoopStatus = {
   running: boolean;
   strategy: StrategyId;
   intervalSeconds: number;
   /** ISO timestamp of the last completed tick, or null if none has finished. */
   lastTickAt: string | null;
-};
-
-/**
- * What `/api/control-log` answers with, and what the debug box renders. Declared
- * here rather than in the route because both ends of that request need it and
- * neither may import the other: a component reaching into a route module would
- * cross the boundary the wrong way, and a route importing a component's type
- * would put the wire contract behind the UI that happens to draw it.
- */
-export type ControlLogData = {
-  status: ControlLoopStatus;
-  entries: ControlLogEntry[];
 };

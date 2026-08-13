@@ -1,46 +1,70 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
-import type { ControlLogData, ControlLogEntry } from "../lib/control";
-import type { LiveHealth } from "../lib/readings";
+import {
+  type DiagnosticEntry,
+  type DiagnosticsData,
+  type DiagnosticsOrigin,
+  diagnosticsOriginLabel,
+} from "../lib/diagnostics";
 import { hintStyle } from "./form";
 
 /** Fast enough to watch a five-second loop without polling for its own sake. */
 const POLL_INTERVAL = 2_000;
 
-/** One label-and-value pair in the health list. */
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <>
-      <dt>{label}</dt>
-      <dd style={{ margin: 0, color: "var(--color-text)" }}>{value}</dd>
-    </>
-  );
-}
-
-const LEVEL_COLOR: Record<ControlLogEntry["level"], string> = {
+const LEVEL_COLOR: Record<DiagnosticEntry["level"], string> = {
   info: "var(--color-text)",
   warn: "var(--color-warning)",
   error: "var(--color-danger)",
 };
 
 /**
- * The control loop's decisions, collapsed by default. Only polls while it is
- * open — a debug box nobody is looking at should cost nothing.
+ * A feature's diagnostics, or every feature's. Only polls while it is open — a
+ * log nobody is looking at should cost nothing.
+ *
+ * `origin` is both the filter and the switch for whether each line says where it
+ * came from: inside a feature's own section that would be the same word every
+ * time, and on the Tools page it is the only way to tell the entries apart.
  */
-export default function DebugBox({
-  initial,
-  health,
+export default function DiagnosticsBox({
+  origin,
+  initialEntries,
+  label = "Diagnostics",
+  subtitle,
+  defaultOpen = false,
+  children,
 }: {
-  initial: ControlLogData;
-  /** The live path's health, as the readings stream last reported it. */
-  health: LiveHealth;
+  origin?: DiagnosticsOrigin;
+  /** What the page's loader read, shown until the first poll comes back. */
+  initialEntries: DiagnosticEntry[];
+  /**
+   * What the disclosure calls itself. The default is right under a feature's
+   * own heading; a page that already says "Diagnostics" above the box wants
+   * something that isn't the same word twice.
+   */
+  label?: string;
+  /** Feature-specific context for the summary line, e.g. whether a loop is running. */
+  subtitle?: string;
+  defaultOpen?: boolean;
+  /**
+   * Feature-specific detail to show above the entries — the live path's health,
+   * on the home page. It belongs *with* the log rather than in it: the same
+   * person opening the box to read what happened wants to know whether the
+   * numbers behind it were arriving. Anything origin-specific goes here rather
+   * than in this component, which has to stay true for every feature.
+   */
+  children?: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
-  const fetcher = useFetcher<ControlLogData>();
+  const [open, setOpen] = useState(defaultOpen);
+  const fetcher = useFetcher<DiagnosticsData>();
+
+  const href = origin
+    ? `/api/diagnostics?origin=${origin}`
+    : "/api/diagnostics";
 
   // useFetcher returns a new object every render, so depending on fetcher.load
   // would restart the interval on each render and refire immediately. Only
-  // `open` should retrigger it.
+  // `open` and the URL should retrigger it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (!open) return undefined;
@@ -49,19 +73,20 @@ export default function DebugBox({
       // The add-on panel usually sits in a background tab; there is no point
       // polling one nobody can see.
       if (document.visibilityState === "visible") {
-        fetcher.load("/api/control-log");
+        fetcher.load(href);
       }
     };
 
     poll();
     const timer = setInterval(poll, POLL_INTERVAL);
     return () => clearInterval(timer);
-  }, [open]);
+  }, [open, href]);
 
-  const { status, entries } = fetcher.data ?? initial;
+  const entries = fetcher.data?.entries ?? initialEntries;
 
   return (
     <details
+      open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
       style={{
         marginTop: "1rem",
@@ -71,49 +96,17 @@ export default function DebugBox({
       }}
     >
       <summary style={{ cursor: "pointer", fontSize: "0.875rem" }}>
-        Debug log{" "}
-        <span style={{ color: "var(--color-text-muted)" }}>
-          ({status.running ? "loop running" : "loop stopped"})
-        </span>
+        {label}
       </summary>
 
       <p style={{ ...hintStyle, margin: "0.5rem 0" }}>
-        {status.strategy} · on change, at most every {status.intervalSeconds}s ·{" "}
+        {subtitle ? `${subtitle} · ` : ""}
         {entries.length === 0
           ? "nothing logged yet"
           : `${entries.length} entries`}
       </p>
 
-      <dl
-        style={{
-          ...hintStyle,
-          display: "grid",
-          gridTemplateColumns: "auto 1fr",
-          gap: "0.15rem 0.75rem",
-          margin: "0 0 0.75rem",
-        }}
-      >
-        <Fact
-          label="Home Assistant"
-          value={health.connected ? "subscribed" : "not connected"}
-        />
-        <Fact
-          label="Last change seen"
-          value={health.lastEventAt ?? "none yet"}
-        />
-        <Fact
-          label="Readings from"
-          value={health.source ?? "nothing read yet"}
-        />
-        {/* Only worth the line once it has happened: a stable connection
-            should not spend space telling you it is stable. */}
-        {health.reconnects > 0 && (
-          <Fact label="Reconnects" value={String(health.reconnects)} />
-        )}
-        {health.lastError && (
-          <Fact label="Last error" value={health.lastError} />
-        )}
-      </dl>
+      {children}
 
       {entries.length > 0 && (
         <ol
@@ -133,8 +126,8 @@ export default function DebugBox({
               key={entry.seq}
               style={{
                 color: LEVEL_COLOR[entry.level],
-                // One entry covers a whole tick — a summary line plus one line
-                // per battery — so its newlines have to survive.
+                // One control tick is a whole entry — a summary line plus one
+                // line per battery — so its newlines have to survive.
                 whiteSpace: "pre-wrap",
                 marginTop: "0.4rem",
               }}
@@ -142,6 +135,11 @@ export default function DebugBox({
               <span style={{ color: "var(--color-text-muted)" }}>
                 {entry.time}
               </span>{" "}
+              {!origin && (
+                <span style={{ color: "var(--color-text-muted)" }}>
+                  [{diagnosticsOriginLabel(entry.origin)}]{" "}
+                </span>
+              )}
               {entry.message}
               {entry.repeat > 1 && (
                 <span style={{ color: "var(--color-text-muted)" }}>

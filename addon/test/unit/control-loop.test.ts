@@ -30,15 +30,15 @@ import {
 } from "../../app/lib/batteries.server";
 import { saveControlConfig } from "../../app/lib/control-config.server";
 import {
-  clearControlLog,
-  readControlLog,
-} from "../../app/lib/control-log.server";
-import {
   pendingControlTick,
   resetControlLoop,
   runControlTick,
   syncControlLoop,
 } from "../../app/lib/control-loop.server";
+import {
+  clearDiagnostics,
+  readDiagnostics,
+} from "../../app/lib/diagnostics.server";
 import { saveGrid } from "../../app/lib/grid.server";
 import {
   haLiveStatus,
@@ -75,7 +75,7 @@ const BATTERY = {
 
 /** Every message currently in the log, oldest first, for readable assertions. */
 function messages(): string[] {
-  return readControlLog()
+  return readDiagnostics()
     .reverse()
     .map((entry) => entry.message);
 }
@@ -90,7 +90,7 @@ function logged(fragment: string): boolean {
  * those rather than counting rows.
  */
 function decisionTicks(): number {
-  return readControlLog()
+  return readDiagnostics()
     .filter((entry) => entry.message.startsWith("Grid net"))
     .reduce((total, entry) => total + entry.repeat, 0);
 }
@@ -129,7 +129,7 @@ beforeEach(async () => {
   ha.setStates(await defaultStates());
   for (const battery of await listBatteries()) await removeBattery(battery.id);
   await saveGrid(GRID);
-  clearControlLog();
+  clearDiagnostics();
   resetControlLoop();
 });
 
@@ -215,7 +215,7 @@ describe("syncControlLoop", () => {
     await syncControlLoop();
     await pendingControlTick();
     expect(logged("importing")).toBe(true);
-    clearControlLog();
+    clearDiagnostics();
 
     // Home Assistant says the meter has swung to export. Nothing here asks it
     // anything; the decision is a consequence of being told.
@@ -344,7 +344,7 @@ describe("syncControlLoop", () => {
     });
     await syncControlLoop();
     await pendingControlTick();
-    clearControlLog();
+    clearDiagnostics();
 
     ha.setState("sensor.grid_power", "-1500", { unit_of_measurement: "W" });
 
@@ -367,7 +367,7 @@ describe("syncControlLoop", () => {
 
     // Saving an unrelated settings section calls this again. Restarting the
     // interval every time would let a busy settings page starve the loop.
-    clearControlLog();
+    clearDiagnostics();
     await syncControlLoop();
     await pendingControlTick();
 
@@ -420,7 +420,7 @@ describe("where a tick's numbers came from", () => {
   });
 });
 
-describe("the log itself", () => {
+describe("what it writes to diagnostics", () => {
   it("collapses a repeated line instead of filling the buffer with it", async () => {
     await saveGrid({ powerEntityId: "" });
 
@@ -428,8 +428,20 @@ describe("the log itself", () => {
     await runControlTick();
     await runControlTick();
 
-    const entries = readControlLog();
+    const entries = readDiagnostics();
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ repeat: 3, level: "warn" });
+  });
+
+  it("files everything under the battery-control origin", async () => {
+    // The Tools page shows every feature's entries in one list, so an entry
+    // that did not say where it came from would be unattributable there.
+    await addBattery(BATTERY);
+
+    await runControlTick();
+
+    expect(readDiagnostics().map((entry) => entry.origin)).toEqual([
+      "battery-control",
+    ]);
   });
 });

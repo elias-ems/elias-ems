@@ -2,7 +2,7 @@
  * The control loop: one interval in the add-on's Node process that, every
  * `intervalSeconds`, reads the grid and the batteries out of Home Assistant,
  * asks the configured strategy what the batteries should be doing, and writes
- * the answer to the debug log.
+ * the answer to diagnostics.
  *
  * It does not yet *tell* the batteries anything. Writing a setpoint is
  * inverter-specific — Modbus for some, a `number.*` entity or a brand
@@ -18,7 +18,8 @@
 import { listBatteries } from "./batteries.server";
 import type { ControlConfig, ControlLoopStatus } from "./control";
 import { readControlConfig } from "./control-config.server";
-import { appendControlLog } from "./control-log.server";
+import type { DiagnosticsLevel } from "./diagnostics";
+import { appendDiagnostic } from "./diagnostics.server";
 import { isGridConfigured } from "./grid";
 import { readGrid } from "./grid.server";
 import { onHaChange } from "./ha-live.server";
@@ -32,7 +33,7 @@ import { readingAge, readStates } from "./states.server";
  * Ticks are driven by Home Assistant now, so a house doing nothing produces no
  * events and would otherwise produce no ticks — which is indistinguishable, from
  * the outside, from a loop that has died. This is what keeps `lastTickAt` and
- * the debug log honest. It reads memory and costs nothing.
+ * the diagnostics log honest. It reads memory and costs nothing.
  */
 const IDLE_TICK_MS = 60_000;
 
@@ -63,6 +64,11 @@ const state: LoopState = {
   trailing: null,
   watched: new Set(),
 };
+
+/** Everything this module logs is battery control's; the origin never varies. */
+function logControl(level: DiagnosticsLevel, message: string): void {
+  appendDiagnostic("battery-control", level, message);
+}
 
 /** The entities a tick is built from — the loop's own, smaller than the page's. */
 async function controlEntityIds(): Promise<string[]> {
@@ -148,7 +154,7 @@ export async function runControlTick(): Promise<void> {
   const inputs = await readSnapshots();
 
   if (!inputs.gridConfigured) {
-    appendControlLog(
+    logControl(
       "warn",
       "The grid sensor is not configured — nothing to balance against.",
     );
@@ -169,10 +175,7 @@ export async function runControlTick(): Promise<void> {
     ...plan.decisions.map((decision) => decision.message),
   ];
 
-  appendControlLog(
-    plan.warnings.length > 0 ? "warn" : "info",
-    lines.join("\n"),
-  );
+  logControl(plan.warnings.length > 0 ? "warn" : "info", lines.join("\n"));
 
   state.lastTickAt = new Date().toISOString();
 }
@@ -189,10 +192,7 @@ function startTick(): void {
   // unreachable HA takes far longer than that to give up, which is exactly when
   // overlap would start.
   if (state.inFlight) {
-    appendControlLog(
-      "warn",
-      "Previous tick is still running — skipping this one.",
-    );
+    logControl("warn", "Previous tick is still running — skipping this one.");
     return;
   }
 
@@ -203,7 +203,7 @@ function startTick(): void {
       // keep the schedule. A loop that dies on the first outage is worse than no
       // loop, because from the outside it still looks like it is working.
       const message = error instanceof Error ? error.message : String(error);
-      appendControlLog("error", `Tick failed: ${message}`);
+      logControl("error", `Tick failed: ${message}`);
     })
     .finally(() => {
       state.inFlight = null;
@@ -288,7 +288,7 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   if (!config.enabled) {
     if (state.timer) {
       stopControlLoop();
-      appendControlLog("info", "Battery control disabled — loop stopped.");
+      logControl("info", "Battery control disabled — loop stopped.");
     }
     return controlLoopStatus();
   }
@@ -301,7 +301,7 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   if (state.timer && !changed) return controlLoopStatus();
 
   stopControlLoop();
-  appendControlLog(
+  logControl(
     "info",
     `Battery control enabled — ${config.strategy}, on every change and at most every ${config.intervalSeconds}s.`,
   );

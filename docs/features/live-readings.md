@@ -13,15 +13,15 @@ Home Assistant ──WebSocket──▶ add-on ──SSE──▶ browser
 
 ## Home Assistant → the add-on
 
-[`ha-live.server.ts`](../addon/app/lib/ha-live.server.ts) holds one WebSocket per
+[`ha-live.server.ts`](../../addon/app/lib/ha-live.server.ts) holds one WebSocket per
 add-on process to `ws://supervisor/core/websocket` — the Supervisor's proxy to
-Core's WebSocket API, reachable because [config.yaml](../addon/config.yaml) sets
+Core's WebSocket API, reachable because [config.yaml](../../addon/config.yaml) sets
 `homeassistant_api: true`, and authenticated with the same `SUPERVISOR_TOKEN` the
 REST calls use. Node 24 has a global `WebSocket` client, so nothing ships to make
 this work.
 
 Everything that reads a state goes through
-[`states.server.ts`](../addon/app/lib/states.server.ts), which answers from that
+[`states.server.ts`](../../addon/app/lib/states.server.ts), which answers from that
 cache when it can and falls back to REST when it can't. Both the dashboard and
 the control loop use it, so "where did this number come from, and how old is it"
 has one answer rather than one per caller.
@@ -86,14 +86,14 @@ not used here.
 The consequence: **ages are advisory**. Nothing refuses to act on an old reading.
 Home Assistant's own `unavailable` and `unknown` remain the only states that stop
 a decision, which `toNumber()` in
-[`readings.server.ts`](../addon/app/lib/readings.server.ts) has always handled.
+[`readings.server.ts`](../../addon/app/lib/readings.server.ts) has always handled.
 
 That policy is only safe if a person can see what the machine is ignoring, which
 is what the health chip is for.
 
 ## The health chip
 
-[`LiveStatus.tsx`](../addon/app/components/LiveStatus.tsx) sits above the
+[`LiveStatus.tsx`](../../addon/app/components/LiveStatus.tsx) sits above the
 readings and says one of three things:
 
 | Chip | Means |
@@ -107,23 +107,27 @@ timestamp. The relative form ("3s ago") is rendered client-side only: a relative
 time computed on the server is already wrong when it arrives, and rendering a
 different string on hydration is the mismatch React warns about.
 
-The debug box carries the detail — connected or not, last change seen, which
-source the readings came from, reconnect count, last error.
+[`LiveHealthFacts.tsx`](../../addon/app/components/LiveHealthFacts.tsx) carries
+the detail — connected or not, last change seen, which source the readings came
+from, reconnect count, last error. It renders inside the home page's
+[diagnostics](diagnostics.md) box rather than beside it: the decisions in that
+log are only as good as the readings behind them, so whoever opens it to read
+what happened is the same person who needs to know whether those were arriving.
 
 ## The add-on → the browser
 
-[`api.readings.tsx`](../addon/app/routes/api.readings.tsx) is a resource route
+[`api.readings.tsx`](../../addon/app/routes/api.readings.tsx) is a resource route
 that returns a `text/event-stream` response and holds it open. It sends a
 snapshot immediately, then pushes a new one whenever an entity *that is on the
 page* changes, coalescing bursts into a single push every 500ms. A `: ping`
 comment every 25s keeps idle connections from being closed underneath it.
 
 Both the stream and the home loader build their payload with `readDashboard()`
-from [`dashboard.server.ts`](../addon/app/lib/dashboard.server.ts). They have to
+from [`dashboard.server.ts`](../../addon/app/lib/dashboard.server.ts). They have to
 agree down to the formatting, because the stream's job is to replace what the
 loader rendered — sharing the function is what makes that true by construction
 rather than by discipline. Readings are formatted on the server for the reason
-[`readings.server.ts`](../addon/app/lib/readings.server.ts) gives: the strings are
+[`readings.server.ts`](../../addon/app/lib/readings.server.ts) gives: the strings are
 locale-dependent, and formatting them during render risks a hydration mismatch.
 
 Server-sent events rather than a second WebSocket, because the traffic only goes
@@ -146,7 +150,7 @@ That last row is the one that matters most in production. **Home Assistant's
 ingress proxy is the one thing that cannot be verified outside a real install**:
 a proxy that buffers a `text/event-stream` response until it is complete turns
 the stream into a connection that looks healthy and never delivers.
-[`test/integration/readings-stream.test.ts`](../addon/test/integration/readings-stream.test.ts)
+[`test/integration/readings-stream.test.ts`](../../addon/test/integration/readings-stream.test.ts)
 reproduces the shape of that failure against the mock ingress proxy, but only an
 install proves it. If it ever does happen, the page is 5 seconds stale rather
 than broken, and the browser's network tab shows it: repeated `.data` requests
