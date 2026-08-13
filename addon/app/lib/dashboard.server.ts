@@ -11,11 +11,13 @@
  * gives: the strings are locale-dependent, and formatting them during render
  * would risk the server and the browser disagreeing.
  */
+import type { Battery } from "./batteries";
 import { listBatteries } from "./batteries.server";
-import { isGridConfigured } from "./grid";
+import { type Grid, isGridConfigured } from "./grid";
 import { readGrid } from "./grid.server";
 import { fetchHaState, type HaState } from "./ha.server";
 import { liveStates } from "./ha-live.server";
+import type { PvEntity } from "./pv-entities";
 import { listPvEntities } from "./pv-entities.server";
 import type { Reading } from "./readings";
 import { toReading } from "./readings.server";
@@ -43,6 +45,55 @@ export type DashboardReadings = {
   error: string | null;
 };
 
+/** The stored configuration everything on the page is derived from. */
+type DashboardConfig = {
+  pvEntities: PvEntity[];
+  grid: Grid;
+  batteries: Battery[];
+};
+
+async function readConfig(): Promise<DashboardConfig> {
+  const [pvEntities, grid, batteries] = await Promise.all([
+    listPvEntities(),
+    readGrid(),
+    listBatteries(),
+  ]);
+
+  return { pvEntities, grid, batteries };
+}
+
+/**
+ * Every entity the page's readings are built from.
+ *
+ * One list, and both callers derive from it: `readDashboard` reads exactly
+ * these, and the stream pushes for exactly these. Spelled out twice they would
+ * eventually disagree, and the failure is a quiet one — a card whose entity
+ * nobody is watching renders once on load and then sits there, correct-looking
+ * and stale, until something else on the page happens to move.
+ *
+ * Unconfigured ids are dropped rather than carried as empty strings: a grid
+ * with no sensor picked yet is one fewer reading on the page, not an entity to
+ * go and ask Home Assistant about.
+ */
+function dashboardEntityIds({
+  pvEntities,
+  grid,
+  batteries,
+}: DashboardConfig): string[] {
+  return [
+    ...pvEntities.flatMap((entity) => [
+      entity.powerEntityId,
+      entity.energyEntityId,
+    ]),
+    grid.powerEntityId,
+    ...batteries.flatMap((battery) => [
+      battery.powerEntityId,
+      battery.energyEntityId,
+      battery.socEntityId,
+    ]),
+  ].filter((id): id is string => Boolean(id));
+}
+
 /**
  * Reads every entity the page needs, deduplicated — the same sensor can
  * legitimately be configured in two places.
@@ -56,11 +107,11 @@ export type DashboardReadings = {
  * rather than turning into one failure per card: the cause is the same for all
  * of them, and every reading falls back to "—".
  */
-async function readStates(ids: Array<string | undefined>): Promise<{
+async function readStates(ids: string[]): Promise<{
   states: Map<string, HaState | null>;
   error: string | null;
 }> {
-  const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
+  const unique = [...new Set(ids)];
 
   const live = liveStates(unique);
   if (live) return { states: live, error: null };
@@ -77,24 +128,10 @@ async function readStates(ids: Array<string | undefined>): Promise<{
 }
 
 export async function readDashboard(): Promise<DashboardReadings> {
-  const [pvEntities, grid, batteries] = await Promise.all([
-    listPvEntities(),
-    readGrid(),
-    listBatteries(),
-  ]);
+  const config = await readConfig();
+  const { pvEntities, grid, batteries } = config;
 
-  const { states, error } = await readStates([
-    ...pvEntities.flatMap((entity) => [
-      entity.powerEntityId,
-      entity.energyEntityId,
-    ]),
-    grid.powerEntityId,
-    ...batteries.flatMap((battery) => [
-      battery.powerEntityId,
-      battery.energyEntityId,
-      battery.socEntityId,
-    ]),
-  ]);
+  const { states, error } = await readStates(dashboardEntityIds(config));
 
   // Null rather than a reading when the read never happened, so the card shows
   // a dash instead of claiming the entity is missing.
@@ -130,24 +167,5 @@ export async function readDashboard(): Promise<DashboardReadings> {
  * rather than remembered, because it changes whenever settings are saved.
  */
 export async function watchedEntityIds(): Promise<Set<string>> {
-  const [pvEntities, grid, batteries] = await Promise.all([
-    listPvEntities(),
-    readGrid(),
-    listBatteries(),
-  ]);
-
-  return new Set(
-    [
-      ...pvEntities.flatMap((entity) => [
-        entity.powerEntityId,
-        entity.energyEntityId,
-      ]),
-      grid.powerEntityId,
-      ...batteries.flatMap((battery) => [
-        battery.powerEntityId,
-        battery.energyEntityId,
-        battery.socEntityId,
-      ]),
-    ].filter((id): id is string => Boolean(id)),
-  );
+  return new Set(dashboardEntityIds(await readConfig()));
 }
