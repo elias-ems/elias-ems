@@ -198,6 +198,11 @@ test("readings keep updating without the page being reloaded", async ({
   await page.goto("./");
   await expect(page.getByText("76 %")).toBeVisible();
 
+  // The health chip. With the policy this app runs under, an old reading is
+  // shown rather than refused, so this line is the only thing standing between
+  // a stuck sensor and a number that looks perfectly current.
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
+
   // Survives a client-side refresh and not a page load, so the assertion at the
   // end can tell the two apart.
   await page.evaluate(() => {
@@ -220,6 +225,11 @@ test("readings keep updating without the page being reloaded", async ({
   expect(response.ok()).toBe(true);
 
   await expect(page.getByText("41 %")).toBeVisible({ timeout: 20_000 });
+
+  // And the chip now has a change to date it by. Before this it had none —
+  // which is the honest answer on a house where nothing has moved yet, not a
+  // gap in the display.
+  await expect(page.getByText(/last change \d+s ago/)).toBeVisible();
 
   expect(
     await page.evaluate(

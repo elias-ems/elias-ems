@@ -51,6 +51,20 @@ export type HaState = {
     unit_of_measurement?: string;
     [key: string]: unknown;
   };
+  /**
+   * When the value itself last changed, and when the state object last changed
+   * at all — the latter also moves when only an attribute did. ISO strings on
+   * Home Assistant's clock, present on everything the REST and WebSocket APIs
+   * return, and optional here only because a hand-written state in a test isn't
+   * obliged to carry them.
+   *
+   * Worth being precise about what these can and cannot tell you: neither moves
+   * when a sensor reports the same value again, so an old timestamp on a
+   * quiet sensor is normal rather than a symptom. Whether the connection is
+   * healthy is a separate question, answered in `ha-live.server.ts`.
+   */
+  last_changed?: string;
+  last_updated?: string;
 };
 
 function supervisorToken(): string {

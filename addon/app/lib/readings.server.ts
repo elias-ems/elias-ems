@@ -6,10 +6,13 @@ import type { Reading } from "./readings";
  * locale-dependent, and formatting them during render would risk the server and
  * the browser disagreeing and tripping a hydration mismatch.
  */
-export function toReading(state: HaState | null): Reading {
-  if (!state) return { display: "no such entity", ok: false };
+export function toReading(
+  state: HaState | null,
+  updatedAt: number | null = null,
+): Reading {
+  if (!state) return { display: "no such entity", ok: false, updatedAt: null };
   if (state.state === "unavailable" || state.state === "unknown") {
-    return { display: state.state, ok: false };
+    return { display: state.state, ok: false, updatedAt };
   }
 
   const value = Number(state.state);
@@ -18,7 +21,7 @@ export function toReading(state: HaState | null): Reading {
     : state.state;
   const unit = state.attributes?.unit_of_measurement;
 
-  return { display: unit ? `${shown} ${unit}` : shown, ok: true };
+  return { display: unit ? `${shown} ${unit}` : shown, ok: true, updatedAt };
 }
 
 /**

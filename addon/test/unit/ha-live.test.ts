@@ -14,6 +14,10 @@ beforeEach(async () => {
   ha = await startHaMock();
   process.env.SUPERVISOR_WS = ha.wsUrl;
   process.env.SUPERVISOR_TOKEN = ha.token;
+  // The liveness clock, compressed: 300ms between pings, so the deadlines
+  // derived from it (100ms for a pong, 150ms for a handshake) are reachable in
+  // a test rather than in the half-minute the real defaults take.
+  process.env.HA_HEARTBEAT_MS = "300";
 });
 
 afterEach(async () => {
@@ -23,6 +27,7 @@ afterEach(async () => {
   await ha.close();
   delete process.env.SUPERVISOR_WS;
   delete process.env.SUPERVISOR_TOKEN;
+  delete process.env.HA_HEARTBEAT_MS;
 });
 
 /** The state of one entity as the cache currently has it. */
@@ -105,6 +110,49 @@ describe("the live subscription", () => {
       () => expect(cached("sensor.inverter_power")).toBe("4242"),
       { timeout: 10_000 },
     );
+  });
+
+  it("hangs up on a socket that has gone mute, and comes back", async () => {
+    startHaLive();
+    await vi.waitFor(() => expect(haLiveStatus().connected).toBe(true));
+
+    // Open, and answering nothing — a dropped route, a NAT table that forgot
+    // us. No `close` will ever fire, and a quiet Home Assistant looks exactly
+    // like this, so only the unanswered ping can tell the difference.
+    ha.goSilent();
+
+    await vi.waitFor(() => expect(haLiveStatus().connected).toBe(false), {
+      timeout: 10_000,
+    });
+    expect(haLiveStatus().lastError).toMatch(/stopped answering/);
+
+    ha.stopSilent();
+    await vi.waitFor(() => expect(haLiveStatus().connected).toBe(true), {
+      timeout: 20_000,
+    });
+    expect(haLiveStatus().reconnects).toBeGreaterThan(0);
+  }, 30_000);
+
+  it("does not let an older state overwrite a newer one", async () => {
+    startHaLive();
+    await vi.waitFor(() => expect(haLiveStatus().connected).toBe(true));
+
+    ha.setState("sensor.inverter_power", "500", { unit_of_measurement: "W" });
+    await vi.waitFor(() => expect(cached("sensor.inverter_power")).toBe("500"));
+
+    // Ordering makes this impossible against a real Home Assistant, which is
+    // why it is worth pinning: a seed landing on top of a newer event would put
+    // the cache quietly in the past, and nothing downstream could tell.
+    ha.pushState({
+      entity_id: "sensor.inverter_power",
+      state: "1",
+      attributes: { unit_of_measurement: "W" },
+      last_updated: new Date(Date.now() - 60_000).toISOString(),
+      last_changed: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(cached("sensor.inverter_power")).toBe("500");
   });
 
   it("says so when the token is refused, rather than looking unreachable", async () => {

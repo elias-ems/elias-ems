@@ -1,8 +1,14 @@
 /**
- * The loop, on a fake clock against the mock Home Assistant. What matters here
- * is not the arithmetic — net-zero.test.ts owns that — but the scheduling: that
- * it only runs when it is meant to, at the interval it was told, and that it
- * survives the things that will actually go wrong in a house.
+ * The loop, against the mock Home Assistant. What matters here is not the
+ * arithmetic — net-zero.test.ts owns that — but the scheduling: that it runs
+ * when a reading it cares about moves, no more often than it was told to, and
+ * that it survives the things that will actually go wrong in a house.
+ *
+ * Two clocks in play, deliberately. The event-driven cases run on the real one,
+ * because they turn on a WebSocket message arriving and no fake timer can hurry
+ * real I/O along; the cases about elapsed time use fake timers with the
+ * subscription pointed somewhere unreachable, so the loop is on its REST path
+ * and nothing is waiting on a socket.
  */
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -34,6 +40,11 @@ import {
   syncControlLoop,
 } from "../../app/lib/control-loop.server";
 import { saveGrid } from "../../app/lib/grid.server";
+import {
+  haLiveStatus,
+  startHaLive,
+  stopHaLive,
+} from "../../app/lib/ha-live.server";
 import { defaultStates, startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
@@ -41,6 +52,14 @@ let dataDir: string;
 
 /** Nothing listens on port 1, so a request there fails immediately. */
 const UNREACHABLE_API = "http://127.0.0.1:1/core/api";
+const UNREACHABLE_WS = "ws://127.0.0.1:1/core/websocket";
+
+/** Brings the subscription up and waits for its seed, for the live-path cases. */
+async function subscribe(): Promise<void> {
+  process.env.SUPERVISOR_WS = ha.wsUrl;
+  startHaLive();
+  await vi.waitFor(() => expect(haLiveStatus().connected).toBe(true));
+}
 
 const GRID = { powerEntityId: "sensor.grid_power" };
 
@@ -103,6 +122,10 @@ afterAll(async () => {
 
 beforeEach(async () => {
   process.env.SUPERVISOR_API = ha.apiUrl;
+  // Unreachable unless a case asks for the subscription: the loop's REST path
+  // is what most of these are about, and a socket nobody wanted would only add
+  // reconnect timers to whatever clock the case is running.
+  process.env.SUPERVISOR_WS = UNREACHABLE_WS;
   ha.setStates(await defaultStates());
   for (const battery of await listBatteries()) await removeBattery(battery.id);
   await saveGrid(GRID);
@@ -114,6 +137,7 @@ afterEach(() => {
   // Order matters: the loop has to be torn down while its fake timers still
   // exist, or the interval outlives the clock that was driving it.
   resetControlLoop();
+  stopHaLive();
   vi.useRealTimers();
 });
 
@@ -160,7 +184,7 @@ describe("syncControlLoop", () => {
     expect(messages()).toEqual([]);
   });
 
-  it("starts, ticks immediately, and then ticks on the interval", async () => {
+  it("ticks at once when it is switched on", async () => {
     vi.useFakeTimers();
     await addBattery(BATTERY);
     await saveControlConfig({
@@ -173,17 +197,105 @@ describe("syncControlLoop", () => {
     expect(status.running).toBe(true);
     expect(status.intervalSeconds).toBe(5);
 
-    // The first tick fires at once: someone who has just enabled the strategy
-    // should not have to wait a silent interval to see whether it works.
+    // Someone who has just enabled the strategy should not have to wait for the
+    // house to do something before finding out whether it works.
     await pendingControlTick();
     expect(decisionTicks()).toBe(1);
+  });
 
-    // Four seconds is not yet due; the fifth is.
-    await advance(4_000);
-    expect(decisionTicks()).toBe(1);
+  it("ticks when a reading it watches moves, without waiting for a clock", async () => {
+    await subscribe();
+    await addBattery(BATTERY);
+    await saveControlConfig({
+      enabled: true,
+      strategy: "net-zero-energy",
+      intervalSeconds: 1,
+    });
 
-    await advance(1_500);
-    expect(decisionTicks()).toBe(2);
+    await syncControlLoop();
+    await pendingControlTick();
+    expect(logged("importing")).toBe(true);
+    clearControlLog();
+
+    // Home Assistant says the meter has swung to export. Nothing here asks it
+    // anything; the decision is a consequence of being told.
+    ha.setState("sensor.grid_power", "-1500", { unit_of_measurement: "W" });
+
+    await vi.waitFor(() => expect(logged("exporting")).toBe(true), {
+      timeout: 5_000,
+    });
+  });
+
+  it("ignores changes to entities it doesn't use", async () => {
+    await subscribe();
+    await addBattery(BATTERY);
+    await saveControlConfig({
+      enabled: true,
+      strategy: "net-zero-energy",
+      intervalSeconds: 1,
+    });
+    await syncControlLoop();
+    await pendingControlTick();
+
+    const before = decisionTicks();
+    // A light in the hallway is a state change like any other. Every one of
+    // them reaching the strategy would make the loop as busy as the house.
+    ha.setState("light.hallway", "on", {});
+
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(decisionTicks()).toBe(before);
+  });
+
+  it("holds to its interval under a burst, and still acts on the last change", async () => {
+    await subscribe();
+    await addBattery(BATTERY);
+    await saveControlConfig({
+      enabled: true,
+      strategy: "net-zero-energy",
+      intervalSeconds: 2,
+    });
+    await syncControlLoop();
+    await pendingControlTick();
+
+    const before = decisionTicks();
+
+    // Three changes inside the window that the tick above just opened. An
+    // inverter and its meter reporting together look exactly like this.
+    ha.setState("sensor.grid_power", "100", { unit_of_measurement: "W" });
+    ha.setState("sensor.grid_power", "200", { unit_of_measurement: "W" });
+    ha.setState("sensor.grid_power", "-3000", { unit_of_measurement: "W" });
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(decisionTicks(), "the rate limit should still be holding").toBe(
+      before,
+    );
+
+    // And when it lifts, exactly one tick — on the newest reading, not the one
+    // that happened to arrive first.
+    await vi.waitFor(() => expect(decisionTicks()).toBe(before + 1), {
+      timeout: 5_000,
+    });
+    expect(logged("Grid net -3000 W (exporting)")).toBe(true);
+  });
+
+  it("keeps ticking when nothing in the house is moving", async () => {
+    vi.useFakeTimers();
+    await addBattery(BATTERY);
+    await saveControlConfig({
+      enabled: true,
+      strategy: "net-zero-energy",
+      intervalSeconds: 5,
+    });
+    await syncControlLoop();
+    await pendingControlTick();
+
+    const before = decisionTicks();
+
+    // Nothing has changed, so nothing has been pushed. Without the idle tick a
+    // living loop and a dead one would look identical from the log.
+    await advance(61_000);
+
+    expect(decisionTicks()).toBe(before + 1);
   });
 
   it("stops the loop when control is switched off", async () => {
@@ -214,7 +326,7 @@ describe("syncControlLoop", () => {
   });
 
   it("picks up a changed interval", async () => {
-    vi.useFakeTimers();
+    await subscribe();
     await addBattery(BATTERY);
     await saveControlConfig({
       enabled: true,
@@ -224,21 +336,21 @@ describe("syncControlLoop", () => {
     await syncControlLoop();
     await pendingControlTick();
 
+    // Under the old sixty-second limit this change would wait a minute.
     await saveControlConfig({
       enabled: true,
       strategy: "net-zero-energy",
-      intervalSeconds: 5,
+      intervalSeconds: 1,
     });
     await syncControlLoop();
     await pendingControlTick();
     clearControlLog();
 
-    await advance(5_500);
-    await advance(5_000);
+    ha.setState("sensor.grid_power", "-1500", { unit_of_measurement: "W" });
 
-    // Two more ticks inside eleven seconds, which the old sixty-second schedule
-    // would not have produced.
-    expect(decisionTicks()).toBe(2);
+    await vi.waitFor(() => expect(logged("exporting")).toBe(true), {
+      timeout: 5_000,
+    });
   });
 
   it("leaves a running loop alone when nothing about it changed", async () => {
@@ -279,9 +391,32 @@ describe("syncControlLoop", () => {
     // A loop that dies on the first outage is worse than none, because from the
     // outside it still looks like it is working.
     process.env.SUPERVISOR_API = ha.apiUrl;
-    await advance(5_500);
+    await advance(61_000);
 
     expect(logged("Grid net +842 W (importing)")).toBe(true);
+  });
+});
+
+describe("where a tick's numbers came from", () => {
+  it("says REST, and how old the readings were, when there is no subscription", async () => {
+    await addBattery(BATTERY);
+
+    await runControlTick();
+
+    expect(logged("via REST")).toBe(true);
+    expect(logged("oldest reading")).toBe(true);
+  });
+
+  it("reads the cache without asking Home Assistant again", async () => {
+    await subscribe();
+    await addBattery(BATTERY);
+
+    const before = ha.requests.length;
+    await runControlTick();
+
+    expect(logged("via live cache")).toBe(true);
+    // The point of the whole exercise: a decision that costs no round trip.
+    expect(ha.requests.length).toBe(before);
   });
 });
 

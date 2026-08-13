@@ -15,12 +15,12 @@ import type { Battery } from "./batteries";
 import { listBatteries } from "./batteries.server";
 import { type Grid, isGridConfigured } from "./grid";
 import { readGrid } from "./grid.server";
-import { fetchHaState, type HaState } from "./ha.server";
-import { liveStates } from "./ha-live.server";
+import { haLiveStatus } from "./ha-live.server";
 import type { PvEntity } from "./pv-entities";
 import { listPvEntities } from "./pv-entities.server";
-import type { Reading } from "./readings";
+import type { LiveHealth, Reading } from "./readings";
 import { toReading } from "./readings.server";
+import { readingAge, readStates } from "./states.server";
 
 export type DashboardReadings = {
   arrays: Array<{
@@ -43,6 +43,8 @@ export type DashboardReadings = {
   }>;
   /** Why the readings are missing, when they are. Null when all is well. */
   error: string | null;
+  /** How these readings reached us, and how well that path is working. */
+  health: LiveHealth;
 };
 
 /** The stored configuration everything on the page is derived from. */
@@ -94,39 +96,6 @@ function dashboardEntityIds({
   ].filter((id): id is string => Boolean(id));
 }
 
-/**
- * Reads every entity the page needs, deduplicated — the same sensor can
- * legitimately be configured in two places.
- *
- * The live subscription answers when it can, from memory and with no round
- * trip at all. It cannot always: the socket takes a moment to come up after a
- * restart, and outside Home Assistant it never does. The REST fallback is what
- * makes those cases a normal page rather than an empty one.
- *
- * A Home Assistant that can't be reached is reported once, for the whole page,
- * rather than turning into one failure per card: the cause is the same for all
- * of them, and every reading falls back to "—".
- */
-async function readStates(ids: string[]): Promise<{
-  states: Map<string, HaState | null>;
-  error: string | null;
-}> {
-  const unique = [...new Set(ids)];
-
-  const live = liveStates(unique);
-  if (live) return { states: live, error: null };
-
-  try {
-    const entries = await Promise.all(
-      unique.map(async (id) => [id, await fetchHaState(id)] as const),
-    );
-    return { states: new Map(entries), error: null };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { states: new Map(), error: message };
-  }
-}
-
 export async function readDashboard(): Promise<DashboardReadings> {
   const config = await readConfig();
   const { pvEntities, grid, batteries } = config;
@@ -135,8 +104,12 @@ export async function readDashboard(): Promise<DashboardReadings> {
 
   // Null rather than a reading when the read never happened, so the card shows
   // a dash instead of claiming the entity is missing.
-  const reading = (id: string) =>
-    states.has(id) ? toReading(states.get(id) ?? null) : null;
+  const reading = (id: string) => {
+    const read = states.get(id);
+    return read ? toReading(read.state, read.updatedAt) : null;
+  };
+
+  const status = haLiveStatus();
 
   return {
     arrays: pvEntities.map((entity) => ({
@@ -158,6 +131,14 @@ export async function readDashboard(): Promise<DashboardReadings> {
       energy: reading(battery.energyEntityId),
     })),
     error,
+    health: {
+      connected: status.connected,
+      lastEventAt: status.lastEventAt,
+      connectedSince: status.connectedSince,
+      lastError: status.lastError,
+      reconnects: status.reconnects,
+      source: readingAge(states).source,
+    },
   };
 }
 

@@ -118,4 +118,33 @@ describe("GET /api/readings behind ingress", () => {
 
     for (const stream of streams) await stream.return(undefined);
   });
+
+  /**
+   * Last, because it takes the subscription down: anything after it would be
+   * racing the reconnect.
+   */
+  it("carries the health of the connection the readings arrived through", async () => {
+    const response = await fetch(`${stack.baseUrl}api/readings`);
+    const stream = messages(response);
+
+    const first = await stream.next();
+    expect(first.value.health).toMatchObject({
+      connected: true,
+      source: "live",
+    });
+
+    // Home Assistant restarts. The readings keep coming — over REST now — and
+    // the page has to be able to say which, or a degraded connection is
+    // indistinguishable from a healthy one.
+    stack.ha.dropSockets();
+
+    const degraded = await stream.next();
+    expect(degraded.value.health).toMatchObject({
+      connected: false,
+      source: "rest",
+    });
+    expect(degraded.value.grid.power.ok).toBe(true);
+
+    await stream.return(undefined);
+  });
 });

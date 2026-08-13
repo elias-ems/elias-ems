@@ -139,7 +139,9 @@ Two modules do it, both through the Supervisor's proxy and both authenticated wi
 
 Neither the token nor the `supervisor` hostname exists outside HA, so all of it fails locally by design; the UI degrades to a message rather than erroring.
 
-To develop against real-looking data, start [addon/test/ha-mock.js](addon/test/ha-mock.js), which serves both halves, then set `SUPERVISOR_API` to its `apiUrl`, `SUPERVISOR_WS` to its `wsUrl` and `SUPERVISOR_TOKEN` to its token. Unset, those default to the real `http://supervisor/core/api` and `ws://supervisor/core/websocket`. `HA_TIMEOUT_MS` overrides the REST deadline, which exists so a test can reach it in milliseconds.
+To develop against real-looking data, start [addon/test/ha-mock.js](addon/test/ha-mock.js), which serves both halves, then set `SUPERVISOR_API` to its `apiUrl`, `SUPERVISOR_WS` to its `wsUrl` and `SUPERVISOR_TOKEN` to its token. Unset, those default to the real `http://supervisor/core/api` and `ws://supervisor/core/websocket`.
+
+Two deadlines are overridable, both so a test can reach them in milliseconds rather than in half a minute: `HA_TIMEOUT_MS` for the REST request deadline, and `HA_HEARTBEAT_MS` for the WebSocket's liveness clock — the ping period, with the pong deadline (a third of it) and the handshake deadline (half of it) derived from that one number so they cannot drift into a combination that makes no sense.
 
 `addon/test/` holds the harness (`ha-mock.js`, `ingress-proxy.js`, `stack.js`, `dev.js`) alongside the suites in `unit/`, `integration/`, and `e2e/`. The harness files are plain JavaScript for the same reason `server.js` is: node runs them directly, with no build step in front.
 

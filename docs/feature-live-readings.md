@@ -20,6 +20,12 @@ Core's WebSocket API, reachable because [config.yaml](../addon/config.yaml) sets
 REST calls use. Node 24 has a global `WebSocket` client, so nothing ships to make
 this work.
 
+Everything that reads a state goes through
+[`states.server.ts`](../addon/app/lib/states.server.ts), which answers from that
+cache when it can and falls back to REST when it can't. Both the dashboard and
+the control loop use it, so "where did this number come from, and how old is it"
+has one answer rather than one per caller.
+
 The handshake is Home Assistant's: it sends `auth_required`, we answer with the
 token, it answers `auth_ok`. Then two messages:
 
@@ -38,6 +44,71 @@ stops answering — `liveStates()` returns null — and readers fall back to RES
 
 One subscription serves every browser. Two open dashboards do not mean two
 sockets.
+
+### Proving the connection is alive
+
+A socket that closes is the easy failure. The hard one is a connection that dies
+without either end noticing — a dropped route, a NAT table that forgot us —
+because a half-open TCP socket never fires `close` and never errors. Home
+Assistant sends nothing at all when nothing changes, so **silence on a healthy
+connection and silence on a dead one are the same silence**.
+
+Two watchdogs close that gap, both derived from one number (`HA_HEARTBEAT_MS`,
+30s by default, and overridable so a test can reach these deadlines in
+milliseconds):
+
+| Watchdog | Fires after | Catches |
+| --- | --- | --- |
+| Ping/pong | a ping every 30s, answer due within 10s | a connection that went mute while open |
+| Handshake | 15s from opening | a socket that is accepted and then never spoken on — the heartbeat hasn't started yet, so nothing else would notice |
+
+Either one closes the socket, which drops it into the same reconnect path as an
+ordinary disconnect.
+
+## How old is this number?
+
+Two different questions, deliberately answered by two different things. Confusing
+them produces a system that either trusts stale data or refuses to act on good
+data.
+
+| | Question | Where it comes from |
+| --- | --- | --- |
+| **Link health** | Is our picture of the house current? | `haLiveStatus()` — connected, last event, last pong, reconnect count |
+| **Entity age** | When did *this* value last change? | the state's own `last_updated`, carried on every `Reading` |
+
+The trap is that **`last_updated` only moves when a value changes**. A battery
+parked at exactly 0 W overnight emits no `state_changed` event at all, so its age
+grows while nothing whatsoever is wrong. Home Assistant's `last_reported` and its
+`state_reported` event answer this precisely, but that event is high-volume by
+design, cannot be subscribed to broadly, and needs per-entity filters — so it is
+not used here.
+
+The consequence: **ages are advisory**. Nothing refuses to act on an old reading.
+Home Assistant's own `unavailable` and `unknown` remain the only states that stop
+a decision, which `toNumber()` in
+[`readings.server.ts`](../addon/app/lib/readings.server.ts) has always handled.
+
+That policy is only safe if a person can see what the machine is ignoring, which
+is what the health chip is for.
+
+## The health chip
+
+[`LiveStatus.tsx`](../addon/app/components/LiveStatus.tsx) sits above the
+readings and says one of three things:
+
+| Chip | Means |
+| --- | --- |
+| **Live** · last change 3s ago | The subscription is up and the stream is delivering. With no changes yet, it dates itself by how long the link has been up instead. |
+| **Reconnecting** · showing values read on request | The WebSocket is down. Readings still appear — over REST — which is exactly why this needs saying. |
+| **Polling** · live updates aren't getting through | The server is fine; the browser's stream isn't. The page is revalidating every 5s instead. |
+
+Hovering a reading shows when that particular value last changed, as an absolute
+timestamp. The relative form ("3s ago") is rendered client-side only: a relative
+time computed on the server is already wrong when it arrives, and rendering a
+different string on hydration is the mismatch React warns about.
+
+The debug box carries the detail — connected or not, last change seen, which
+source the readings came from, reconnect count, last error.
 
 ## The add-on → the browser
 
@@ -91,7 +162,11 @@ purely for that server half; node ships the client, which is the half the add-on
 uses.
 
 - `test/unit/ha-live.test.ts` — the handshake, the seed, an applied event, an
-  entity removed, a reconnect that re-reads what it missed, and a refused token.
+  entity removed, a reconnect that re-reads what it missed, a refused token, an
+  out-of-order event that must not overwrite a newer one, and — via the mock's
+  `goSilent()` — a socket that goes mute without closing.
+- `test/unit/states.test.ts` — that both sources produce the same answer and say
+  which they are, and that a freshly fetched old reading is still reported as old.
 - `test/unit/dashboard.test.ts` — that the cache and REST produce the same page,
   and that the cache costs no round trip.
 - `test/integration/readings-stream.test.ts` — the stream through the ingress

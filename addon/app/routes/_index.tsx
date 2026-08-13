@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useHref, useRevalidator } from "react-router";
 import DebugBox from "../components/DebugBox";
 import { headingStyle, hintStyle, rowStyle } from "../components/form";
+import LiveStatus from "../components/LiveStatus";
 import Measurement from "../components/Measurement";
 import { readControlConfig } from "../lib/control-config.server";
 import { readControlLog } from "../lib/control-log.server";
@@ -149,7 +150,7 @@ export default function Index({ loaderData }: Route.ComponentProps) {
 
   // The stream's readings once it has sent any, the loader's until then. Both
   // are built by the same function on the server, so they are interchangeable.
-  const { arrays, grid, batteries, error } = readings ?? loaderData;
+  const { arrays, grid, batteries, error, health } = readings ?? loaderData;
 
   const hasReadings =
     arrays.length > 0 || grid.configured || batteries.length > 0;
@@ -162,6 +163,8 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   return (
     <main style={{ padding: "2rem", maxWidth: 640 }}>
       <h1>Home</h1>
+
+      {hasReadings && <LiveStatus health={health} streaming={streaming} />}
 
       {error && (
         <p style={{ fontSize: "0.875rem", color: "var(--color-text-muted)" }}>
@@ -215,12 +218,13 @@ export default function Index({ loaderData }: Route.ComponentProps) {
         <h2 style={headingStyle}>Battery control</h2>
         <p style={{ ...hintStyle, marginTop: "0.35rem" }}>
           {control.enabled
-            ? `Running the ${control.status.strategy} strategy every ${control.status.intervalSeconds}s.`
+            ? `Running the ${control.status.strategy} strategy whenever a reading changes, at most every ${control.status.intervalSeconds}s.`
             : "Disabled."}{" "}
           <Link to="/settings">Settings</Link>
         </p>
         <DebugBox
           initial={{ status: control.status, entries: control.entries }}
+          health={health}
         />
       </section>
     </main>

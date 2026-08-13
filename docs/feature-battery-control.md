@@ -68,7 +68,7 @@ above the ceiling.
 | --- | --- | --- |
 | `enabled` | `false` | |
 | `strategy` | `"net-zero-energy"` | the only strategy so far |
-| `intervalSeconds` | `5` | 1–3600 |
+| `intervalSeconds` | `5` | 1–3600. A floor between ticks, not a schedule — see [The loop](#the-loop). |
 
 The strategy is stored as an id rather than a boolean so that the price-aware
 strategies on the [roadmap](roadmap.md) are additive: one more entry in
@@ -131,9 +131,23 @@ the inverter can deliver. That matters once something acts on the number; see
 
 In [addon/app/lib/control-loop.server.ts](../addon/app/lib/control-loop.server.ts).
 
-- One interval in the add-on's Node process. Module-level state is the right
-  shape for it: the server build is loaded once per process, so "one loop per
-  add-on" and "one module instance" are the same statement.
+- Module-level state, for the same reason as the subscription it reads from: the
+  server build is loaded once per process, so "one loop per add-on" and "one
+  module instance" are the same statement.
+- **Home Assistant decides when there is something to decide about.** The loop
+  subscribes to the live cache
+  ([feature-live-readings.md](feature-live-readings.md)) and ticks when one of
+  *its* entities changes — the grid sensor, or a battery's SoC or power. A meter
+  that swings is acted on in the time it takes the event to arrive, rather than
+  up to a full interval later.
+- `intervalSeconds` is now a **rate limit**, not a schedule: at most one tick per
+  interval, leading edge. Changes arriving inside that window schedule one tick
+  for when it closes, so the last change before a lull is never the one that gets
+  swallowed — a decision standing on a reading nobody looked at again is exactly
+  the failure worth avoiding.
+- A **60s idle tick** runs regardless. A quiet house produces no events and would
+  otherwise produce no ticks, which from outside is indistinguishable from a loop
+  that has died. It reads memory and costs nothing.
 - **Started at boot** from
   [addon/app/entry.server.tsx](../addon/app/entry.server.tsx), which is the only
   module the framework loads exactly once when the server starts. Deliberately
@@ -142,8 +156,19 @@ In [addon/app/lib/control-loop.server.ts](../addon/app/lib/control-loop.server.t
 - Saving the control form calls `syncControlLoop()` again, so ticking the box
   takes effect immediately rather than at the next restart — waiting for one
   would be indistinguishable from the feature not working.
-- Each tick reads the grid and battery entities in one round of parallel
-  requests, runs the strategy, and appends **one** entry to the log.
+- Each tick reads its entities through
+  [states.server.ts](../addon/app/lib/states.server.ts) — from the live cache,
+  with no round trip at all, or over REST when the subscription isn't up — runs
+  the strategy, and appends **one** entry to the log.
+- **Ages are advisory.** The log line names its source and the age of the oldest
+  reading it used, and then decides anyway. Nothing refuses to act on an old
+  number, because a sensor holding a steady value emits no events and would look
+  identical to a broken one; `unavailable` and `unknown` remain the only states
+  that stop a decision. That makes the log, and the health chip on the home page,
+  the things a stuck sensor actually shows up in.
+- A Home Assistant that cannot be reached at all is different, and still raises:
+  one `Tick failed` line rather than a stream of ticks that read like an idle
+  house when the truth is that nobody asked it anything.
 - A tick that is still waiting on Home Assistant blocks the next one from
   starting rather than letting them pile up. The interval can be as short as a
   second and an unreachable HA takes far longer than that to give up.
@@ -166,10 +191,14 @@ is far too slow to watch a five-second loop with. Closed, the box costs nothing.
 A tick looks like this:
 
 ```
-22:50:57 Grid net +842 W (importing), batteries at 0 W → discharge 842 W total.
+22:50:57 Grid net +842 W (importing), batteries at 0 W → discharge 842 W total. (via live cache, oldest reading 3s)
          Home battery: discharge at 561 W (SoC 76%, 6.6 kWh to 10%)
          Garage battery: discharge at 281 W (SoC 76%, 2.8 kWh to 20%)
 ```
+
+The clause in brackets is the provenance: which source the numbers came from and
+how old the oldest of them was. Since nothing refuses to act on an old reading,
+this line is where a sensor that quietly stopped reporting becomes visible.
 
 The whole tick is **one** entry rather than one per line. Identical consecutive
 entries collapse into a `×N` repeat count, and a house that isn't doing anything
@@ -213,15 +242,18 @@ concatenation.
 | `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split |
 | `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
-| `test/unit/control-loop.test.ts` | scheduling, on a fake clock: starts only when enabled, ticks immediately then on the interval, picks up a changed interval, leaves an unchanged loop alone, survives an outage |
+| `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, and names the source and age of what it read |
 | `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/control-log` |
 | `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy |
 | `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves |
 | `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the debug box fill |
 
-The loop tests need one non-obvious thing: a fake clock can move the interval
-along, but it cannot make real I/O land. `pendingControlTick()` exposes the tick
-currently in flight so a test can wait for it.
+The loop tests run on two clocks on purpose. The event-driven cases use the real
+one, because they turn on a WebSocket message arriving and no fake timer can
+hurry real I/O along; the cases about elapsed time use fake timers with the
+subscription pointed somewhere unreachable, so the loop is on its REST path and
+nothing is waiting on a socket. Either way `pendingControlTick()` exposes the
+tick currently in flight, since advancing a clock only *starts* one.
 
 ## Not done yet
 

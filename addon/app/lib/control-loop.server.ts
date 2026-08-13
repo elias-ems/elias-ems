@@ -21,62 +21,123 @@ import { readControlConfig } from "./control-config.server";
 import { appendControlLog } from "./control-log.server";
 import { isGridConfigured } from "./grid";
 import { readGrid } from "./grid.server";
-import { fetchHaState } from "./ha.server";
+import { onHaChange } from "./ha-live.server";
 import { type BatterySnapshot, planNetZero } from "./net-zero";
 import { toNumber } from "./readings.server";
+import { readingAge, readStates } from "./states.server";
+
+/**
+ * How often a tick happens when nothing at all is moving.
+ *
+ * Ticks are driven by Home Assistant now, so a house doing nothing produces no
+ * events and would otherwise produce no ticks — which is indistinguishable, from
+ * the outside, from a loop that has died. This is what keeps `lastTickAt` and
+ * the debug log honest. It reads memory and costs nothing.
+ */
+const IDLE_TICK_MS = 60_000;
 
 type LoopState = {
+  /** The idle heartbeat. Its presence is also what "the loop is running" means. */
   timer: ReturnType<typeof setInterval> | null;
+  /** Unsubscribes from Home Assistant's changes; null when the loop is stopped. */
+  unsubscribe: (() => void) | null;
   config: ControlConfig | null;
   /** The tick currently awaiting Home Assistant, if any. Doubles as the overlap guard. */
   inFlight: Promise<void> | null;
   lastTickAt: string | null;
+  /** When the last tick started, for the rate limit — monotonic-ish, not for display. */
+  lastTickStartedAt: number | null;
+  /** Set when changes arrived too soon after a tick and one is owed. */
+  trailing: ReturnType<typeof setTimeout> | null;
+  /** The entities whose changes should provoke a tick. */
+  watched: Set<string>;
 };
 
 const state: LoopState = {
   timer: null,
+  unsubscribe: null,
   config: null,
   inFlight: null,
   lastTickAt: null,
+  lastTickStartedAt: null,
+  trailing: null,
+  watched: new Set(),
 };
 
-/** Everything the strategies need, read fresh each tick. */
+/** The entities a tick is built from — the loop's own, smaller than the page's. */
+async function controlEntityIds(): Promise<string[]> {
+  const [grid, batteries] = await Promise.all([readGrid(), listBatteries()]);
+
+  return [
+    ...(isGridConfigured(grid) ? [grid.powerEntityId] : []),
+    ...batteries.flatMap((battery) => [
+      battery.socEntityId,
+      battery.powerEntityId,
+    ]),
+  ].filter(Boolean);
+}
+
+/**
+ * Everything the strategies need, read fresh each tick.
+ *
+ * Through the same reader the dashboard uses, so a decision and the page agree
+ * about what the house is doing: the live subscription answers from memory, and
+ * REST covers the moment before it is up. The fan-out of one request per entity
+ * is now the exception rather than every tick.
+ */
 async function readSnapshots(): Promise<{
   gridPowerW: number | null;
   batteries: BatterySnapshot[];
   gridConfigured: boolean;
+  provenance: string;
 }> {
   const [grid, batteries] = await Promise.all([readGrid(), listBatteries()]);
   const gridConfigured = isGridConfigured(grid);
 
-  // One round of requests rather than a serial walk: at a five-second interval
-  // a handful of sequential fetches would eat a visible slice of the budget.
-  const [gridPower, batteryStates] = await Promise.all([
-    gridConfigured ? fetchHaState(grid.powerEntityId) : null,
-    Promise.all(
-      batteries.map(async (battery) => {
-        const [soc, power] = await Promise.all([
-          fetchHaState(battery.socEntityId),
-          fetchHaState(battery.powerEntityId),
-        ]);
-        return { battery, soc, power };
-      }),
-    ),
-  ]);
+  const { states, error } = await readStates(await controlEntityIds());
+
+  // The page can render dashes when Home Assistant is unreachable; a decision
+  // cannot be made out of them. Raising it here turns the outage into one
+  // "Tick failed" line and keeps the schedule, rather than a stream of ticks
+  // that read like the house is idle when the truth is that nobody asked it.
+  if (error) throw new Error(error);
+
+  const stateOf = (id: string) => states.get(id)?.state ?? null;
 
   return {
     gridConfigured,
-    gridPowerW: toNumber(gridPower),
-    batteries: batteryStates.map(({ battery, soc, power }) => ({
+    gridPowerW: gridConfigured ? toNumber(stateOf(grid.powerEntityId)) : null,
+    batteries: batteries.map((battery) => ({
       id: battery.id,
       title: battery.title,
       capacityKwh: battery.capacityKwh,
       minChargePercent: battery.minChargePercent,
       maxChargePercent: battery.maxChargePercent,
-      socPercent: toNumber(soc),
-      powerW: toNumber(power),
+      socPercent: toNumber(stateOf(battery.socEntityId)),
+      powerW: toNumber(stateOf(battery.powerEntityId)),
     })),
+    provenance: describeSource(states),
   };
+}
+
+/**
+ * Where this tick's numbers came from and how old the oldest of them is, as one
+ * clause for the log.
+ *
+ * Ages do not gate anything — a sensor holding the same value emits no events,
+ * so an old reading on a quiet house is normal and refusing to decide on it
+ * would be worse than useless. This line is how a genuinely stuck sensor
+ * becomes visible instead: nothing else is watching, so the log has to be
+ * legible enough that a person can.
+ */
+function describeSource(states: Parameters<typeof readingAge>[0]): string {
+  const { source, oldestSeconds } = readingAge(states);
+  if (!source) return "no readings";
+
+  const via = source === "live" ? "live cache" : "REST";
+  return oldestSeconds === null
+    ? `via ${via}`
+    : `via ${via}, oldest reading ${oldestSeconds}s`;
 }
 
 /**
@@ -103,7 +164,7 @@ export async function runControlTick(): Promise<void> {
   // repeated-line collapsing never gets two identical entries in a row and the
   // buffer fills with near-duplicates instead of holding useful history.
   const lines = [
-    plan.summary,
+    `${plan.summary} (${inputs.provenance})`,
     ...plan.warnings.map((warning) => `! ${warning}`),
     ...plan.decisions.map((decision) => decision.message),
   ];
@@ -135,6 +196,7 @@ function startTick(): void {
     return;
   }
 
+  state.lastTickStartedAt = Date.now();
   state.inFlight = runControlTick()
     .catch((error: unknown) => {
       // Home Assistant restarting, a revoked token, a network blip: log it and
@@ -145,7 +207,51 @@ function startTick(): void {
     })
     .finally(() => {
       state.inFlight = null;
+      void refreshWatched();
     });
+}
+
+/**
+ * Keeps the watched set in step with the configuration. Cheap enough to redo
+ * after each tick, and doing it there means saving settings takes effect on the
+ * next one rather than needing the loop restarted.
+ */
+async function refreshWatched(): Promise<void> {
+  try {
+    state.watched = new Set(await controlEntityIds());
+  } catch {
+    // A missing or unreadable config file is already the settings pages's
+    // problem to report; the previous set stays in force until it is fixed.
+  }
+}
+
+/**
+ * A change arrived. Tick now if the rate limit allows, otherwise owe one.
+ *
+ * Leading edge, so the first change after a quiet spell is acted on at once —
+ * that immediacy is the whole reason for driving this from events. The trailing
+ * tick is what stops the *last* change before a lull from being the one that
+ * gets swallowed, which would leave a decision standing on a reading nobody
+ * looked at again.
+ */
+function requestTick(): void {
+  const intervalMs = (state.config?.intervalSeconds ?? 5) * 1000;
+  const since =
+    state.lastTickStartedAt === null
+      ? Number.POSITIVE_INFINITY
+      : Date.now() - state.lastTickStartedAt;
+
+  if (since >= intervalMs) {
+    startTick();
+    return;
+  }
+
+  if (state.trailing) return;
+  state.trailing = setTimeout(() => {
+    state.trailing = null;
+    startTick();
+  }, intervalMs - since);
+  state.trailing.unref?.();
 }
 
 /**
@@ -158,6 +264,12 @@ export function pendingControlTick(): Promise<void> {
 }
 
 export function stopControlLoop(): void {
+  state.unsubscribe?.();
+  state.unsubscribe = null;
+
+  if (state.trailing) clearTimeout(state.trailing);
+  state.trailing = null;
+
   if (!state.timer) return;
   clearInterval(state.timer);
   state.timer = null;
@@ -191,10 +303,20 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   stopControlLoop();
   appendControlLog(
     "info",
-    `Battery control enabled — ${config.strategy} every ${config.intervalSeconds}s.`,
+    `Battery control enabled — ${config.strategy}, on every change and at most every ${config.intervalSeconds}s.`,
   );
 
-  state.timer = setInterval(startTick, config.intervalSeconds * 1000);
+  await refreshWatched();
+
+  // Home Assistant decides when there is something new to decide about. The
+  // interval is now a ceiling on how often that can produce a tick rather than
+  // the thing that produces them, so a grid reading that moves is acted on in
+  // the time it takes to arrive instead of up to a full interval later.
+  state.unsubscribe = onHaChange((changed) => {
+    if (changed === null || state.watched.has(changed)) requestTick();
+  });
+
+  state.timer = setInterval(startTick, IDLE_TICK_MS);
   // Nothing here should be what keeps Node alive; the HTTP server is. Without
   // this a test that forgets to stop the loop hangs the whole run.
   state.timer.unref?.();
@@ -222,4 +344,6 @@ export function resetControlLoop(): void {
   state.config = null;
   state.inFlight = null;
   state.lastTickAt = null;
+  state.lastTickStartedAt = null;
+  state.watched = new Set();
 }

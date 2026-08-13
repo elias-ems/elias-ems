@@ -41,22 +41,47 @@ export type HaLiveStatus = {
   /** Why the last attempt ended, kept while reconnecting so it can be shown. */
   lastError: string | null;
   connectedSince: string | null;
+  /**
+   * When Home Assistant last told us anything moved, and when it last answered
+   * a ping. Between them they are the honest answer to "is our picture of the
+   * house current?" — which no entity's own timestamp can give, because a quiet
+   * house produces no events at all.
+   */
+  lastEventAt: string | null;
+  lastPongAt: string | null;
+  /** How many times the connection has had to be rebuilt this process. */
+  reconnects: number;
+};
+
+/** A cached state, with when we heard it — our clock, not Home Assistant's. */
+type Cached = {
+  state: HaState;
+  receivedAt: number;
 };
 
 type Live = {
   socket: WebSocket | null;
   /** True only between a successful seed and the socket closing. */
   ready: boolean;
-  states: Map<string, HaState>;
+  states: Map<string, Cached>;
   listeners: Set<(changed: HaChange) => void>;
   /** Message ids are per connection and must ascend; both sides rely on it. */
   nextId: number;
   seedId: number | null;
   subscriptionId: number | null;
+  pingId: number | null;
+  heartbeat: ReturnType<typeof setInterval> | null;
+  /** Runs out if a pong doesn't come back, which is the only sign of a mute socket. */
+  pongDeadline: ReturnType<typeof setTimeout> | null;
+  /** The same, for a connection that opens and then says nothing at all. */
+  handshakeDeadline: ReturnType<typeof setTimeout> | null;
   retry: ReturnType<typeof setTimeout> | null;
   attempts: number;
+  reconnects: number;
   lastError: string | null;
   connectedSince: string | null;
+  lastEventAt: number | null;
+  lastPongAt: number | null;
 };
 
 const live: Live = {
@@ -67,15 +92,63 @@ const live: Live = {
   nextId: 1,
   seedId: null,
   subscriptionId: null,
+  pingId: null,
+  heartbeat: null,
+  pongDeadline: null,
+  handshakeDeadline: null,
   retry: null,
   attempts: 0,
+  reconnects: 0,
   lastError: null,
   connectedSince: null,
+  lastEventAt: null,
+  lastPongAt: null,
 };
 
 /** Backoff bounds. A restarting Home Assistant is back in seconds; a missing one never is. */
 const FIRST_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 30_000;
+
+/**
+ * How often to ask Home Assistant whether it is still there, and how long to
+ * wait for the answer.
+ *
+ * The reconnect logic below hangs off the socket's `close` event, which covers
+ * a Home Assistant that goes away politely. It does not cover a connection that
+ * dies without either end noticing — a dropped route, a NAT table that forgot
+ * us — because a half-open TCP socket never closes and never errors. Since Home
+ * Assistant sends nothing at all when nothing changes, silence on a healthy
+ * connection and silence on a dead one are the same silence. The ping is what
+ * tells them apart.
+ */
+const HEARTBEAT_MS = 30_000;
+
+/**
+ * One knob for the whole liveness clock, in milliseconds — the ping period,
+ * with the two deadlines derived from it: 10s to answer a ping and 15s to
+ * finish a handshake, at the default 30s period.
+ *
+ * Derived rather than three separate settings so they cannot drift into a
+ * combination that makes no sense, and overridable for the same reason as
+ * `HA_TIMEOUT_MS` in `ha.server.ts`: a test has to be able to reach these
+ * deadlines in milliseconds instead of in half a minute.
+ */
+function heartbeatMs(): number {
+  return Number(process.env.HA_HEARTBEAT_MS) || HEARTBEAT_MS;
+}
+
+/** How long Home Assistant has to answer a ping before the socket is written off. */
+const pongTimeoutMs = () => heartbeatMs() / 3;
+
+/**
+ * How long a connection has to get all the way to a seeded cache.
+ *
+ * A socket that opens and is then never spoken on — a dead route, a proxy that
+ * accepts and forwards nowhere — would otherwise sit there forever: the
+ * heartbeat only starts once the handshake finishes, so nothing else would ever
+ * notice. This is the watchdog for the part before the watchdog.
+ */
+const handshakeTimeoutMs = () => heartbeatMs() / 2;
 
 function announce(changed: HaChange): void {
   for (const listener of live.listeners) {
@@ -146,14 +219,28 @@ function handle(raw: string): void {
     return;
   }
 
+  if (message.type === "pong" && message.id === live.pingId) {
+    live.lastPongAt = Date.now();
+    if (live.pongDeadline) clearTimeout(live.pongDeadline);
+    live.pongDeadline = null;
+    return;
+  }
+
   if (message.type === "result" && message.id === live.seedId) {
+    const receivedAt = Date.now();
     live.states = new Map(
-      (message.result ?? []).map((state) => [state.entity_id, state]),
+      (message.result ?? []).map((state) => [
+        state.entity_id,
+        { state, receivedAt },
+      ]),
     );
     live.ready = true;
     live.attempts = 0;
     live.lastError = null;
     live.connectedSince = new Date().toISOString();
+    if (live.handshakeDeadline) clearTimeout(live.handshakeDeadline);
+    live.handshakeDeadline = null;
+    startHeartbeat();
     announce(null);
     return;
   }
@@ -162,15 +249,66 @@ function handle(raw: string): void {
     const entityId = message.event?.data?.entity_id;
     if (!entityId) return;
 
+    live.lastEventAt = Date.now();
+
     const next = message.event?.data?.new_state ?? null;
     // A null new_state is an entity being removed, not one going quiet. Drop it
     // so readers report it missing rather than serving its last known value
     // forever.
-    if (next) live.states.set(entityId, next);
-    else live.states.delete(entityId);
+    if (!next) {
+      live.states.delete(entityId);
+      announce(entityId);
+      return;
+    }
 
+    // Ordering makes an out-of-order event impossible today — `get_states` is
+    // sent before `subscribe_events` and Home Assistant answers in order — and
+    // that is exactly why it is worth enforcing rather than relying on. A seed
+    // landing on top of a newer event would put the cache quietly in the past.
+    if (isOlderThanCached(entityId, next)) return;
+
+    live.states.set(entityId, { state: next, receivedAt: Date.now() });
     announce(entityId);
   }
+}
+
+function isOlderThanCached(entityId: string, next: HaState): boolean {
+  const held = live.states.get(entityId)?.state.last_updated;
+  if (!held || !next.last_updated) return false;
+  return Date.parse(next.last_updated) < Date.parse(held);
+}
+
+/**
+ * Ask, periodically, whether the connection is still there — and hang up on it
+ * when the answer doesn't come. Closing is what puts it back on the reconnect
+ * path; there is nothing else to be done with a socket that has stopped
+ * answering, and holding it open would look like health forever.
+ */
+function startHeartbeat(): void {
+  stopHeartbeat();
+
+  live.heartbeat = setInterval(() => {
+    if (!live.socket || live.pongDeadline) return;
+
+    live.pingId = send({ type: "ping" });
+    live.pongDeadline = setTimeout(() => {
+      live.pongDeadline = null;
+      live.lastError = "Home Assistant stopped answering pings";
+      live.socket?.close();
+    }, pongTimeoutMs());
+    live.pongDeadline.unref?.();
+  }, heartbeatMs());
+  live.heartbeat.unref?.();
+}
+
+function stopHeartbeat(): void {
+  if (live.heartbeat) clearInterval(live.heartbeat);
+  if (live.pongDeadline) clearTimeout(live.pongDeadline);
+  if (live.handshakeDeadline) clearTimeout(live.handshakeDeadline);
+  live.heartbeat = null;
+  live.pongDeadline = null;
+  live.handshakeDeadline = null;
+  live.pingId = null;
 }
 
 function scheduleReconnect(): void {
@@ -207,6 +345,13 @@ function connect(): void {
 
   live.socket = socket;
 
+  live.handshakeDeadline = setTimeout(() => {
+    live.handshakeDeadline = null;
+    live.lastError = "Home Assistant accepted the connection but never spoke";
+    socket.close();
+  }, handshakeTimeoutMs());
+  live.handshakeDeadline.unref?.();
+
   socket.addEventListener("message", (event) => {
     handle(String(event.data));
   });
@@ -226,9 +371,11 @@ function connect(): void {
     live.subscriptionId = null;
     live.seedId = null;
     live.connectedSince = null;
+    stopHeartbeat();
 
     if (live.ready) {
       live.ready = false;
+      live.reconnects += 1;
       // The cache is now a set of claims about the past. Readers fall back to
       // REST while it is in this state, so it can be kept for the reconnect to
       // overwrite rather than blanking the page in the meantime.
@@ -267,7 +414,7 @@ export function liveStates(ids: string[]): Map<string, HaState | null> | null {
   startHaLive();
   if (!live.ready) return null;
 
-  return new Map(ids.map((id) => [id, live.states.get(id) ?? null]));
+  return new Map(ids.map((id) => [id, live.states.get(id)?.state ?? null]));
 }
 
 /**
@@ -285,12 +432,18 @@ export function onHaChange(listener: (changed: HaChange) => void): () => void {
   };
 }
 
+const iso = (at: number | null) =>
+  at === null ? null : new Date(at).toISOString();
+
 export function haLiveStatus(): HaLiveStatus {
   return {
     connected: live.ready,
     entities: live.states.size,
     lastError: live.lastError,
     connectedSince: live.connectedSince,
+    lastEventAt: iso(live.lastEventAt),
+    lastPongAt: iso(live.lastPongAt),
+    reconnects: live.reconnects,
   };
 }
 
@@ -304,6 +457,7 @@ export function haLiveStatus(): HaLiveStatus {
 export function stopHaLive(): void {
   if (live.retry) clearTimeout(live.retry);
   live.retry = null;
+  stopHeartbeat();
 
   const socket = live.socket;
   live.socket = null;
@@ -318,6 +472,9 @@ export function stopHaLive(): void {
   live.seedId = null;
   live.subscriptionId = null;
   live.attempts = 0;
+  live.reconnects = 0;
   live.lastError = null;
   live.connectedSince = null;
+  live.lastEventAt = null;
+  live.lastPongAt = null;
 }

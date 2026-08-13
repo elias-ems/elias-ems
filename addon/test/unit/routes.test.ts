@@ -193,6 +193,17 @@ describe("GET / (dashboard)", () => {
         entries: [],
       },
       error: null,
+      // `lastError` is left out on purpose: whether the failed connection to a
+      // Home Assistant that isn't there has been reported yet is a race, and
+      // not what this case is about.
+      health: expect.objectContaining({
+        connected: false,
+        lastEventAt: null,
+        reconnects: 0,
+        // Nothing was read, because nothing is configured — which is a
+        // different thing from having read nothing.
+        source: null,
+      }),
     });
   });
 
@@ -203,7 +214,13 @@ describe("GET / (dashboard)", () => {
     const { grid } = await loadIndex();
 
     expect(grid.configured).toBe(true);
-    expect(grid.power).toEqual({ display: "842 W", ok: true });
+    expect(grid.power).toEqual({
+      display: "842 W",
+      ok: true,
+      // Stamped by Home Assistant, carried through so the page can say how old
+      // the number is rather than implying it is current by showing it at all.
+      updatedAt: expect.any(Number),
+    });
   });
 
   it("shows a battery's charge window alongside its three readings", async () => {
@@ -217,11 +234,12 @@ describe("GET / (dashboard)", () => {
         id: expect.any(String),
         title: "Home battery",
         window: "10–90% of 10 kWh",
-        charge: { display: "76 %", ok: true },
-        power: { display: "0 W", ok: true },
+        charge: { display: "76 %", ok: true, updatedAt: expect.any(Number) },
+        power: { display: "0 W", ok: true, updatedAt: expect.any(Number) },
         energy: {
           display: expect.stringMatching(/^2\D?450\D75 kWh$/),
           ok: true,
+          updatedAt: expect.any(Number),
         },
       },
     ]);
@@ -265,11 +283,13 @@ describe("GET / (dashboard)", () => {
     expect(arrays[0].power).toEqual({
       display: expect.stringMatching(/^1\D?234\D5 W$/),
       ok: true,
+      updatedAt: expect.any(Number),
     });
     // 8421.334 rounded to 8421.33.
     expect(arrays[0].energy).toEqual({
       display: expect.stringMatching(/^8\D?421\D33 kWh$/),
       ok: true,
+      updatedAt: expect.any(Number),
     });
   });
 
@@ -282,7 +302,13 @@ describe("GET / (dashboard)", () => {
 
     const { arrays } = await loadIndex();
 
-    expect(arrays[0].power).toEqual({ display: "unavailable", ok: false });
+    expect(arrays[0].power).toEqual({
+      display: "unavailable",
+      ok: false,
+      // Still stamped: knowing *when* a sensor went unavailable is exactly what
+      // makes it diagnosable.
+      updatedAt: expect.any(Number),
+    });
   });
 
   it("says so when a saved entity id has gone stale", async () => {
@@ -294,7 +320,11 @@ describe("GET / (dashboard)", () => {
 
     const { arrays } = await loadIndex();
 
-    expect(arrays[0].power).toEqual({ display: "no such entity", ok: false });
+    expect(arrays[0].power).toEqual({
+      display: "no such entity",
+      ok: false,
+      updatedAt: null,
+    });
   });
 
   it("still lists the configured arrays when Home Assistant is unreachable", async () => {

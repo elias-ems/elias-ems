@@ -85,7 +85,25 @@ export async function startHaMock({
   token = DEFAULT_SUPERVISOR_TOKEN,
   states,
 } = {}) {
-  let current = states ?? (await defaultStates());
+  /**
+   * Home Assistant stamps every state; the fixtures and hand-written states in
+   * tests don't. Filling them in at startup rather than writing them into the
+   * fixture keeps the ages realistic — a checked-in timestamp is permanently
+   * hours old — while leaving an explicit one alone, which is how a test asks
+   * for a deliberately stale reading.
+   */
+  const stamped = (state, when = new Date().toISOString()) => ({
+    last_changed: when,
+    last_updated: when,
+    ...state,
+  });
+
+  let current = (states ?? (await defaultStates())).map((state) =>
+    stamped(state),
+  );
+
+  /** Set by `goSilent()`: the socket stays open and stops saying anything. */
+  let silent = false;
 
   /**
    * Every request seen, so tests can assert the app actually called out.
@@ -108,13 +126,25 @@ export async function startHaMock({
    */
   function applyState(entityId, next) {
     const old = current.find((entity) => entity.entity_id === entityId) ?? null;
+
+    if (next) {
+      const now = new Date().toISOString();
+      // `last_changed` only moves when the value does — the distinction the
+      // whole freshness story rests on, so the mock has to honour it.
+      next = {
+        ...next,
+        last_updated: now,
+        last_changed: old && old.state === next.state ? old.last_changed : now,
+      };
+    }
+
     current = [
       ...current.filter((entity) => entity.entity_id !== entityId),
       ...(next ? [next] : []),
     ];
 
     for (const [socket, subscriptionId] of sockets) {
-      if (subscriptionId === null) continue;
+      if (subscriptionId === null || silent) continue;
       socket.send(
         JSON.stringify({
           id: subscriptionId,
@@ -189,13 +219,23 @@ export async function startHaMock({
 
   wss.on("connection", (socket) => {
     let authenticated = false;
-    socket.send(
-      JSON.stringify({ type: "auth_required", ha_version: HA_VERSION }),
-    );
+    // A silent mock doesn't even greet: a connection that is accepted and then
+    // never spoken on is exactly what a dead route looks like, and the client
+    // has to get itself out of that too.
+    if (!silent) {
+      socket.send(
+        JSON.stringify({ type: "auth_required", ha_version: HA_VERSION }),
+      );
+    }
 
     socket.on("close", () => sockets.delete(socket));
 
     socket.on("message", (raw) => {
+      // A silent mock answers nothing at all while holding the socket open —
+      // what a half-open connection looks like from the client's side, and the
+      // only failure a `close` handler cannot catch.
+      if (silent) return;
+
       let message;
       try {
         message = JSON.parse(raw.toString());
@@ -227,6 +267,10 @@ export async function startHaMock({
 
       const reply = (body) =>
         socket.send(JSON.stringify({ id: message.id, ...body }));
+
+      if (message.type === "ping") {
+        return reply({ type: "pong" });
+      }
 
       if (message.type === "get_states") {
         return reply({ type: "result", success: true, result: current });
@@ -264,7 +308,23 @@ export async function startHaMock({
       [...sockets.values()].filter((id) => id !== null).length,
     /** Swap the whole state list — for testing unavailable or missing entities. */
     setStates(next) {
-      current = next;
+      current = next.map((state) => stamped(state));
+    },
+    /**
+     * Stop answering — no pongs, no events — without closing anything.
+     *
+     * This is the failure the reconnect logic cannot see by itself: a
+     * half-open connection never fires `close` and never errors, and since Home
+     * Assistant says nothing when nothing changes, a dead socket and a quiet
+     * house produce identical silence. Only the ping tells them apart, so this
+     * is the only way to prove the watchdog works.
+     */
+    goSilent() {
+      silent = true;
+    },
+    /** Start answering again, without the client having had to reconnect. */
+    stopSilent() {
+      silent = false;
     },
     /**
      * Set one state and push it to subscribers, as `POST /states/<id>` does.
@@ -281,6 +341,35 @@ export async function startHaMock({
     /** Delete an entity and push the removal, as an integration being removed does. */
     removeState(entityId) {
       applyState(entityId, null);
+    },
+    /**
+     * Push a state exactly as given, timestamps included, without touching the
+     * stored list.
+     *
+     * For the cases a well-behaved Home Assistant will not produce — an event
+     * that arrives out of order, say. `setState` stamps the current time, which
+     * is precisely what such a test needs to avoid.
+     */
+    pushState(state) {
+      for (const [socket, subscriptionId] of sockets) {
+        if (subscriptionId === null || silent) continue;
+        socket.send(
+          JSON.stringify({
+            id: subscriptionId,
+            type: "event",
+            event: {
+              event_type: "state_changed",
+              data: {
+                entity_id: state.entity_id,
+                old_state: null,
+                new_state: state,
+              },
+              time_fired: new Date().toISOString(),
+              origin: "LOCAL",
+            },
+          }),
+        );
+      }
     },
     /**
      * Hang up on every subscriber without closing the server — how a Home

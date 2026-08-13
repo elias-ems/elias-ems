@@ -39,6 +39,11 @@
      surface they are drawn on: 5.2:1 on white, 8.9:1 on the dark canvas. */
   --color-warning: light-dark(#8d6708, #f0b429);
 
+  /* A working live connection. Used for a dot and for the word beside it, so it
+     is picked to clear 4.5:1 as text rather than the 3:1 a graphic would need:
+     4.9:1 on white, 9.8:1 on the dark canvas. */
+  --color-success: light-dark(#0f7b3f, #3ddc84);
+
   --color-focus: light-dark(#2186eb, #5eaaf5);
 
   /* The add-on's own top bar — the one surface here that isn't the page canvas.
