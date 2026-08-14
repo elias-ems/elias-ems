@@ -26,7 +26,11 @@ let dataDir: string;
  */
 const UNREACHABLE_API = "http://127.0.0.1:1/core/api";
 
-/** A battery as the settings form posts it — every field a string. */
+/**
+ * A battery as the settings form posts it — every field a string, and the two
+ * optional power caps left out entirely, which is what a browser sends for a
+ * field nobody filled in.
+ */
 const postedBattery = {
   title: "Home battery",
   capacityKwh: "10",
@@ -35,6 +39,7 @@ const postedBattery = {
   energyEntityId: "sensor.battery_energy_total",
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
+  targetPowerEntityId: "number.battery_target_power",
 };
 
 /** The same battery as it should end up on disk, with real numbers. */
@@ -43,6 +48,8 @@ const storedBattery = {
   capacityKwh: 10,
   minChargePercent: 10,
   maxChargePercent: 90,
+  maxChargePowerW: null,
+  maxDischargePowerW: null,
 };
 
 /**

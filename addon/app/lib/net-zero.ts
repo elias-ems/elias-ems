@@ -23,6 +23,15 @@
  * exactly the right thing; the naive rule would tell it to stop and create an
  * 800 W import in the process. This form tells it to carry on, which is a
  * different answer to the same reading, and the correct one.
+ *
+ * ## Power limits
+ *
+ * Each battery's share is capped by what its inverter can deliver, which is
+ * either typed into settings or read off the target entity's own range. The
+ * feedback term above is also what makes a cap safe to apply per battery and
+ * leave there: whatever the cap holds back keeps the meter off zero, so the
+ * next tick asks for it again and the batteries with headroom take it up over a
+ * few ticks rather than in one redistributing pass.
  */
 
 /** Below this the meter counts as balanced; chasing noise would only cycle the battery. */
@@ -38,6 +47,10 @@ export type BatterySnapshot = {
   socPercent: number | null;
   /** Current power in W — positive charging, negative discharging — or null. */
   powerW: number | null;
+  /** Most it may be asked to charge at, in W. Null when nothing constrains it. */
+  maxChargeW: number | null;
+  /** The same for discharging, as a positive magnitude. Null when unconstrained. */
+  maxDischargeW: number | null;
 };
 
 export type BatteryAction = "charge" | "discharge" | "hold";
@@ -48,6 +61,13 @@ export type BatteryDecision = {
   action: BatteryAction;
   /** Where the battery should be, in W: positive charging, negative discharging. */
   setpointW: number;
+  /**
+   * What the split asked for before a power limit cut it down, or null when
+   * nothing was cut. Kept separate from `setpointW` so the log can show both:
+   * a plan that is quietly delivering less than the meter needs looks identical
+   * to one that is on target unless the shortfall is stated.
+   */
+  cappedFromW: number | null;
   currentW: number | null;
   socPercent: number | null;
   /** Why this decision, in a few words. */
@@ -101,6 +121,14 @@ function headroomKwh(
   return Math.max(0, (battery.capacityKwh * span) / 100);
 }
 
+/** The cap on this direction, as a positive magnitude. Null when uncapped. */
+function limitFor(
+  battery: BatterySnapshot,
+  direction: "charge" | "discharge",
+): number | null {
+  return direction === "charge" ? battery.maxChargeW : battery.maxDischargeW;
+}
+
 /** Null when this battery can't take part, with the reason it can't. */
 function blockedReason(
   battery: BatterySnapshot,
@@ -120,6 +148,16 @@ function blockedReason(
   ) {
     return `at the ${battery.minChargePercent}% floor`;
   }
+
+  // A limit of zero takes the battery out of the plan rather than leaving it in
+  // with a 0 W share: it cannot contribute either way, and dropping it here is
+  // what lets the batteries that *can* help take the whole target. This is the
+  // shape a target entity that cannot express the direction arrives in — an
+  // `input_number` left on its default 0–100 range, say — so it wants a reason
+  // that points at the limit rather than at the battery.
+  const limit = limitFor(battery, direction);
+  if (limit === 0) return `${direction} power limited to 0 W`;
+
   return null;
 }
 
@@ -133,6 +171,7 @@ function hold(
     title: battery.title,
     action: "hold",
     setpointW,
+    cappedFromW: null,
     currentW: battery.powerW,
     socPercent: battery.socPercent,
     reason,
@@ -229,20 +268,36 @@ export function planNetZero(input: {
       eligibleCapacity > 0
         ? battery.capacityKwh / eligibleCapacity
         : 1 / eligible.length;
-    const setpointW = targetBatteryW * share;
+    const requestedW = targetBatteryW * share;
+
+    // The inverter's rating, applied last: the split above divides the target
+    // by capacity, and a small battery's share can easily exceed what its
+    // inverter can actually deliver. What the cap leaves undelivered is not
+    // handed to the others here — the loop's feedback term picks it up on the
+    // next tick, since the meter will still be off by the shortfall.
+    const powerLimitW = limitFor(battery, direction);
+    const setpointW =
+      powerLimitW === null
+        ? requestedW
+        : Math.sign(requestedW) * Math.min(Math.abs(requestedW), powerLimitW);
+    const cappedFromW = setpointW === requestedW ? null : requestedW;
+
     const room = headroomKwh(battery, direction);
     const limit =
       direction === "charge"
         ? `${battery.maxChargePercent}%`
         : `${battery.minChargePercent}%`;
     const soc = `SoC ${battery.socPercent}%`;
-    const reason = `${direction} at ${magnitude(setpointW)} (${soc}, ${kwh(room)} to ${limit})`;
+    const capped =
+      cappedFromW === null ? "" : `, capped from ${magnitude(cappedFromW)}`;
+    const reason = `${direction} at ${magnitude(setpointW)}${capped} (${soc}, ${kwh(room)} to ${limit})`;
 
     return {
       batteryId: battery.id,
       title: battery.title,
       action: direction,
       setpointW,
+      cappedFromW,
       currentW: battery.powerW,
       socPercent: battery.socPercent,
       reason,

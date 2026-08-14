@@ -80,6 +80,19 @@
     }
   },
   {
+    "entity_id": "number.battery_target_power",
+    "state": "0",
+    "attributes": {
+      "friendly_name": "Battery target power",
+      "unit_of_measurement": "W",
+      "device_class": "power",
+      "min": -500,
+      "max": 3000,
+      "step": 10,
+      "mode": "box"
+    }
+  },
+  {
     "entity_id": "sensor.shed_inverter_power",
     "state": "unavailable",
     "attributes": {

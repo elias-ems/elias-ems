@@ -19,6 +19,8 @@ type EntityAutocompleteProps = {
   label: string;
   placeholder?: string;
   error?: string;
+  /** Shown under the field when there's no error and no load failure to show instead. */
+  hint?: string;
   /** Pre-fills the field when editing an entity that already has one. */
   defaultValue?: string;
 };
@@ -28,6 +30,7 @@ export default function EntityAutocomplete({
   label,
   placeholder,
   error,
+  hint,
   defaultValue = "",
 }: EntityAutocompleteProps) {
   const [query, setQuery] = useState(defaultValue);
@@ -157,6 +160,9 @@ export default function EntityAutocomplete({
           Couldn't load Home Assistant entities: {loadError}. You can still type
           an entity ID manually.
         </p>
+      )}
+      {!error && !(open && loadError) && hint && (
+        <p style={hintStyle}>{hint}</p>
       )}
     </div>
   );

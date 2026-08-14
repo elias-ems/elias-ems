@@ -20,6 +20,8 @@ function battery(overrides: Partial<BatterySnapshot> = {}): BatterySnapshot {
     maxChargePercent: 90,
     socPercent: 50,
     powerW: 0,
+    maxChargeW: null,
+    maxDischargeW: null,
     ...overrides,
   };
 }
@@ -207,6 +209,88 @@ describe("planNetZero", () => {
 
     expect(plan.decisions).toEqual([]);
     expect(plan.summary).toContain("No batteries configured");
+  });
+
+  it("caps a discharge at what the inverter can deliver", () => {
+    const plan = planNetZero({
+      gridPowerW: 4000,
+      batteries: [battery({ maxDischargeW: 2500 })],
+    });
+
+    // The target is still the honest answer to the meter; the setpoint is what
+    // the battery can actually be asked for.
+    expect(plan.targetBatteryW).toBe(-4000);
+    expect(plan.decisions[0]).toMatchObject({
+      action: "discharge",
+      setpointW: -2500,
+      cappedFromW: -4000,
+    });
+    expect(plan.decisions[0].message).toContain("capped from 4000 W");
+  });
+
+  it("caps a charge the same way", () => {
+    const plan = planNetZero({
+      gridPowerW: -6000,
+      batteries: [battery({ maxChargeW: 3000 })],
+    });
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "charge",
+      setpointW: 3000,
+      cappedFromW: 6000,
+    });
+  });
+
+  it("leaves a setpoint inside the limit alone", () => {
+    const plan = planNetZero({
+      gridPowerW: 800,
+      batteries: [battery({ maxDischargeW: 2500 })],
+    });
+
+    expect(plan.decisions[0]).toMatchObject({
+      setpointW: -800,
+      cappedFromW: null,
+    });
+    expect(plan.decisions[0].message).not.toContain("capped");
+  });
+
+  it("applies each direction's limit only to that direction", () => {
+    // An inverter that charges at 3 kW and discharges at 5 kW is ordinary, and
+    // one limit leaking into the other direction would be invisible in the log.
+    const plan = planNetZero({
+      gridPowerW: -9000,
+      batteries: [battery({ maxChargeW: 3000, maxDischargeW: 5000 })],
+    });
+
+    expect(plan.decisions[0].setpointW).toBe(3000);
+  });
+
+  it("takes a battery limited to 0 W out of the plan entirely", () => {
+    // What an input_number left on its default 0–100 range looks like from
+    // here: it cannot express a discharge at all. Holding at 0 W with a
+    // "discharge" action would read as though it were doing something.
+    const plan = planNetZero({
+      gridPowerW: 1000,
+      batteries: [battery({ maxDischargeW: 0 })],
+    });
+
+    expect(plan.decisions[0]).toMatchObject({ action: "hold", setpointW: 0 });
+    expect(plan.decisions[0].reason).toBe("discharge power limited to 0 W");
+    expect(plan.summary).toContain("every battery is at its limit");
+  });
+
+  it("gives the whole target to a battery whose neighbour is limited to 0 W", () => {
+    const plan = planNetZero({
+      gridPowerW: 1000,
+      batteries: [
+        battery({ id: "capped", capacityKwh: 10, maxDischargeW: 0 }),
+        battery({ id: "free", capacityKwh: 10 }),
+      ],
+    });
+
+    // Not 500 each: the capped one is out of the split, not in it with a zero.
+    expect(plan.decisions[0].setpointW).toBe(0);
+    expect(plan.decisions[1].setpointW).toBe(-1000);
   });
 
   it("reports the room left, so a setpoint can be sanity-checked next to it", () => {

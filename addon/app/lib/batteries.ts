@@ -1,13 +1,14 @@
 /**
  * The configured batteries. Capacity and the charge window are things the
  * installer knows and Home Assistant does not, so they are typed in; the three
- * live values come from HA entities.
+ * live values come from HA entities, and a fourth, `targetPowerEntityId`, is
+ * the writable one the setpoint goes to.
  *
- * `powerEntityId` is read with the sign convention **positive = charging,
+ * Both power entities are read with the sign convention **positive = charging,
  * negative = discharging**. That is a decision rather than an observation —
  * inverters disagree, and plenty publish the opposite — and it is the convention
  * the strategy's arithmetic and the log lines are written against, so it is also
- * the one the eventual write path will use.
+ * the one the write path uses.
  *
  * Pure; persistence lives in `batteries.server.ts`.
  */
@@ -26,6 +27,27 @@ export type BatteryFields = {
   powerEntityId: string;
   /** State of charge, in percent. */
   socEntityId: string;
+  /**
+   * Where the setpoint gets written: a writable entity — a `number` from an
+   * inverter integration, or an `input_number` an automation forwards to
+   * `modbus.write_register` — read with the same sign convention as
+   * `powerEntityId`, positive charging and negative discharging.
+   *
+   * Optional. Empty means this battery is watched but not steered, which is
+   * what every record saved before this field existed becomes.
+   */
+  targetPowerEntityId: string;
+  /**
+   * Most this battery may be asked to charge at, in W. Null falls back to the
+   * target entity's own `max` attribute; see `resolvePowerLimits`.
+   */
+  maxChargePowerW: number | null;
+  /**
+   * The same for discharging, as a **positive magnitude** — the form asks for
+   * "5000 W", not "-5000 W", and the sign is applied where it is used. Null
+   * falls back to the target entity's own `min` attribute.
+   */
+  maxDischargePowerW: number | null;
 };
 
 export type Battery = BatteryFields & { id: string };
@@ -50,9 +72,29 @@ function toFiniteNumber(value: unknown, fallback: number): number {
 }
 
 /**
+ * A power cap, or null for "no cap configured".
+ *
+ * Zero and negatives collapse to null rather than being kept: a cap of 0 W
+ * would silently stop the battery taking part at all, and that is far more
+ * likely to be a blank field or a hand-edited typo than something anyone meant.
+ */
+function toOptionalPowerW(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
  * Numbers survive a round trip through JSON, but not through someone editing
  * the file by hand — and a string where a number belongs would turn the
  * strategy's arithmetic into silent string concatenation.
+ *
+ * This is also where a record written before a field existed is given something
+ * sensible to be: the three control fields below all read as "not configured"
+ * when they are missing, so an installation that predates them keeps behaving
+ * exactly as it did.
  */
 export function normalizeBattery(battery: Battery): Battery {
   return {
@@ -67,6 +109,53 @@ export function normalizeBattery(battery: Battery): Battery {
       battery.maxChargePercent,
       BATTERY_DEFAULTS.maxChargePercent,
     ),
+    targetPowerEntityId: battery.targetPowerEntityId?.trim() ?? "",
+    maxChargePowerW: toOptionalPowerW(battery.maxChargePowerW),
+    maxDischargePowerW: toOptionalPowerW(battery.maxDischargePowerW),
+  };
+}
+
+/** What a battery may be asked for, once config and the entity are both in. */
+export type PowerLimits = {
+  /** Most it may charge at, in W. Null when nothing constrains it. */
+  maxChargeW: number | null;
+  /** Most it may discharge at, in W as a positive magnitude. Null when unconstrained. */
+  maxDischargeW: number | null;
+};
+
+/**
+ * The range a writable entity publishes about itself. `number` entities always
+ * carry `min`/`max` — they are required properties of the platform — and so do
+ * `input_number` helpers, so in practice this is nearly always available.
+ */
+export type EntityRange = { min: number | null; max: number | null };
+
+/**
+ * What the battery may actually be asked for, from the two sources that know:
+ * the fields typed into settings and the target entity's own range.
+ *
+ * **Configured values win.** The entity's range is a good default but not a
+ * trustworthy one — an `input_number` helper created through the UI defaults to
+ * 0–100, which would cap a 5 kW battery at 100 W — so the override has to be
+ * able to say otherwise rather than merely narrow it.
+ *
+ * A range that cannot express a direction caps that direction at 0 rather than
+ * leaving it open: `min: 0` on a signed setpoint entity means negative values
+ * are not writable, so discharging through it is not something we can do. That
+ * is also exactly what the mis-created helper above looks like, and a 0 is a
+ * visible symptom where silently writing out of range would not be.
+ */
+export function resolvePowerLimits(
+  battery: Pick<BatteryFields, "maxChargePowerW" | "maxDischargePowerW">,
+  range: EntityRange | null,
+): PowerLimits {
+  return {
+    maxChargeW:
+      battery.maxChargePowerW ??
+      (range?.max == null ? null : Math.max(0, range.max)),
+    maxDischargeW:
+      battery.maxDischargePowerW ??
+      (range?.min == null ? null : Math.max(0, -range.min)),
   };
 }
 
@@ -77,6 +166,24 @@ function readNumber(formData: FormData, name: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+/**
+ * An optional power cap. Unlike `readNumber` this has to tell a field left
+ * empty from one filled in with nonsense: the first is a valid "no cap", the
+ * second is a typo, and reporting them the same way would let a mistyped limit
+ * through as "unlimited" — the least safe reading of the two.
+ */
+function readOptionalPowerW(
+  formData: FormData,
+  name: string,
+): { ok: true; value: number | null } | { ok: false } {
+  const raw = formData.get(name)?.toString().trim();
+  if (!raw) return { ok: true, value: null };
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return { ok: false };
+  return { ok: true, value };
+}
+
 export function parseBattery(
   formData: FormData,
 ): { ok: true; fields: BatteryFields } | { ok: false; errors: BatteryErrors } {
@@ -85,15 +192,28 @@ export function parseBattery(
     formData.get("energyEntityId")?.toString().trim() ?? "";
   const powerEntityId = formData.get("powerEntityId")?.toString().trim() ?? "";
   const socEntityId = formData.get("socEntityId")?.toString().trim() ?? "";
+  // Optional: a battery with no target entity is watched but not steered.
+  const targetPowerEntityId =
+    formData.get("targetPowerEntityId")?.toString().trim() ?? "";
   const capacityKwh = readNumber(formData, "capacityKwh");
   const minChargePercent = readNumber(formData, "minChargePercent");
   const maxChargePercent = readNumber(formData, "maxChargePercent");
+  const maxChargePowerW = readOptionalPowerW(formData, "maxChargePowerW");
+  const maxDischargePowerW = readOptionalPowerW(formData, "maxDischargePowerW");
 
   const errors: BatteryErrors = {};
   if (!title) errors.title = "Give this battery a name.";
   if (!energyEntityId) errors.energyEntityId = "Pick the energy entity.";
   if (!powerEntityId) errors.powerEntityId = "Pick the power entity.";
   if (!socEntityId) errors.socEntityId = "Pick the state-of-charge entity.";
+
+  if (!maxChargePowerW.ok) {
+    errors.maxChargePowerW = "Maximum charge power must be a number above 0.";
+  }
+  if (!maxDischargePowerW.ok) {
+    errors.maxDischargePowerW =
+      "Maximum discharge power must be a number above 0.";
+  }
 
   if (capacityKwh === null || capacityKwh <= 0) {
     errors.capacityKwh = "Capacity must be a number above 0.";
@@ -136,6 +256,12 @@ export function parseBattery(
       energyEntityId,
       powerEntityId,
       socEntityId,
+      targetPowerEntityId,
+      // Both are known good here: an unparseable one is an error above.
+      maxChargePowerW: maxChargePowerW.ok ? maxChargePowerW.value : null,
+      maxDischargePowerW: maxDischargePowerW.ok
+        ? maxDischargePowerW.value
+        : null,
     },
   };
 }

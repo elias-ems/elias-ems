@@ -24,7 +24,7 @@ export default function BatteriesSection({
   return (
     <Section
       title="Batteries"
-      description="Capacity and the charge window are typed in; the three live values come from Home Assistant."
+      description="Capacity and the charge window are typed in; the readings and the target come from Home Assistant."
       add={{
         label: "Add battery",
         open: editor.showAdd,
@@ -54,6 +54,15 @@ export default function BatteriesSection({
             </div>
             <div style={{ fontSize: "0.875rem" }}>
               Charge: <code>{battery.socEntityId}</code>
+            </div>
+            <div style={{ fontSize: "0.875rem" }}>
+              {battery.targetPowerEntityId ? (
+                <>
+                  Target: <code>{battery.targetPowerEntityId}</code>
+                </>
+              ) : (
+                "Target: not set — watched, not steered"
+              )}
             </div>
           </>
         )}
@@ -124,6 +133,36 @@ export default function BatteriesSection({
                 placeholder="e.g. sensor.battery_state_of_charge"
                 defaultValue={battery?.socEntityId}
                 error={errors.socEntityId}
+              />
+              <EntityAutocomplete
+                name="targetPowerEntityId"
+                label="Target power (W) — optional"
+                placeholder="e.g. number.battery_target_power"
+                defaultValue={battery?.targetPowerEntityId}
+                error={errors.targetPowerEntityId}
+                hint="Where the setpoint is written, same sign convention as Power. Leave empty to watch this battery without steering it."
+              />
+              <Field
+                name="maxChargePowerW"
+                label="Maximum charge power (W) — optional"
+                type="number"
+                min={0}
+                step="any"
+                placeholder="e.g. 5000"
+                defaultValue={battery?.maxChargePowerW ?? ""}
+                error={errors.maxChargePowerW}
+                hint="Leave empty to use the target entity's own limit."
+              />
+              <Field
+                name="maxDischargePowerW"
+                label="Maximum discharge power (W) — optional"
+                type="number"
+                min={0}
+                step="any"
+                placeholder="e.g. 5000"
+                defaultValue={battery?.maxDischargePowerW ?? ""}
+                error={errors.maxDischargePowerW}
+                hint="A positive number. Leave empty to use the target entity's own limit."
               />
             </>
           );

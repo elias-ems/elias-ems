@@ -4,10 +4,12 @@
  * tested without a router in front of it.
  */
 import { describe, expect, it } from "vitest";
+import type { Battery } from "../../app/lib/batteries";
 import {
   BATTERY_DEFAULTS,
   normalizeBattery,
   parseBattery,
+  resolvePowerLimits,
 } from "../../app/lib/batteries";
 import {
   DEFAULT_CONTROL_CONFIG,
@@ -122,6 +124,50 @@ describe("parseBattery", () => {
     if (result.ok) return;
     expect(Object.keys(result.errors)).toEqual(["socEntityId"]);
   });
+
+  it("accepts a battery with no target entity, which is watched but not steered", () => {
+    const result = parseBattery(form(validBattery));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.fields.targetPowerEntityId).toBe("");
+    expect(result.fields.maxChargePowerW).toBeNull();
+    expect(result.fields.maxDischargePowerW).toBeNull();
+  });
+
+  it("takes the target entity and the power caps when they are given", () => {
+    const result = parseBattery(
+      form({
+        ...validBattery,
+        targetPowerEntityId: " number.battery_target_power ",
+        maxChargePowerW: "5000",
+        maxDischargePowerW: "3500",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.fields.targetPowerEntityId).toBe(
+      "number.battery_target_power",
+    );
+    expect(result.fields.maxChargePowerW).toBe(5000);
+    expect(result.fields.maxDischargePowerW).toBe(3500);
+  });
+
+  it("rejects a mistyped power cap instead of reading it as no cap", () => {
+    // Blank means "no cap", which is the least constrained reading there is.
+    // Silently giving a typo the same meaning would turn a fat-fingered limit
+    // into an unlimited one.
+    for (const value of ["nonsense", "0", "-5000"]) {
+      const result = parseBattery(
+        form({ ...validBattery, maxChargePowerW: value }),
+      );
+
+      expect(result.ok, `cap ${value}`).toBe(false);
+      if (result.ok) return;
+      expect(result.errors.maxChargePowerW).toBeTruthy();
+    }
+  });
 });
 
 describe("normalizeBattery", () => {
@@ -137,11 +183,16 @@ describe("normalizeBattery", () => {
       energyEntityId: "sensor.e",
       powerEntityId: "sensor.p",
       socEntityId: "sensor.s",
+      targetPowerEntityId: "number.t",
+      maxChargePowerW: "5000" as unknown as number,
+      maxDischargePowerW: "3000" as unknown as number,
     });
 
     expect(battery.capacityKwh).toBe(10);
     expect(battery.minChargePercent).toBe(5);
     expect(battery.maxChargePercent).toBe(95);
+    expect(battery.maxChargePowerW).toBe(5000);
+    expect(battery.maxDischargePowerW).toBe(3000);
   });
 
   it("falls back to the defaults for an unparseable charge window", () => {
@@ -154,6 +205,9 @@ describe("normalizeBattery", () => {
       energyEntityId: "sensor.e",
       powerEntityId: "sensor.battery_power",
       socEntityId: "sensor.s",
+      targetPowerEntityId: "",
+      maxChargePowerW: null,
+      maxDischargePowerW: null,
     });
 
     expect(battery.capacityKwh).toBe(0);
@@ -161,6 +215,92 @@ describe("normalizeBattery", () => {
     expect(battery.maxChargePercent).toBe(BATTERY_DEFAULTS.maxChargePercent);
     // An untitled record shows its power entity, which at least tells two apart.
     expect(battery.title).toBe("sensor.battery_power");
+  });
+
+  it("reads a record saved before the control fields existed as unsteered", () => {
+    // The cast is the point: this is a batteries.json written by an older
+    // version, where the three fields below are simply absent. Anything other
+    // than "not configured" here would start steering an installation that had
+    // never been asked whether it wanted to be.
+    const battery = normalizeBattery({
+      id: "b1",
+      title: "Home battery",
+      capacityKwh: 10,
+      minChargePercent: 10,
+      maxChargePercent: 90,
+      energyEntityId: "sensor.e",
+      powerEntityId: "sensor.p",
+      socEntityId: "sensor.s",
+    } as Battery);
+
+    expect(battery.targetPowerEntityId).toBe("");
+    expect(battery.maxChargePowerW).toBeNull();
+    expect(battery.maxDischargePowerW).toBeNull();
+  });
+
+  it("drops a power cap of zero rather than freezing the battery at 0 W", () => {
+    // Far more likely to be a stray keystroke in a hand-edited file than a
+    // deliberate "never let this battery do anything".
+    const battery = normalizeBattery({
+      id: "b1",
+      title: "Home battery",
+      capacityKwh: 10,
+      minChargePercent: 10,
+      maxChargePercent: 90,
+      energyEntityId: "sensor.e",
+      powerEntityId: "sensor.p",
+      socEntityId: "sensor.s",
+      targetPowerEntityId: "number.t",
+      maxChargePowerW: 0,
+      maxDischargePowerW: -5000,
+    });
+
+    expect(battery.maxChargePowerW).toBeNull();
+    expect(battery.maxDischargePowerW).toBeNull();
+  });
+});
+
+describe("resolvePowerLimits", () => {
+  const unset = { maxChargePowerW: null, maxDischargePowerW: null };
+
+  it("takes the range from the target entity when nothing is configured", () => {
+    expect(resolvePowerLimits(unset, { min: -3000, max: 5000 })).toEqual({
+      maxChargeW: 5000,
+      maxDischargeW: 3000,
+    });
+  });
+
+  it("leaves a direction unbounded when the entity doesn't say", () => {
+    expect(resolvePowerLimits(unset, null)).toEqual({
+      maxChargeW: null,
+      maxDischargeW: null,
+    });
+    expect(resolvePowerLimits(unset, { min: null, max: 5000 })).toEqual({
+      maxChargeW: 5000,
+      maxDischargeW: null,
+    });
+  });
+
+  it("lets the configured value override the entity's own range", () => {
+    // An input_number helper created through the UI defaults to 0–100, which
+    // would cap a 5 kW battery at 100 W. The override has to be able to say
+    // otherwise, not merely narrow what the entity claims.
+    expect(
+      resolvePowerLimits(
+        { maxChargePowerW: 5000, maxDischargePowerW: 4000 },
+        { min: 0, max: 100 },
+      ),
+    ).toEqual({ maxChargeW: 5000, maxDischargeW: 4000 });
+  });
+
+  it("caps a direction the entity's range cannot express at zero", () => {
+    // min: 0 means negative values aren't writable, so discharging through
+    // this entity is not something we can do — and saying 0 makes that visible
+    // where writing out of range silently would not.
+    expect(resolvePowerLimits(unset, { min: 0, max: 100 })).toEqual({
+      maxChargeW: 100,
+      maxDischargeW: 0,
+    });
   });
 });
 

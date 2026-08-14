@@ -49,6 +49,9 @@ beforeAll(async () => {
     energyEntityId: "sensor.battery_energy_total",
     powerEntityId: "sensor.battery_power",
     socEntityId: "sensor.battery_state_of_charge",
+    targetPowerEntityId: "",
+    maxChargePowerW: null,
+    maxDischargePowerW: null,
   });
 });
 

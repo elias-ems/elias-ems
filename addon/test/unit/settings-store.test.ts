@@ -37,6 +37,9 @@ const battery = {
   energyEntityId: "sensor.battery_energy_total",
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
+  targetPowerEntityId: "number.battery_target_power",
+  maxChargePowerW: null,
+  maxDischargePowerW: null,
 };
 
 beforeEach(async () => {

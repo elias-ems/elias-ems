@@ -71,6 +71,11 @@ const BATTERY = {
   energyEntityId: "sensor.battery_energy_total",
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
+  // Unsteered by default, so the cases below are about scheduling and not
+  // about a power limit quietly cutting the setpoint they assert on.
+  targetPowerEntityId: "",
+  maxChargePowerW: null,
+  maxDischargePowerW: null,
 };
 
 /** Every message currently in the log, oldest first, for readable assertions. */
@@ -167,6 +172,35 @@ describe("runControlTick", () => {
     await runControlTick();
 
     expect(logged("state of charge unknown")).toBe(true);
+  });
+
+  it("caps the setpoint at the target entity's own range", async () => {
+    // Nothing is typed into settings, so the entity is the only thing that can
+    // produce a cap. The fixture's number.battery_target_power has a -500 W
+    // floor — deliberately tighter than the 842 W the meter is asking for, so
+    // that a range which never reached the strategy would be visible here.
+    await addBattery({
+      ...BATTERY,
+      targetPowerEntityId: "number.battery_target_power",
+    });
+
+    await runControlTick();
+
+    expect(logged("discharge at 500 W, capped from 842 W")).toBe(true);
+  });
+
+  it("lets a configured cap override the entity's range rather than narrow it", async () => {
+    await addBattery({
+      ...BATTERY,
+      targetPowerEntityId: "number.battery_target_power",
+      maxDischargePowerW: 5000,
+    });
+
+    await runControlTick();
+
+    // 5000 W beats the entity's -500 W floor, so the full 842 W goes through.
+    expect(logged("discharge at 842 W")).toBe(true);
+    expect(logged("capped from")).toBe(false);
   });
 });
 

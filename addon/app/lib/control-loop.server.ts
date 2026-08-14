@@ -15,6 +15,7 @@
  * statement. (Under Vite's dev server a hot reload can drop the module and with
  * it the log; `npm run start:ingress` is the stack to watch it on.)
  */
+import { resolvePowerLimits } from "./batteries";
 import { listBatteries } from "./batteries.server";
 import type { ControlConfig, ControlLoopStatus } from "./control";
 import { readControlConfig } from "./control-config.server";
@@ -24,7 +25,7 @@ import { isGridConfigured } from "./grid";
 import { readGrid } from "./grid.server";
 import { onHaChange } from "./ha-live.server";
 import { type BatterySnapshot, planNetZero } from "./net-zero";
-import { toNumber } from "./readings.server";
+import { toNumber, toRange } from "./readings.server";
 import { readingAge, readStates } from "./states.server";
 
 /**
@@ -79,6 +80,10 @@ async function controlEntityIds(): Promise<string[]> {
     ...batteries.flatMap((battery) => [
       battery.socEntityId,
       battery.powerEntityId,
+      // Read for its `min`/`max`, not its value: those are what bound the
+      // setpoint when settings don't. Unconfigured ids are dropped below, so a
+      // battery that isn't steered costs nothing here.
+      battery.targetPowerEntityId,
     ]),
   ].filter(Boolean);
 }
@@ -121,6 +126,12 @@ async function readSnapshots(): Promise<{
       maxChargePercent: battery.maxChargePercent,
       socPercent: toNumber(stateOf(battery.socEntityId)),
       powerW: toNumber(stateOf(battery.powerEntityId)),
+      ...resolvePowerLimits(
+        battery,
+        battery.targetPowerEntityId
+          ? toRange(stateOf(battery.targetPowerEntityId))
+          : null,
+      ),
     })),
     provenance: describeSource(states),
   };
