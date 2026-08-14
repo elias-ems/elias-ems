@@ -1,33 +1,17 @@
-import type { EntityOption } from "../lib/entities";
-import { fetchHaStates, type HaState } from "../lib/ha.server";
+/**
+ * What an entity autocomplete polls while it is open. `?q=` narrows the list;
+ * without it, the first page of every offerable sensor comes back.
+ *
+ * The route holds the query string and nothing else — which sensors are
+ * offerable and how they are shaped is `entities.server.ts`'s.
+ */
+import type { EntitiesData } from "../lib/entities";
+import { listEntityOptions } from "../lib/entities.server";
 import type { Route } from "./+types/api.entities";
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const url = new URL(request.url);
-  const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
-
-  let states: HaState[];
-  try {
-    states = await fetchHaStates();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { entities: [] as EntityOption[], error: message };
-  }
-
-  const entities: EntityOption[] = states
-    .filter((state) => state.entity_id.startsWith("sensor."))
-    .map((state) => ({
-      entityId: state.entity_id,
-      name: state.attributes?.friendly_name ?? state.entity_id,
-      unit: state.attributes?.unit_of_measurement ?? null,
-    }))
-    .filter(
-      (entity) =>
-        q === "" ||
-        entity.entityId.toLowerCase().includes(q) ||
-        entity.name.toLowerCase().includes(q),
-    )
-    .slice(0, 25);
-
-  return { entities, error: null };
+export async function loader({
+  request,
+}: Route.LoaderArgs): Promise<EntitiesData> {
+  const query = new URL(request.url).searchParams.get("q") ?? "";
+  return listEntityOptions(query);
 }
