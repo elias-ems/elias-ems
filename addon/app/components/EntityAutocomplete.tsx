@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useFetcher } from "react-router";
-import type { EntityOption } from "../lib/entities";
+import type { EntitiesData } from "../lib/entities";
 import {
   errorStyle,
   fieldStyle,
@@ -8,11 +8,6 @@ import {
   inputStyle,
   labelStyle,
 } from "./form";
-
-type EntitiesData = {
-  entities: EntityOption[];
-  error: string | null;
-};
 
 type EntityAutocompleteProps = {
   name: string;
