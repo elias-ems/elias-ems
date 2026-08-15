@@ -1,0 +1,123 @@
+# Contributing
+
+The repository is [elias-ems/elias-ems](https://github.com/elias-ems/elias-ems).
+Issues and pull requests are welcome — reports from real installations are the
+most useful thing right now, since the failure modes that matter most (an
+inverter that ignores a setpoint, an ingress proxy that buffers a stream) cannot
+be reproduced outside a real Home Assistant.
+
+If you are here to understand how it works rather than to change it, start with
+[Under the hood](/internals/architecture).
+
+## Getting set up
+
+The tools that don't come from npm are pinned in `mise.toml`, so
+[mise](https://mise.jdx.dev/) installs the lot at the right versions — Node 24
+and the GitHub CLI:
+
+```bash
+mise install
+```
+
+Then, from `addon/`:
+
+```bash
+npm install && npm run dev:mock
+```
+
+`npm install` is also what installs the git hooks. Playwright needs its browser
+downloaded once, with `npx playwright install chromium`.
+
+## The commands
+
+All of these run from `addon/`.
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | The React Router dev server. |
+| `npm run dev:mock` | The dev server plus a mock Home Assistant. **This is the one to reach for.** |
+| `npm run build` | Production build. |
+| `npm run typecheck` | Regenerates route types, then `tsc --strict`. |
+| `npm run lint` | Biome — formatting, lint rules and import order. |
+| `npm run lint:fix` | The safe fixes, applied. |
+| `npm test` | Unit tests (Vitest). Fast, no build needed. |
+| `npm run test:integration` | Builds, then drives the real `server.js` behind a mock ingress proxy over HTTP. |
+| `npm run test:e2e` | The same stack in Chromium, via Playwright. |
+| `npm run test:all` | All three in order. |
+
+There is also `npm run start:ingress`, which brings up the full production stack
+behind an ingress proxy. It is the only local setup where the ingress bugs can
+show up at all.
+
+## Three things worth knowing before you start
+
+**Ingress is where the surprises live.** Home Assistant serves the add-on behind
+a proxy at a path that is only known at request time and is stripped before the
+request arrives. `addon/server.js` reconstructs it from a header and uses it for
+three different things, each of which was a separate observed failure — the
+worst being a page that server-renders perfectly and is completely inert because
+every asset URL 404s. Loading the app directly on its port will not surface any
+of it. Read the ingress section of
+[CLAUDE.md](https://github.com/elias-ems/elias-ems/blob/main/CLAUDE.md) before
+touching that file.
+
+**Colours go through a token, never a literal.** `addon/app/app.css` holds
+light/dark tokens and components style themselves inline through
+`var(--color-*)`. A hardcoded hex is by definition broken in one of the two
+themes, which is how the app once ended up dark-grey-on-dark. Check contrast in
+both themes when you touch one.
+
+**Each test stack owns its own block of ports**, and they must not overlap.
+Playwright cannot tell a manually started stack from one of its own, so when
+these collided, running the suite while a dev stack was up made it adopt that
+stack and run against real data instead of a throwaway directory.
+
+## Linting
+
+**Biome** is both the linter and the formatter. There is no ESLint and no
+Prettier, and adding them is not a small decision: `typescript-eslint` loads the
+TypeScript compiler API and throws at import time on the TypeScript version this
+repo is on, so ESLint would need a second TypeScript installed purely to feed
+the linter. Biome has its own parser and never loads `typescript`.
+
+The tradeoff is that Biome has **no type-aware rules** — nothing like
+`no-floating-promises`. `npm run typecheck` is what covers that ground, so keep
+running it; lint is not a substitute.
+
+A pre-commit hook formats staged files and re-stages what it fixed. Unfixable
+lint errors fail the commit.
+
+## Commits and pull requests
+
+[Conventional Commits](https://www.conventionalcommits.org/):
+`<type>(<scope>): <description>`, imperative mood, lowercase, no trailing
+period. Common types are `feat`, `fix`, `docs`, `chore`, `refactor`, `test`,
+`ci` and `build`; the scope is optional and usually `addon`.
+
+Run `npm run lint`, `npm run typecheck` and `npm test` before opening a pull
+request. If you touched anything the browser renders or the server serves, run
+`npm run test:integration` as well.
+
+## Working on the docs
+
+The pages under **Guide** are written by hand and live in `site/` — edit them
+there. The pages under **Under the hood** are *generated* at build time from
+`docs/` in the repository; the banner on each says which file it came from, and
+editing the copy under `site/internals/` would be overwritten on the next build.
+
+To run the site locally, from `site/`:
+
+```bash
+npm install && npm run docs:dev
+```
+
+`npm run docs:build` is what CI runs, and it fails on dead links.
+
+## The rest
+
+[CLAUDE.md](https://github.com/elias-ems/elias-ems/blob/main/CLAUDE.md) in the
+repository root is the long-form version of all of this: the framework
+constraints, the ingress quirks in full, the theming traps, and how the add-on
+talks to Home Assistant. It is written as instructions for an AI agent working
+in the repo, which makes it blunter than a contributor guide and more complete
+than one.

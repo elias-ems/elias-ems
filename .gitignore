@@ -91,3 +91,10 @@ addon/data/
 addon/test/.tmp/
 addon/test-results/
 addon/playwright-report/
+
+### Docs site
+site/.vitepress/dist/
+site/.vitepress/cache/
+
+# Generated from docs/ by site/scripts/sync-docs.mjs
+site/internals/
