@@ -17,8 +17,7 @@
  * statement. (Under Vite's dev server a hot reload can drop the module and with
  * it the log; `npm run start:ingress` is the stack to watch it on.)
  */
-import type { Battery } from "./batteries";
-import { isSteerable, resolvePowerLimits } from "./batteries";
+import { type Battery, isSteerable, resolvePowerLimits } from "./batteries";
 import { listBatteries } from "./batteries.server";
 import type { ControlConfig, ControlLoopStatus } from "./control";
 import { readControlConfig } from "./control-config.server";
@@ -76,18 +75,36 @@ function logControl(level: DiagnosticsLevel, message: string): void {
   appendDiagnostic("battery-control", level, message);
 }
 
+/** The stored configuration a tick's entity lists and its snapshots share. */
+type TickConfig = {
+  grid: Grid;
+  batteries: Battery[];
+};
+
+async function readTickConfig(): Promise<TickConfig> {
+  const [grid, batteries] = await Promise.all([readGrid(), listBatteries()]);
+
+  return { grid, batteries };
+}
+
 /**
  * The readings a tick is built from — the loop's own, smaller than the page's.
  *
+ * Derived from a configuration already in hand rather than reading its own, for
+ * the reason `dashboard.server.ts` derives the page's list the same way: the ids
+ * and the values read for them have to describe the same house. Read twice, a
+ * save landing in between leaves a tick holding a battery's settings and another
+ * battery's readings.
+ *
  * Deliberately **not** the target power entities. This is also the set whose
- * changes provoke a tick, and a target is an output, not a reading: once the
- * write path exists, watching it would mean every setpoint we write comes back
- * as a change, provokes another tick, and writes again — a feedback loop with
- * nothing damping it. It is also what "oldest reading" is measured over, and a
- * setpoint nobody has touched for hours would dominate that number while saying
- * nothing about whether the sensors are alive.
+ * changes provoke a tick, and a target is an output, not a reading: watching it
+ * would mean every setpoint we write comes back as a change, provokes another
+ * tick, and writes again — a feedback loop with nothing damping it. It is also
+ * what "oldest reading" is measured over, and a setpoint nobody has touched for
+ * hours would dominate that number while saying nothing about whether the
+ * sensors are alive.
  */
-function controlReadingIds(grid: Grid, batteries: Battery[]): string[] {
+function controlReadingIds({ grid, batteries }: TickConfig): string[] {
   return [
     ...(isGridConfigured(grid) ? [grid.powerEntityId] : []),
     ...batteries.flatMap((battery) => [
@@ -99,26 +116,16 @@ function controlReadingIds(grid: Grid, batteries: Battery[]): string[] {
 
 /**
  * The target entities, read for their `min`/`max` rather than their value:
- * those are what bound the setpoint when settings don't. Unconfigured ids are
- * dropped, so a battery that isn't steered costs nothing here.
+ * those are what bound the setpoint when settings don't. From the same
+ * `TickConfig` as the readings, so the batteries written to and the batteries
+ * decided about cannot come from two different reads of the store.
+ *
+ * Unconfigured ids are dropped, so a battery that isn't steered costs nothing.
  */
-function controlTargetIds(batteries: Battery[]): string[] {
+function controlTargetIds({ batteries }: TickConfig): string[] {
   return batteries
     .map((battery) => battery.targetPowerEntityId)
     .filter(Boolean);
-}
-
-/** Everything a tick reads. Ticks are provoked by the readings half only. */
-async function controlEntityIds(): Promise<{
-  readings: string[];
-  targets: string[];
-}> {
-  const [grid, batteries] = await Promise.all([readGrid(), listBatteries()]);
-
-  return {
-    readings: controlReadingIds(grid, batteries),
-    targets: controlTargetIds(batteries),
-  };
 }
 
 /**
@@ -137,13 +144,14 @@ async function readSnapshots(): Promise<{
   /** Each steerable battery's target entity and its state, ready to be written. */
   targets: Map<string, { entityId: string; state: HaState | null }>;
 }> {
-  const [grid, batteries] = await Promise.all([readGrid(), listBatteries()]);
+  const config = await readTickConfig();
+  const { grid, batteries } = config;
   const gridConfigured = isGridConfigured(grid);
 
-  const readingIds = controlReadingIds(grid, batteries);
+  const readingIds = controlReadingIds(config);
   const { states, error } = await readStates([
     ...readingIds,
-    ...controlTargetIds(batteries),
+    ...controlTargetIds(config),
   ]);
 
   // The page can render dashes when Home Assistant is unreachable; a decision
@@ -365,7 +373,7 @@ function startTick(): void {
  */
 async function refreshWatched(): Promise<void> {
   try {
-    state.watched = new Set((await controlEntityIds()).readings);
+    state.watched = new Set(controlReadingIds(await readTickConfig()));
   } catch {
     // A missing or unreadable config file is already the settings pages's
     // problem to report; the previous set stays in force until it is fixed.
