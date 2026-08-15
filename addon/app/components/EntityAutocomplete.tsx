@@ -16,6 +16,13 @@ type EntityAutocompleteProps = {
   error?: string;
   /** Shown under the field when there's no error and no load failure to show instead. */
   hint?: string;
+  /**
+   * Entity domains to suggest. Defaults to readings; a field that writes wants
+   * `["number", "input_number"]` instead. Only the suggestions are filtered —
+   * the field still accepts anything typed into it, which is the escape hatch
+   * for a setup whose control surface is some other domain entirely.
+   */
+  domains?: string[];
   /** Pre-fills the field when editing an entity that already has one. */
   defaultValue?: string;
 };
@@ -26,6 +33,7 @@ export default function EntityAutocomplete({
   placeholder,
   error,
   hint,
+  domains,
   defaultValue = "",
 }: EntityAutocompleteProps) {
   const [query, setQuery] = useState(defaultValue);
@@ -38,18 +46,25 @@ export default function EntityAutocomplete({
   );
   const inputId = useId();
 
+  // Joined to a string rather than depended on as an array: callers pass an
+  // inline literal, which is a new identity every render and would restart the
+  // debounce on each one. A string compares by value.
+  const domainParam = domains?.join(",") ?? "";
+
   // useFetcher returns a new object every render, so depending on fetcher.load
   // would restart the debounce on each render and refire the request. Only
-  // query and open should retrigger it.
+  // query, open and the domains should retrigger it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (!open) return undefined;
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      fetcher.load(`/api/entities?q=${encodeURIComponent(query)}`);
+      const params = new URLSearchParams({ q: query });
+      if (domainParam) params.set("domains", domainParam);
+      fetcher.load(`/api/entities?${params}`);
     }, 200);
     return () => clearTimeout(debounceRef.current);
-  }, [query, open]);
+  }, [query, open, domainParam]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {

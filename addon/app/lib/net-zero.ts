@@ -24,6 +24,24 @@
  * 800 W import in the process. This form tells it to carry on, which is a
  * different answer to the same reading, and the correct one.
  *
+ * ## Batteries that cannot be steered
+ *
+ * A battery with no target power entity keeps doing whatever it was doing, so
+ * it gets no share of the target — but it must also be left out of the
+ * `currentBatteryPower` above, which is less obvious. Writing `C` for the
+ * steerable batteries' current power and `U` for the unsteerable ones':
+ *
+ *     net = load - pv + C + U
+ *
+ * and the unsteerable ones stay at `U`, so the setpoint that zeroes the meter
+ * is found from `load - pv + S + U = 0`, which reduces to
+ *
+ *     S = C - net
+ *
+ * `U` cancels out entirely. Counting it into `currentBatteryPower` instead
+ * would ask the steerable batteries to cover what the unsteerable ones are
+ * already covering, and the meter would overshoot by exactly `U`.
+ *
  * ## Power limits
  *
  * Each battery's share is capped by what its inverter can deliver, which is
@@ -36,6 +54,9 @@
 
 /** Below this the meter counts as balanced; chasing noise would only cycle the battery. */
 export const DEADBAND_W = 25;
+
+/** Why a battery with no target power entity sits out every plan. */
+export const UNSTEERED_REASON = "no target power entity — not steered";
 
 export type BatterySnapshot = {
   id: string;
@@ -51,6 +72,12 @@ export type BatterySnapshot = {
   maxChargeW: number | null;
   /** The same for discharging, as a positive magnitude. Null when unconstrained. */
   maxDischargeW: number | null;
+  /**
+   * Whether a setpoint can be written to this battery at all — false when it
+   * has no target power entity. An unsteered battery is still part of the
+   * house, but it is not part of the plan; see `planNetZero`.
+   */
+  steerable: boolean;
 };
 
 export type BatteryAction = "charge" | "discharge" | "hold";
@@ -79,7 +106,13 @@ export type BatteryDecision = {
 export type NetZeroPlan = {
   /** Grid net exchange in W: positive importing, negative exporting. Null when unreadable. */
   netW: number | null;
-  /** The batteries' combined power right now, in W. */
+  /**
+   * The **steerable** batteries' combined power right now, in W.
+   *
+   * Deliberately not every battery: this is the `C` in `S = C - net` above, and
+   * including a battery nothing can command would make the arithmetic ask the
+   * others to cover what it is already doing.
+   */
   currentBatteryW: number;
   /** The combined setpoint that would zero the meter, or null when it can't be worked out. */
   targetBatteryW: number | null;
@@ -186,11 +219,13 @@ export function planNetZero(input: {
 }): NetZeroPlan {
   const { gridPowerW, batteries } = input;
   const warnings: string[] = [];
+  const steerable = batteries.filter((battery) => battery.steerable);
 
-  // A battery whose power sensor is down still counts as present, but its
-  // contribution to the meter reading is a guess, so say so.
+  // Only the steerable batteries' readings matter to the arithmetic — an
+  // unsteerable one's power cancels out of `S = C - net` — so an unreadable
+  // sensor on a battery nothing can command is not worth a warning.
   let currentBatteryW = 0;
-  for (const battery of batteries) {
+  for (const battery of steerable) {
     if (battery.powerW === null) {
       warnings.push(
         `${battery.title}: power reading unavailable, assuming 0 W`,
@@ -211,6 +246,21 @@ export function planNetZero(input: {
     };
   }
 
+  // Reachable even though the settings form refuses to enable control without
+  // one: the target can be cleared from a battery afterwards.
+  if (steerable.length === 0) {
+    return {
+      netW: gridPowerW,
+      currentBatteryW: 0,
+      targetBatteryW: null,
+      decisions: batteries.map((battery) =>
+        hold(battery, UNSTEERED_REASON, battery.powerW ?? 0),
+      ),
+      summary: "No battery has a target power entity — nothing to steer.",
+      warnings,
+    };
+  }
+
   if (gridPowerW === null) {
     return {
       netW: null,
@@ -219,7 +269,9 @@ export function planNetZero(input: {
       decisions: batteries.map((battery) =>
         hold(
           battery,
-          "no grid reading to balance against",
+          battery.steerable
+            ? "no grid reading to balance against"
+            : UNSTEERED_REASON,
           battery.powerW ?? 0,
         ),
       ),
@@ -236,7 +288,11 @@ export function planNetZero(input: {
       currentBatteryW,
       targetBatteryW: currentBatteryW,
       decisions: batteries.map((battery) =>
-        hold(battery, "grid already balanced", battery.powerW ?? 0),
+        hold(
+          battery,
+          battery.steerable ? "grid already balanced" : UNSTEERED_REASON,
+          battery.powerW ?? 0,
+        ),
       ),
       summary: `Grid net ${signed(netW)} — balanced within the ${DEADBAND_W} W deadband, holding.`,
       warnings,
@@ -247,10 +303,10 @@ export function planNetZero(input: {
   const direction: "charge" | "discharge" =
     targetBatteryW > 0 ? "charge" : "discharge";
 
-  // Only the batteries that still have somewhere to go share the target. The
-  // split is proportional to capacity, so a 5 kWh unit isn't asked for as much
-  // as a 20 kWh one standing next to it.
-  const eligible = batteries.filter(
+  // Only the batteries that can be commanded *and* still have somewhere to go
+  // share the target. The split is proportional to capacity, so a 5 kWh unit
+  // isn't asked for as much as a 20 kWh one standing next to it.
+  const eligible = steerable.filter(
     (battery) => blockedReason(battery, direction) === null,
   );
   const eligibleCapacity = eligible.reduce(
@@ -259,6 +315,13 @@ export function planNetZero(input: {
   );
 
   const decisions = batteries.map((battery): BatteryDecision => {
+    // Held at what it is already doing, not at 0: the other holds below are a
+    // decision to stop, and this one is the absence of any decision at all.
+    // Nothing can be written here, so nothing is being asked for.
+    if (!battery.steerable) {
+      return hold(battery, UNSTEERED_REASON, battery.powerW ?? 0);
+    }
+
     const blocked = blockedReason(battery, direction);
     if (blocked) return hold(battery, blocked, 0);
 

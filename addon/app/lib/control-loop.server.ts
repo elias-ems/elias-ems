@@ -15,7 +15,7 @@
  * statement. (Under Vite's dev server a hot reload can drop the module and with
  * it the log; `npm run start:ingress` is the stack to watch it on.)
  */
-import { resolvePowerLimits } from "./batteries";
+import { isSteerable, resolvePowerLimits } from "./batteries";
 import { listBatteries } from "./batteries.server";
 import type { ControlConfig, ControlLoopStatus } from "./control";
 import { readControlConfig } from "./control-config.server";
@@ -126,6 +126,7 @@ async function readSnapshots(): Promise<{
       maxChargePercent: battery.maxChargePercent,
       socPercent: toNumber(stateOf(battery.socEntityId)),
       powerW: toNumber(stateOf(battery.powerEntityId)),
+      steerable: isSteerable(battery),
       ...resolvePowerLimits(
         battery,
         battery.targetPowerEntityId

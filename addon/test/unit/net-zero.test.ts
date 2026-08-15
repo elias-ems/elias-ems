@@ -9,6 +9,7 @@ import {
   type BatterySnapshot,
   DEADBAND_W,
   planNetZero,
+  UNSTEERED_REASON,
 } from "../../app/lib/net-zero";
 
 function battery(overrides: Partial<BatterySnapshot> = {}): BatterySnapshot {
@@ -22,6 +23,9 @@ function battery(overrides: Partial<BatterySnapshot> = {}): BatterySnapshot {
     powerW: 0,
     maxChargeW: null,
     maxDischargeW: null,
+    // Steerable unless a case says otherwise: these are about the arithmetic,
+    // and a battery nothing can command sits out of all of it.
+    steerable: true,
     ...overrides,
   };
 }
@@ -209,6 +213,67 @@ describe("planNetZero", () => {
 
     expect(plan.decisions).toEqual([]);
     expect(plan.summary).toContain("No batteries configured");
+  });
+
+  it("leaves a battery with no target entity out of the plan", () => {
+    const plan = planNetZero({
+      gridPowerW: 1000,
+      batteries: [
+        battery({ id: "watched", steerable: false }),
+        battery({ id: "steered" }),
+      ],
+    });
+
+    // Held where it is, not commanded to 0: nothing can be written to it, so
+    // nothing is being asked of it either way.
+    expect(plan.decisions[0]).toMatchObject({ action: "hold", setpointW: 0 });
+    expect(plan.decisions[0].reason).toBe(UNSTEERED_REASON);
+    expect(plan.decisions[1].setpointW).toBe(-1000);
+  });
+
+  it("does not ask the steerable batteries to cover what an unsteered one already is", () => {
+    // The case that makes `currentBatteryW` the steerable subset rather than
+    // every battery. Load 1000 W, an unsteered battery already discharging
+    // 800 W, so the meter reads +200 W. Counting its -800 W into the feedback
+    // term would make the target -1000 W, the steerable battery would discharge
+    // 1000 W on top of the other's 800 W, and the house would swing to
+    // exporting 800 W — an overshoot of exactly the unsteered battery's output.
+    const plan = planNetZero({
+      gridPowerW: 200,
+      batteries: [
+        battery({ id: "unsteered", steerable: false, powerW: -800 }),
+        battery({ id: "steered", powerW: 0 }),
+      ],
+    });
+
+    expect(plan.currentBatteryW).toBe(0);
+    expect(plan.targetBatteryW).toBe(-200);
+    expect(plan.decisions[1].setpointW).toBe(-200);
+  });
+
+  it("ignores an unreadable power sensor on a battery it cannot steer", () => {
+    // It cancels out of the arithmetic, so unlike a steerable battery's
+    // missing reading it costs the answer nothing and is not worth a warning.
+    const plan = planNetZero({
+      gridPowerW: 800,
+      batteries: [
+        battery({ id: "unsteered", steerable: false, powerW: null }),
+        battery({ id: "steered" }),
+      ],
+    });
+
+    expect(plan.warnings).toEqual([]);
+    expect(plan.decisions[1].setpointW).toBe(-800);
+  });
+
+  it("says there is nothing to steer when no battery has a target", () => {
+    const plan = planNetZero({
+      gridPowerW: 800,
+      batteries: [battery({ steerable: false })],
+    });
+
+    expect(plan.targetBatteryW).toBeNull();
+    expect(plan.summary).toContain("nothing to steer");
   });
 
   it("caps a discharge at what the inverter can deliver", () => {

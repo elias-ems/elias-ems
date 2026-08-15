@@ -69,10 +69,22 @@ above the ceiling.
 
 `targetPowerEntityId` is where the setpoint gets written, and it is what turns a
 battery from something watched into something steered. Leaving it empty is a
-supported state, not an unfinished one: the battery still takes part in every
-decision and every log line, and nothing will be written to it. Every record
-saved before this field existed reads as empty, so no existing installation
-starts being steered by an upgrade.
+supported state, not an unfinished one — but it has consequences, described
+under [Batteries that cannot be steered](#batteries-that-cannot-be-steered)
+below. Every record saved before this field existed reads as empty, so no
+existing installation starts being steered by an upgrade.
+
+**Battery control cannot be enabled until at least one battery has one.** The
+checkbox on the Settings page is disabled until then, and the action rejects the
+save even if the form is posted directly — a target can be cleared after control
+was switched on, so the server cannot trust the form to have been rendered in
+the current state. Switching control *off* is always allowed, which is the way
+out of that state.
+
+The rule is "at least one", not "all": a house can reasonably have one steerable
+battery and one that only reports. What it cannot have is control enabled with
+nothing to write to, because a loop that decides correctly and changes nothing
+looks exactly like a loop that is broken.
 
 It wants a **writable** entity, which in practice means one of two things:
 
@@ -84,6 +96,12 @@ It wants a **writable** entity, which in practice means one of two things:
   `climate`, `cover`, `switch`, `light`, `fan`, `sensor` and `binary_sensor`
   only — so writing a register means calling `modbus.write_register` from an
   automation, and the `input_number` is the thing to point this field at.
+
+Those two are what the field's autocomplete suggests, via the `domains`
+parameter on [`/api/entities`](../../addon/app/routes/api.entities.tsx); every
+other field asks that route for `sensor` and gets the old behaviour. The field
+still accepts anything typed into it by hand, which is the escape hatch for a
+setup whose control surface is some other domain entirely.
 
 There is deliberately no mode/`select` entity here yet, and no split
 charge/discharge pair. Plenty of inverters need the mode set to something like
@@ -158,14 +176,44 @@ exactly the right thing. The naive rule would tell it to stop and create an
 800 W import in the process. This form tells it to carry on — a different answer
 to the same reading, and the correct one.
 
+### Batteries that cannot be steered
+
+A battery with no target power entity is left out of the plan: it keeps doing
+whatever it was doing, and gets a decision line saying so rather than a
+setpoint. The less obvious half is that it must also be left out of
+`currentBatteryPower`. Writing `C` for the steerable batteries' combined power
+and `U` for the unsteerable ones':
+
+```
+net = load - pv + C + U
+```
+
+The unsteerable ones stay at `U`, so the setpoint that zeroes the meter comes
+from `load - pv + S + U = 0`, which reduces to:
+
+```
+S = C - net
+```
+
+`U` cancels out entirely. Counting it into `currentBatteryPower` would ask the
+steerable batteries to cover what the unsteerable ones are *already* covering,
+and the meter would overshoot by exactly `U` — a house importing 200 W with an
+unsteered battery already discharging 800 W would end up exporting 800 W.
+
+A corollary: an unreadable power sensor on an unsteered battery costs the answer
+nothing, so unlike a steerable battery's missing reading it produces no warning.
+
 ### The rules
 
 1. `net` is the grid power sensor, read as-is.
 2. If `|net| < 25 W` the meter counts as balanced: hold everything where it is.
    Chasing meter noise would only cycle the battery.
-3. Otherwise `target = currentBatteryPower - net`; positive means charge,
-   negative means discharge.
+3. Otherwise `target = currentBatteryPower - net`, over the **steerable**
+   batteries only; positive means charge, negative means discharge.
 4. A battery drops out of the plan when it cannot help in that direction:
+   - it has no target power entity, so nothing can be written to it. Unlike the
+     cases below it holds at its *current* power rather than at 0 — those are a
+     decision to stop, this is the absence of any decision at all;
    - at or above `maxChargePercent` and the target is to charge;
    - at or below `minChargePercent` and the target is to discharge;
    - its power limit in that direction is 0 — see
@@ -298,11 +346,11 @@ concatenation.
 
 | Suite | What it covers |
 | --- | --- |
-| `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split, and the power caps — each direction independently, and a battery limited to 0 W leaving the split to the others |
+| `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split, and the power caps — each direction independently, and a battery limited to 0 W leaving the split to the others. Also the unsteerable cases: dropping out of the plan, and not being counted into the feedback term |
 | `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config, including `resolvePowerLimits` and a battery record saved before the control fields existed |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
 | `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, and files its lines under the right origin. Also that a target entity's own range reaches the strategy, and that a configured cap overrides it rather than narrowing it |
-| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent |
+| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, the writable-domain filter on `/api/entities`, and that control refuses to switch on with no steerable battery but can always be switched off |
 | `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy |
 | `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves. What it reads is the diagnostics entry `syncControlLoop()` writes when it starts an interval: nothing in that process has posted the settings form, so only the boot-time call can have produced it |
 | `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the diagnostics box fill |

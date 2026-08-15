@@ -140,7 +140,8 @@ export default function BatteriesSection({
                 placeholder="e.g. number.battery_target_power"
                 defaultValue={battery?.targetPowerEntityId}
                 error={errors.targetPowerEntityId}
-                hint="Where the setpoint is written, same sign convention as Power. Leave empty to watch this battery without steering it."
+                domains={["number", "input_number"]}
+                hint="Where the setpoint is written, same sign convention as Power. Suggests number and input_number entities, but accepts any id you type. Leave empty to watch this battery without steering it."
               />
               <Field
                 name="maxChargePowerW"

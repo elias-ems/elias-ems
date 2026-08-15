@@ -4,22 +4,33 @@ import type { ControlConfig } from "../../lib/control";
 import {
   MAX_INTERVAL_SECONDS,
   MIN_INTERVAL_SECONDS,
+  NO_STEERABLE_BATTERY_ERROR,
   STRATEGIES,
 } from "../../lib/control";
 import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
 import Field from "../Field";
-import { formStyle, hintStyle, inputStyle, labelStyle } from "../form";
+import {
+  errorStyle,
+  formStyle,
+  hintStyle,
+  inputStyle,
+  labelStyle,
+} from "../form";
 import Section from "./Section";
 
 export default function ControlSection({
   config,
-  /** Whether the grid and at least one battery are configured. */
+  /**
+   * Whether the grid, at least one battery, and at least one battery with a
+   * target power entity are configured. The last is the only one of the three
+   * that blocks enabling rather than merely warning.
+   */
   ready,
   actionData,
 }: {
   config: ControlConfig;
-  ready: { grid: boolean; batteries: boolean };
+  ready: { grid: boolean; batteries: boolean; targets: boolean };
   actionData?: SettingsActionData;
 }) {
   const navigation = useNavigation();
@@ -39,6 +50,11 @@ export default function ControlSection({
     !ready.batteries && "at least one battery",
   ].filter((item): item is string => Boolean(item));
 
+  // Left interactive while control is already on, so that a target cleared
+  // afterwards leaves a box that can still be unticked rather than a switch
+  // stuck in the on position.
+  const canEnable = ready.targets || config.enabled;
+
   return (
     <Section
       title="Battery control"
@@ -53,11 +69,18 @@ export default function ControlSection({
             type="checkbox"
             name="enabled"
             defaultChecked={config.enabled}
+            disabled={!canEnable}
           />
           <label htmlFor={enabledId} style={labelStyle}>
             Enable battery control
           </label>
         </div>
+
+        {!ready.targets && (
+          <p style={errors.enabled ? errorStyle : hintStyle}>
+            {NO_STEERABLE_BATTERY_ERROR}
+          </p>
+        )}
 
         {missing.length > 0 && (
           <p style={hintStyle}>

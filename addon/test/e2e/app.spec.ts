@@ -146,6 +146,12 @@ test("battery control can be configured, enabled, and watched deciding", async (
   await suggestion("sensor\\.battery_power\\b").click();
   await page.getByLabel(/^Charge/).fill("state_of_charge");
   await suggestion("sensor\\.battery_state_of_charge\\b").click();
+  // Control cannot be switched on without one. Also the only place the
+  // writable-domain suggestions are exercised in a real browser: this field
+  // asks for `number` and `input_number`, and a plain `sensor.` search would
+  // never turn this entity up.
+  await page.getByLabel(/^Target power/).fill("setpoint");
+  await suggestion("input_number\\.battery_setpoint\\b").click();
   await page.getByRole("button", { name: "Add", exact: true }).click();
 
   await expect(

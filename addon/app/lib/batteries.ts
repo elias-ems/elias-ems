@@ -115,6 +115,19 @@ export function normalizeBattery(battery: Battery): Battery {
   };
 }
 
+/**
+ * Whether a setpoint can be written to this battery at all.
+ *
+ * The one thing that separates a battery the strategy may command from one it
+ * can only watch, so it is a named function rather than a truthiness check
+ * spelled out at each of the three call sites that need it.
+ */
+export function isSteerable(
+  battery: Pick<BatteryFields, "targetPowerEntityId">,
+): boolean {
+  return Boolean(battery.targetPowerEntityId?.trim());
+}
+
 /** What a battery may be asked for, once config and the entity are both in. */
 export type PowerLimits = {
   /** Most it may charge at, in W. Null when nothing constrains it. */

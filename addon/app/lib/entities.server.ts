@@ -1,5 +1,5 @@
 /**
- * The list of sensors the settings forms let you pick from.
+ * The list of entities the settings forms let you pick from.
  *
  * Here rather than in `api.entities.tsx` for the reason `dashboard.server.ts`
  * is not in `_index.tsx`: which entities are offerable, what a picked one is
@@ -18,11 +18,19 @@ import { fetchHaStates, type HaState } from "./ha.server";
 const MAX_OPTIONS = 25;
 
 /**
- * Only `sensor.` entities: the fields that use this all store a reading, and a
- * switch or a binary sensor is not one.
+ * What a field gets when it doesn't ask for anything else: readings, which is
+ * what all but one of them store. A switch or a binary sensor is not one.
  */
-function isOfferable(state: HaState): boolean {
-  return state.entity_id.startsWith("sensor.");
+const DEFAULT_DOMAINS = ["sensor"];
+
+/**
+ * Restricted to the domains the field asked for, because a field that writes
+ * needs different entities from one that reads. The battery's target power
+ * field asks for `number` and `input_number`; offering it a `sensor` would be
+ * offering something that cannot be set.
+ */
+function isOfferable(state: HaState, prefixes: string[]): boolean {
+  return prefixes.some((prefix) => state.entity_id.startsWith(prefix));
 }
 
 function toOption(state: HaState): EntityOption {
@@ -49,11 +57,14 @@ function matches(entity: EntityOption, query: string): boolean {
 }
 
 /**
- * The sensors matching `query`, or the reason Home Assistant could not be
- * asked. Never throws: the caller is a dropdown, and a field that fails to open
- * says less than one that explains itself.
+ * The entities matching `query` in `domains`, or the reason Home Assistant
+ * could not be asked. Never throws: the caller is a dropdown, and a field that
+ * fails to open says less than one that explains itself.
  */
-export async function listEntityOptions(query: string): Promise<EntitiesData> {
+export async function listEntityOptions(
+  query: string,
+  domains: string[] = DEFAULT_DOMAINS,
+): Promise<EntitiesData> {
   let states: HaState[];
   try {
     states = await fetchHaStates();
@@ -62,9 +73,10 @@ export async function listEntityOptions(query: string): Promise<EntitiesData> {
     return { entities: [], error: message };
   }
 
+  const prefixes = domains.map((domain) => `${domain}.`);
   const needle = query.trim().toLowerCase();
   const entities = states
-    .filter(isOfferable)
+    .filter((state) => isOfferable(state, prefixes))
     .map(toOption)
     .filter((entity) => matches(entity, needle))
     .slice(0, MAX_OPTIONS);

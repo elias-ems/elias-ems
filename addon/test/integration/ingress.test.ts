@@ -178,6 +178,9 @@ describe("battery control", () => {
       energyEntityId: "sensor.battery_energy_total",
       powerEntityId: "sensor.battery_power",
       socEntityId: "sensor.battery_state_of_charge",
+      // Control refuses to switch on without one, and its wide range leaves
+      // the setpoints these assert on uncapped.
+      targetPowerEntityId: "input_number.battery_setpoint",
     });
 
     expect(await messages()).toEqual([]);

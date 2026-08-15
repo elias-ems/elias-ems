@@ -76,7 +76,20 @@ export function normalizeControlConfig(
   };
 }
 
-export type ControlErrors = { intervalSeconds?: string };
+export type ControlErrors = { intervalSeconds?: string; enabled?: string };
+
+/**
+ * Why control cannot be switched on yet.
+ *
+ * Enabling it with nothing to write to would produce a loop that decides
+ * correctly and changes nothing — which looks identical, from the outside, to
+ * a loop that is broken. The check lives in the settings action rather than in
+ * `parseControlConfig` because it needs the battery list, and this module is
+ * pure; the constant is here so the form's warning and the server's rejection
+ * cannot drift apart.
+ */
+export const NO_STEERABLE_BATTERY_ERROR =
+  "At least one battery needs a target power entity before control can be enabled — without one there is nothing to steer.";
 
 export function parseControlConfig(
   formData: FormData,

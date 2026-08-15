@@ -116,6 +116,39 @@ describe("GET /api/entities", () => {
     expect(ids).not.toContain("binary_sensor.grid_connected");
   });
 
+  it("offers the writable domains when a field asks for them", async () => {
+    // What the target power field asks for. An `input_number` is the entity a
+    // plain Modbus setup ends up pointing at — Home Assistant's modbus
+    // integration has no `number` platform — so leaving it out of the
+    // suggestions makes that whole class of installation look unsupported.
+    const { entities } = await loadEntities("?domains=number,input_number");
+
+    const ids = entities.map((entity) => entity.entityId);
+    expect(ids).toContain("number.battery_target_power");
+    expect(ids).toContain("input_number.battery_setpoint");
+    expect(ids).not.toContain("sensor.inverter_power");
+  });
+
+  it("still searches within the domains it was given", async () => {
+    const { entities } = await loadEntities(
+      "?domains=number,input_number&q=setpoint",
+    );
+
+    expect(entities.map((entity) => entity.entityId)).toEqual([
+      "input_number.battery_setpoint",
+    ]);
+  });
+
+  it("falls back to sensors when the domains parameter is empty", async () => {
+    // A blank one is a caller that meant to filter and sent nothing, not a
+    // request for every entity in the house.
+    const { entities } = await loadEntities("?domains=");
+
+    const ids = entities.map((entity) => entity.entityId);
+    expect(ids).toContain("sensor.inverter_power");
+    expect(ids).not.toContain("number.battery_target_power");
+  });
+
   it("matches the query against both the id and the friendly name", async () => {
     const byId = await loadEntities("?q=garage_inverter");
     const byName = await loadEntities("?q=Garage inverter");
@@ -550,6 +583,9 @@ describe("POST /settings", () => {
   it("starts the loop as soon as the box is ticked", async () => {
     // Waiting for a restart would be indistinguishable from the feature not
     // working, which is the whole reason the action re-syncs the loop.
+    const { addBattery } = await import("../../app/lib/batteries.server");
+    await addBattery(storedBattery);
+
     const { loop } = await loadSettings();
     try {
       await post({
@@ -566,6 +602,68 @@ describe("POST /settings", () => {
     } finally {
       // The interval is real here; leaving it running would tick against a
       // torn-down mock for the rest of the file.
+      await loop.pendingControlTick();
+      loop.resetControlLoop();
+    }
+  });
+
+  it("refuses to enable control when no battery has a target entity", async () => {
+    // A loop that decides correctly and writes nowhere is indistinguishable
+    // from a broken one, so this is a rejection rather than a warning.
+    const { addBattery } = await import("../../app/lib/batteries.server");
+    await addBattery({ ...storedBattery, targetPowerEntityId: "" });
+
+    const result = await post({
+      intent: "control-save",
+      enabled: "on",
+      strategy: "net-zero-energy",
+      intervalSeconds: "5",
+    });
+
+    const { payload, status } = failure(result);
+    expect(status).toBe(400);
+    expect(payload).toMatchObject({
+      section: "control",
+      errors: { enabled: expect.stringContaining("target power entity") },
+    });
+
+    const { readControlConfig } = await import(
+      "../../app/lib/control-config.server"
+    );
+    expect((await readControlConfig()).enabled).toBe(false);
+  });
+
+  it("still lets control be switched off with no target entity", async () => {
+    // The way out of the state above: refusing this too would leave a stored
+    // `enabled: true` with no way to clear it from the form.
+    const { addBattery } = await import("../../app/lib/batteries.server");
+    await addBattery({ ...storedBattery, targetPowerEntityId: "" });
+
+    const result = await post({
+      intent: "control-save",
+      strategy: "net-zero-energy",
+      intervalSeconds: "5",
+    });
+
+    expect(result).toEqual({ section: "control", ok: true });
+  });
+
+  it("enables control when only one of several batteries is steerable", async () => {
+    const { addBattery } = await import("../../app/lib/batteries.server");
+    await addBattery({ ...storedBattery, targetPowerEntityId: "" });
+    await addBattery(storedBattery);
+
+    const { loop } = await loadSettings();
+    try {
+      const result = await post({
+        intent: "control-save",
+        enabled: "on",
+        strategy: "net-zero-energy",
+        intervalSeconds: "5",
+      });
+
+      expect(result).toEqual({ section: "control", ok: true });
+    } finally {
       await loop.pendingControlTick();
       loop.resetControlLoop();
     }

@@ -3,14 +3,14 @@ import BatteriesSection from "../components/settings/BatteriesSection";
 import ControlSection from "../components/settings/ControlSection";
 import GridSection from "../components/settings/GridSection";
 import PvSection from "../components/settings/PvSection";
-import { parseBattery } from "../lib/batteries";
+import { isSteerable, parseBattery } from "../lib/batteries";
 import {
   addBattery,
   listBatteries,
   removeBattery,
   updateBattery,
 } from "../lib/batteries.server";
-import { parseControlConfig } from "../lib/control";
+import { NO_STEERABLE_BATTERY_ERROR, parseControlConfig } from "../lib/control";
 import {
   readControlConfig,
   saveControlConfig,
@@ -108,6 +108,21 @@ export async function action({ request }: Route.ActionArgs) {
           errors: parsed.errors,
         });
       }
+
+      // The form disables the checkbox in this state, but the check has to be
+      // here too: a target can be cleared from a battery after control was
+      // switched on, and nothing stops a form being posted directly.
+      if (parsed.config.enabled) {
+        const batteries = await listBatteries();
+        if (!batteries.some(isSteerable)) {
+          return failed({
+            section: "control",
+            recordId: null,
+            errors: { enabled: NO_STEERABLE_BATTERY_ERROR },
+          });
+        }
+      }
+
       await saveControlConfig(parsed.config);
       // Take effect now rather than at the next restart: someone who has just
       // ticked the box expects the log on the home page to start moving.
@@ -140,6 +155,7 @@ export default function Settings({
         ready={{
           grid: isGridConfigured(grid),
           batteries: batteries.length > 0,
+          targets: batteries.some(isSteerable),
         }}
         actionData={actionData}
       />

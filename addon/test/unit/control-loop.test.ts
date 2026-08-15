@@ -71,9 +71,11 @@ const BATTERY = {
   energyEntityId: "sensor.battery_energy_total",
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
-  // Unsteered by default, so the cases below are about scheduling and not
-  // about a power limit quietly cutting the setpoint they assert on.
-  targetPowerEntityId: "",
+  // Steerable, since an unsteered battery sits out of every plan and these
+  // cases are about scheduling. Pointed at the wide-range fixture entity
+  // (-5000..5000) rather than number.battery_target_power, whose deliberately
+  // tight -500 W floor would cap the setpoints they assert on.
+  targetPowerEntityId: "input_number.battery_setpoint",
   maxChargePowerW: null,
   maxDischargePowerW: null,
 };
