@@ -112,6 +112,15 @@ export async function startHaMock({
   const requests = [];
 
   /**
+   * Every service call seen, in order, so a test can assert what the add-on
+   * asked Home Assistant to do rather than only what the state ended up as.
+   * The difference matters: a loop that writes the same value forty times a
+   * minute and one that writes it once leave the same entity behind.
+   * @type {Array<{ domain: string, service: string, data: object }>}
+   */
+  const serviceCalls = [];
+
+  /**
    * Sockets that have authenticated, against the id of their `state_changed`
    * subscription — null until they ask for one. A connection that never
    * subscribes is still a connection, and must not be sent events.
@@ -172,6 +181,51 @@ export async function startHaMock({
 
     if (pathname === "/core/api/states") {
       return sendJson(res, 200, current);
+    }
+
+    // Services are how anything actually changes a device. Only the two
+    // `set_value` variants the add-on calls are implemented, and they behave
+    // the way the real ones do in the respect that matters here: the entity
+    // takes the value, subscribers are told, and the response is the list of
+    // states the call changed. A value outside the entity's own min/max is
+    // rejected, which is what makes writing out of range a testable mistake
+    // rather than a silent one.
+    const serviceMatch = pathname.match(
+      /^\/core\/api\/services\/([^/]+)\/(.+)$/,
+    );
+    if (serviceMatch && req.method === "POST") {
+      const [, domain, service] = serviceMatch;
+      return readJson(req).then(
+        (body) => {
+          const entityId = String(body?.entity_id ?? "");
+          const existing = current.find(
+            (entity) => entity.entity_id === entityId,
+          );
+
+          serviceCalls.push({ domain, service, data: body ?? {} });
+
+          if (service !== "set_value" || !existing) {
+            return sendJson(res, 400, { message: "Unknown service call" });
+          }
+
+          const value = Number(body?.value);
+          const { min, max } = existing.attributes ?? {};
+          if (
+            !Number.isFinite(value) ||
+            (Number.isFinite(min) && value < min) ||
+            (Number.isFinite(max) && value > max)
+          ) {
+            return sendJson(res, 400, {
+              message: `Value ${body?.value} outside range`,
+            });
+          }
+
+          const next = { ...existing, state: String(value) };
+          applyState(entityId, next);
+          return sendJson(res, 200, [next]);
+        },
+        () => sendJson(res, 400, { message: "Invalid JSON specified." }),
+      );
     }
 
     const match = pathname.match(/^\/core\/api\/states\/(.+)$/);
@@ -303,6 +357,7 @@ export async function startHaMock({
     /** What SUPERVISOR_WS should be set to. */
     wsUrl: `ws://127.0.0.1:${boundPort}/core/websocket`,
     requests,
+    serviceCalls,
     /** How many clients are subscribed right now — one per add-on process. */
     subscriberCount: () =>
       [...sockets.values()].filter((id) => id !== null).length,

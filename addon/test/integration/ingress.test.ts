@@ -199,6 +199,44 @@ describe("battery control", () => {
       .toContainEqual(expect.stringContaining("Home battery: discharge at"));
   });
 
+  it("writes the setpoint from inside the real server process", async () => {
+    // The unit tests import the loop and call it. This is the one place the
+    // write leaves the process that actually serves the add-on, over the same
+    // Supervisor proxy it would use inside Home Assistant.
+    await expect
+      .poll(
+        () =>
+          stack.ha.serviceCalls.filter((call) => call.service === "set_value")
+            .length,
+        { timeout: 5_000 },
+      )
+      .toBeGreaterThan(0);
+
+    const [call] = stack.ha.serviceCalls.filter(
+      (entry) => entry.service === "set_value",
+    );
+    expect(call).toMatchObject({
+      domain: "input_number",
+      data: { entity_id: "input_number.battery_setpoint", value: -800 },
+    });
+  });
+
+  it("releases the battery when control is switched off", async () => {
+    await post({
+      intent: "control-save",
+      strategy: "net-zero-energy",
+      intervalSeconds: "1",
+    });
+
+    const values = stack.ha.serviceCalls
+      .filter((call) => call.service === "set_value")
+      .map((call) => (call.data as { value?: unknown }).value);
+
+    // Whatever it wrote along the way, the last thing it said before letting go
+    // has to be 0 — a stopped loop must not leave a battery being driven.
+    expect(values.at(-1)).toBe(0);
+  });
+
   it("hands the whole log over as a text file", async () => {
     const response = await fetch(`${stack.baseUrl}api/diagnostics.txt`);
 

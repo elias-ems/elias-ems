@@ -3,11 +3,10 @@
 The first EMS feature: a loop that watches the grid meter and works out what the
 house battery should be doing to keep it at zero.
 
-**It decides and logs; it does not yet command the battery.** The battery
-configuration now names the entity a setpoint would be written to, and the
-strategy respects that entity's power limits — but nothing is written to it yet.
-The decision half is worth having visibly right before anything is handed the
-power to act on it. Everything below describes a loop you can watch and check.
+**It decides, writes, and logs.** Each tick works out what every battery should
+be doing, writes that to the battery's target power entity, and records both the
+decision and what was written. What it cannot yet do is put an inverter into the
+mode that makes it *listen* — see [Not done yet](#not-done-yet).
 
 Tracked in [issue #4](https://github.com/elias-ems/elias-ems/issues/4).
 
@@ -96,6 +95,15 @@ It wants a **writable** entity, which in practice means one of two things:
   `climate`, `cover`, `switch`, `light`, `fan`, `sensor` and `binary_sensor`
   only — so writing a register means calling `modbus.write_register` from an
   automation, and the `input_number` is the thing to point this field at.
+
+The loop reads it every tick for its `min`/`max`, but it is **not** one of the
+entities whose changes provoke a tick, and it is left out of the "oldest
+reading" the log stamps each decision with. A target is an output: once the
+write path exists, watching it would mean every setpoint we write comes back as
+a change, provokes another tick, and is written again, with nothing damping the
+loop. And being a setpoint rather than a sensor, it can sit untouched for hours
+without anything being wrong — which would make it permanently the oldest thing
+the loop had read, and that clause is there to expose a stuck *sensor*.
 
 Those two are what the field's autocomplete suggests, via the `domains`
 parameter on [`/api/entities`](../../addon/app/routes/api.entities.tsx); every
@@ -240,6 +248,86 @@ zero, so the next tick's `currentBatteryPower - net` asks for it again, and the
 batteries with headroom take it up over a few ticks. The feedback term is what
 makes the simpler per-battery cap correct rather than merely cheaper.
 
+## Writing the setpoint
+
+In [addon/app/lib/setpoints.server.ts](../../addon/app/lib/setpoints.server.ts),
+kept apart from the strategy (which stays pure) and from the loop (which is
+about *when* to decide). What arrives is a number in watts with the sign
+convention already applied; what leaves is a Home Assistant service call.
+
+### What gets written, which is not the setpoint
+
+Each decision carries a `commandW` alongside its `setpointW`, and they are
+deliberately different things:
+
+| Decision | `setpointW` | `commandW` |
+| --- | --- | --- |
+| charge / discharge | the share, capped | the same |
+| at an SoC or power limit | 0 | **0** — an active stop |
+| inside the grid deadband | the battery's *measured* power | **null** — write nothing |
+| grid sensor unreadable | measured power | **0** for steerable batteries |
+| no target entity | measured power | null |
+
+The deadband row is the one worth explaining. A hold reports the battery's
+measured power, which is the right thing to *display* and the wrong thing to
+*command*: writing a measurement back as a setpoint would let sensor noise walk
+the commanded value around tick after tick, on a house that is already balanced.
+So a deadband hold writes nothing and the previous setpoint stands.
+
+The unreadable-grid row goes the other way. That is the blind case, and a
+battery left forcing kilowatts because the meter it was following broke is the
+one hold that must not persist. An unreachable Home Assistant never gets this
+far — the tick fails first — so a null reading here means a genuinely broken
+sensor.
+
+### Which service
+
+From the target entity's own domain: `number.set_value` for a `number`,
+`input_number.set_value` for an `input_number`, both taking
+`{ entity_id, value }`. Any other domain is refused rather than guessed at —
+this writes to hardware, and a service name invented from an entity id is
+exactly the guess that should fail loudly and change nothing.
+
+### The write deadband
+
+A write only happens when the entity's current value differs from what we want
+by at least **50 W**. The loop can tick every second and a house is never still,
+so a strategy recalculating a few watts lower each time would otherwise produce a
+service call every tick — thousands an hour, against hardware that on some brands
+commits setpoints to flash.
+
+Comparing against **what the entity reads now**, rather than against what we last
+sent, is what makes this self-correcting and stateless: something else moving the
+entity shows up as a difference on the next tick and gets written back, with
+nothing remembered in between. Values are rounded to the entity's own `step`
+first, so a device that quantises 582 W to 600 W and reports that back doesn't
+leave a permanent gap between what we asked for and what we read.
+
+A failed write is one battery not doing as it was told: it is logged, the other
+batteries are still written, and the next tick tries again. It is never allowed
+to end the loop.
+
+### Letting go
+
+`releaseBatteries()` commands 0 to every steerable battery, and runs when control
+is switched off and on `SIGTERM`/`SIGINT`. A battery left forcing kilowatts
+because the thing that told it to is gone is the worst failure this feature has —
+from the battery's side there is no difference between a setpoint that is still
+wanted and one whose author died ten minutes ago.
+
+Two honest limits. Zero is the **safe** value, not necessarily the *correct*
+one: it stops the battery being driven either way, which is safe on every
+inverter, but handing it back to its own self-consumption logic means restoring a
+mode on many brands. And nothing here survives `kill -9`, a power cut, or a
+container the supervisor destroys without asking. The only real answer to those
+is an inverter whose forced mode expires on its own — a command timeout, which
+some brands have and others do not.
+
+The release deliberately ignores the write deadband: letting go is worth one
+unconditional write even when the entity looks like it already reads 0, because
+the entity's last known value is the very thing in doubt when something has gone
+wrong enough to be switching control off.
+
 ## The loop
 
 In [addon/app/lib/control-loop.server.ts](../../addon/app/lib/control-loop.server.ts).
@@ -349,9 +437,10 @@ concatenation.
 | `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split, and the power caps — each direction independently, and a battery limited to 0 W leaving the split to the others. Also the unsteerable cases: dropping out of the plan, and not being counted into the feedback term |
 | `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config, including `resolvePowerLimits` and a battery record saved before the control fields existed |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
-| `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, and files its lines under the right origin. Also that a target entity's own range reaches the strategy, and that a configured cap overrides it rather than narrowing it |
+| `test/unit/setpoints.test.ts` | the write itself: the service picked from the entity's domain, a refused domain, rounding to `step`, the deadband skipping a redundant write and clearing it not doing, correcting an entity something else moved, and a failure on one battery leaving its neighbour written |
+| `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, and files its lines under the right origin. Also that a target entity's own range reaches the strategy, that a configured cap overrides it rather than narrowing it, and that a change to a target provokes no tick. Also the write from the loop's side: that a tick writes what it decided, that a second tick doesn't repeat it, that a deadband hold writes nothing, that an unreadable grid cancels a standing command, and that switching control off releases the batteries |
 | `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, the writable-domain filter on `/api/entities`, and that control refuses to switch on with no steerable battery but can always be switched off |
-| `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy |
+| `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy — including the setpoint leaving that process over the Supervisor proxy, and the release landing when control is switched off |
 | `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves. What it reads is the diagnostics entry `syncControlLoop()` writes when it starts an interval: nothing in that process has posted the settings form, so only the boot-time call can have produced it |
 | `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the diagnostics box fill |
 
@@ -364,20 +453,18 @@ tick currently in flight, since advancing a clock only *starts* one.
 
 ## Not done yet
 
-- **Writing the setpoint to the battery.** The one thing that makes this control
-  rather than observation. The target entity is now configured and the setpoint
-  is bounded by what the inverter can take, so what is left is the write itself:
-  a `number.set_value` service call through the Supervisor proxy, a deadband so
-  a five-second loop is not writing thousands of times an hour, and reading the
-  entity back to notice when a write did not land.
 - **A mode entity.** Many inverters ignore a setpoint until a `select.*` is put
   into a forced or manual mode, and want it returned to self-consumption
-  afterwards. That is a second field and a lifecycle, not just another write.
-- **Reverting on stop.** Nothing yet guarantees a battery is handed back to its
-  own logic when control is disabled, the add-on is stopped, or the container
-  dies. A battery left forcing 5 kW because the process that told it to is gone
-  is the worst failure this feature has, and it has to be solved before the
-  write path ships.
+  afterwards. This is the biggest remaining gap and the most likely reason a
+  correctly written setpoint does nothing: the write lands on the entity, the
+  entity reads back what we asked for, and the hardware carries on doing
+  whatever its own logic says. It is a second field and a lifecycle, not just
+  another write, and it is also what would make [letting go](#letting-go) mean
+  "resume self-consumption" rather than merely "stop".
+- **Noticing that the hardware disagreed.** The read-back confirms the *entity*
+  took the value, which is not the same as the inverter obeying it. Comparing
+  the battery's measured power against its setpoint over a few ticks would
+  catch a setpoint being ignored — the failure the mode entity above causes.
 - **Redistributing what a power cap holds back** within a single tick, rather
   than letting the feedback term converge on it over several. Worth doing if the
   convergence turns out to be visible in practice.

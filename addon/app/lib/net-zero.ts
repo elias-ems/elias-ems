@@ -89,6 +89,19 @@ export type BatteryDecision = {
   /** Where the battery should be, in W: positive charging, negative discharging. */
   setpointW: number;
   /**
+   * What to write to the target entity, or **null to write nothing and leave
+   * the last setpoint standing**.
+   *
+   * Not the same as `setpointW`, and the difference is the whole reason this
+   * field exists. A hold inside the deadband reports `setpointW` as the
+   * battery's *measured* power, which is the right thing to display and the
+   * wrong thing to command: writing a measurement back as a setpoint would let
+   * sensor noise walk the commanded value around, tick after tick, for a house
+   * that is already balanced. A hold forced by a limit is the opposite — it is
+   * an active decision to stop, so it commands 0.
+   */
+  commandW: number | null;
+  /**
    * What the split asked for before a power limit cut it down, or null when
    * nothing was cut. Kept separate from `setpointW` so the log can show both:
    * a plan that is quietly delivering less than the meter needs looks identical
@@ -198,12 +211,16 @@ function hold(
   battery: BatterySnapshot,
   reason: string,
   setpointW: number,
+  commandW: number | null = null,
 ): BatteryDecision {
   return {
     batteryId: battery.id,
     title: battery.title,
     action: "hold",
     setpointW,
+    // Nothing written unless a caller says otherwise: most holds are "leave it
+    // alone", and the ones that mean "stop" pass an explicit 0.
+    commandW,
     cappedFromW: null,
     currentW: battery.powerW,
     socPercent: battery.socPercent,
@@ -273,6 +290,12 @@ export function planNetZero(input: {
             ? "no grid reading to balance against"
             : UNSTEERED_REASON,
           battery.powerW ?? 0,
+          // Commanding 0 rather than holding: this is the blind case, and a
+          // battery left forcing kilowatts because the meter it was following
+          // went unreadable is the one hold that should not persist. The
+          // sensor being unreadable is a broken sensor, not a network blip —
+          // an unreachable Home Assistant fails the tick before it gets here.
+          battery.steerable ? 0 : null,
         ),
       ),
       summary: "The grid power sensor is not readable — holding.",
@@ -322,8 +345,10 @@ export function planNetZero(input: {
       return hold(battery, UNSTEERED_REASON, battery.powerW ?? 0);
     }
 
+    // Commanded to 0, not merely left alone: this battery is at a limit, and
+    // whatever it was last told to do is exactly what it must stop doing.
     const blocked = blockedReason(battery, direction);
-    if (blocked) return hold(battery, blocked, 0);
+    if (blocked) return hold(battery, blocked, 0, 0);
 
     // Equal shares when capacities are unusable — the form validates capacity
     // above zero, but a hand-edited file can still get here.
@@ -360,6 +385,7 @@ export function planNetZero(input: {
       title: battery.title,
       action: direction,
       setpointW,
+      commandW: setpointW,
       cappedFromW,
       currentW: battery.powerW,
       socPercent: battery.socPercent,

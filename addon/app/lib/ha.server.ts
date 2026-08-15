@@ -85,11 +85,14 @@ function supervisorToken(): string {
  */
 async function haFetch<T>(
   path: string,
+  init?: { method: string; body: unknown },
 ): Promise<{ ok: boolean; status: number; body: () => Promise<T> }> {
   const timeout = requestTimeoutMs();
 
   try {
     const response = await fetch(`${supervisorApi()}${path}`, {
+      method: init?.method,
+      body: init ? JSON.stringify(init.body) : undefined,
       headers: {
         Authorization: `Bearer ${supervisorToken()}`,
         "Content-Type": "application/json",
@@ -138,4 +141,35 @@ export async function fetchHaState(entityId: string): Promise<HaState | null> {
   }
 
   return response.body();
+}
+
+/**
+ * Calls a Home Assistant service — the only way an add-on can *change*
+ * anything, since `POST /states` merely rewrites Home Assistant's idea of an
+ * entity without telling the device behind it.
+ *
+ * Throws on anything but success, and the caller is expected to catch: a write
+ * that fails is one battery not doing what it was told, which is worth a log
+ * line and another attempt on the next tick, not the end of the control loop.
+ *
+ * Home Assistant answers with the states the call changed. That is not proof
+ * the hardware obeyed — only that the entity took the value — so the loop
+ * confirms by reading the entity back on the next tick rather than by trusting
+ * this.
+ */
+export async function callHaService(
+  domain: string,
+  service: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const response = await haFetch<unknown>(
+    `/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`,
+    { method: "POST", body: data },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Home Assistant rejected ${domain}.${service}: ${response.status}`,
+    );
+  }
 }
