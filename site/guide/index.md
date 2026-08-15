@@ -1,0 +1,63 @@
+# What Elias ems is
+
+A **home energy management system** that runs as a Home Assistant add-on. It
+does not replace Home Assistant or duplicate what it already does well — it
+sits on top, reads the entities your integrations already publish, and makes
+decisions Home Assistant has no opinion about.
+
+The first of those decisions is **battery control**: keep the grid meter at
+zero. If the house is importing, discharge the battery by that much; if it is
+exporting, charge. Home Assistant can already show you both numbers. Turning
+them into a setpoint, several times a minute, within your charge limits and your
+inverter's power limits, is the part this fills in.
+
+It is installed from the Add-on Store, appears in your sidebar, and is
+configured entirely from its own pages — no YAML.
+
+## What you need
+
+| | |
+| --- | --- |
+| **Home Assistant** | A **Supervisor-based** install: Home Assistant OS or Home Assistant Supervised. Core-only and plain Docker installs have no Add-on Store and cannot run this. |
+| **Architecture** | `aarch64` or `amd64`. 32-bit ARM (`armv7`) is not supported — Home Assistant dropped it, and the Node 24 runtime the add-on is built on publishes no 32-bit ARM images to base one on. |
+| **A grid sensor** | One entity giving **instantaneous power in watts, signed**: positive importing, negative exporting. See [the note on signed sensors](/guide/configure#the-grid-sensor) if yours is an import/export pair. |
+| **A battery** | Entities for its cumulative energy (kWh), current power (W) and state of charge (%). To have it *steered* rather than merely watched, it also needs a writable target power entity — usually a `number` from an inverter integration or an `input_number` helper. |
+
+## What works today
+
+- **Battery control** with a net-zero-energy strategy. It reads, decides, writes
+  the setpoint to each battery's target entity, and logs both halves. See
+  [Battery control](/guide/battery-control).
+- **Live readings** on the home page for your PV arrays, the grid and each
+  battery, pushed rather than polled, with a health chip that tells you when the
+  connection to Home Assistant is degraded. See [The dashboard](/guide/dashboard).
+- **Diagnostics** — one log every feature writes to, readable on screen and
+  downloadable as a text file. See [Diagnostics](/guide/diagnostics).
+
+## What it cannot do yet
+
+- **Set an inverter's mode.** Many inverters ignore a setpoint until a `select`
+  entity is put into a forced or manual mode. Elias ems writes the setpoint but
+  does not touch the mode, so on those inverters the value lands on the entity
+  and the hardware carries on doing its own thing. This is the single most
+  likely reason a correct-looking setup appears to do nothing.
+- **Notice that the hardware disagreed.** It confirms the *entity* took the
+  value, not that the battery obeyed it.
+- **Anything price-aware.** Dynamic prices, negative-price strategies and PV
+  curtailment are on the roadmap and not started.
+
+The full list, with the reasoning, is in
+[the internals](/internals/battery-control#not-done-yet).
+
+## Where things are
+
+Three pages, in the top bar:
+
+- **Home** — live readings, plus battery control's own diagnostics.
+- **Tools** — every feature's diagnostics merged, and the download button.
+- **Settings** — the grid sensor, your batteries, your PV entities, and the
+  control loop.
+
+## Next
+
+[Install it →](/guide/install)

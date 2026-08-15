@@ -26,6 +26,23 @@
       "runtimeExecutable": "mise",
       "runtimeArgs": ["exec", "--", "npm", "--prefix", "addon", "run", "start"],
       "port": 3000
+    },
+    {
+      "name": "elias-ems-docs",
+      "runtimeExecutable": "mise",
+      "runtimeArgs": [
+        "exec",
+        "--",
+        "npm",
+        "--prefix",
+        "site",
+        "run",
+        "docs:dev",
+        "--",
+        "--port",
+        "5174"
+      ],
+      "port": 5174
     }
   ]
 }
