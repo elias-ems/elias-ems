@@ -43,6 +43,18 @@ Each stack owns a distinct block of ports, so all three can be up at once:
 
 Keeping the test block separate is not tidiness. Playwright's `reuseExistingServer` cannot tell a manually started stack from one of its own, so when these overlapped, running the suite while `start:ingress` was up made it adopt that stack, ignore the `env` in [playwright.config.ts](addon/playwright.config.ts) — which only applies to a server Playwright launches itself — and run the tests against the real `addon/data` rather than a throwaway directory. Override any of them with `INGRESS_PORT`, `APP_PORT` or `HA_MOCK_PORT`.
 
+### The documentation site
+
+`site/` is the second npm project — a VitePress site published to GitHub Pages, with its own `package.json`, lockfile and `node_modules`, and one dependency. Run from `site/`:
+
+- `npm run docs:dev` — the site locally.
+- `npm run docs:build` — what [.github/workflows/docs.yml](.github/workflows/docs.yml) runs, and the site's whole verification gate: there is no lint or test suite, and the build fails on a dead link. Both commands regenerate the gitignored `site/internals/` from `docs/` first.
+
+Two things about its dependency are settled decisions, so that neither a dependency bump nor an `npm audit` reading re-opens them:
+
+- **`npm audit` in `site/` is expected to be non-empty**, currently three findings including one `high`. All of them are `esbuild`/`vite` advisories reached through `vitepress`, and all of them are **dev-server only** — cross-origin requests to `vitepress dev` and its file serving. What ships is static HTML, and CI never starts a dev server. A *new* finding that reaches the built output or the build itself is not covered by that and needs raising.
+- **Stay on VitePress 1.x.** npm reports no fix for the above because 1.6.4 is the latest stable and pins vite 5; the fix is VitePress 2, which is still alpha. Never `npm audit fix --force` here — it installs the pre-release. The [update-dependencies skill](.claude/skills/update-dependencies/SKILL.md) covers this project too and checks each run whether the hold can end.
+
 ## Framework and toolchain
 
 The app is **React Router 8 in framework mode** (the successor to Remix — Remix v2's packages were collapsed into `react-router` in v7), written in **TypeScript**.
