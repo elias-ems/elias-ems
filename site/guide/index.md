@@ -11,6 +11,10 @@ exporting, charge. Home Assistant can already show you both numbers. Turning
 them into a setpoint, several times a minute, within your charge limits and your
 inverter's power limits, is the part this fills in.
 
+The setpoint leaves as a Home Assistant **event**, and an automation you write
+turns it into whatever your inverter speaks. That one step is what keeps the
+add-on out of the business of knowing every brand's registers and modes.
+
 It is installed from the Add-on Store, appears in your sidebar, and is
 configured entirely from its own pages — no YAML.
 
@@ -21,13 +25,13 @@ configured entirely from its own pages — no YAML.
 | **Home Assistant** | A **Supervisor-based** install: Home Assistant OS or Home Assistant Supervised. Core-only and plain Docker installs have no Add-on Store and cannot run this. |
 | **Architecture** | `aarch64` or `amd64`. 32-bit ARM (`armv7`) is not supported — Home Assistant dropped it, and the Node 24 runtime the add-on is built on publishes no 32-bit ARM images to base one on. |
 | **A grid sensor** | One entity giving **instantaneous power in watts, signed**: positive importing, negative exporting. See [the note on signed sensors](/guide/configure#the-grid-sensor) if yours is an import/export pair. |
-| **A battery** | Entities for its cumulative energy (kWh), current power (W) and state of charge (%). To have it *steered* rather than merely watched, it also needs a writable target power entity — usually a `number` from an inverter integration or an `input_number` helper. |
+| **A battery** | Entities for its cumulative energy (kWh), current power (W) and state of charge (%). To have it *steered* rather than merely watched, it also needs a **control key** and an [automation](/guide/battery-control#connecting-the-event-to-your-battery) that listens for its setpoints — a few lines of YAML, and the one place your inverter's own quirks live. |
 
 ## What works today
 
-- **Battery control** with a net-zero-energy strategy. It reads, decides, writes
-  the setpoint to each battery's target entity, and logs both halves. See
-  [Battery control](/guide/battery-control).
+- **Battery control** with a net-zero-energy strategy. It reads, decides,
+  publishes each battery's setpoint as an `elias_ems_setpoint` event, and logs
+  both halves. See [Battery control](/guide/battery-control).
 - **Live readings** on the home page for your PV arrays, the grid and each
   battery, pushed rather than polled, with a health chip that tells you when the
   connection to Home Assistant is degraded. See [The dashboard](/guide/dashboard).
@@ -36,13 +40,14 @@ configured entirely from its own pages — no YAML.
 
 ## What it cannot do yet
 
-- **Set an inverter's mode.** Many inverters ignore a setpoint until a `select`
-  entity is put into a forced or manual mode. Elias ems writes the setpoint but
-  does not touch the mode, so on those inverters the value lands on the entity
-  and the hardware carries on doing its own thing. This is the single most
-  likely reason a correct-looking setup appears to do nothing.
-- **Notice that the hardware disagreed.** It confirms the *entity* took the
-  value, not that the battery obeyed it.
+- **Reach your battery on its own.** The setpoint stops at the event; the
+  automation that carries it the rest of the way is yours to write, including
+  anything your inverter needs first — a forced mode, most often. There are
+  worked examples for each shape, but no per-brand catalogue.
+- **Notice that nothing acted on a setpoint.** A missing automation, a mistyped
+  control key and an inverter quietly ignoring the value all look identical from
+  the add-on's side. This is the single most likely reason a correct-looking
+  setup appears to do nothing.
 - **Anything price-aware.** Dynamic prices, negative-price strategies and PV
   curtailment are on the roadmap and not started.
 

@@ -18,17 +18,13 @@ import { fetchHaStates, type HaState } from "./ha.server";
 const MAX_OPTIONS = 25;
 
 /**
- * What a field gets when it doesn't ask for anything else: readings, which is
- * what all but one of them store. A switch or a binary sensor is not one.
+ * Every entity these forms pick is a reading, so `sensor` is the whole list.
+ * A switch or a binary sensor is not a reading, and nothing here is picked to
+ * be written to: a setpoint leaves as an event, not as a value set on an
+ * entity, so there is no writable field to offer other domains to.
  */
-const DEFAULT_DOMAINS = ["sensor"];
+const OFFERED_DOMAINS = ["sensor"];
 
-/**
- * Restricted to the domains the field asked for, because a field that writes
- * needs different entities from one that reads. The battery's target power
- * field asks for `number` and `input_number`; offering it a `sensor` would be
- * offering something that cannot be set.
- */
 function isOfferable(state: HaState, prefixes: string[]): boolean {
   return prefixes.some((prefix) => state.entity_id.startsWith(prefix));
 }
@@ -57,14 +53,11 @@ function matches(entity: EntityOption, query: string): boolean {
 }
 
 /**
- * The entities matching `query` in `domains`, or the reason Home Assistant
- * could not be asked. Never throws: the caller is a dropdown, and a field that
- * fails to open says less than one that explains itself.
+ * The entities matching `query`, or the reason Home Assistant could not be
+ * asked. Never throws: the caller is a dropdown, and a field that fails to open
+ * says less than one that explains itself.
  */
-export async function listEntityOptions(
-  query: string,
-  domains: string[] = DEFAULT_DOMAINS,
-): Promise<EntitiesData> {
+export async function listEntityOptions(query: string): Promise<EntitiesData> {
   let states: HaState[];
   try {
     states = await fetchHaStates();
@@ -73,7 +66,7 @@ export async function listEntityOptions(
     return { entities: [], error: message };
   }
 
-  const prefixes = domains.map((domain) => `${domain}.`);
+  const prefixes = OFFERED_DOMAINS.map((domain) => `${domain}.`);
   const needle = query.trim().toLowerCase();
   const entities = states
     .filter((state) => isOfferable(state, prefixes))

@@ -16,6 +16,13 @@ import { startStack } from "../stack.js";
 let stack: Awaited<ReturnType<typeof startStack>>;
 let html: string;
 
+/** Every setpoint the add-on has published, as an automation would see it. */
+function setpointEvents(): Array<Record<string, unknown>> {
+  return stack.ha.events
+    .filter((event) => event.eventType === "elias_ems_setpoint")
+    .map((event) => event.data as Record<string, unknown>);
+}
+
 /** Every URL the browser would go on to request from the served HTML. */
 function assetUrls(document: string): string[] {
   return [
@@ -178,9 +185,9 @@ describe("battery control", () => {
       energyEntityId: "sensor.battery_energy_total",
       powerEntityId: "sensor.battery_power",
       socEntityId: "sensor.battery_state_of_charge",
-      // Control refuses to switch on without one, and its wide range leaves
-      // the setpoints these assert on uncapped.
-      targetPowerEntityId: "input_number.battery_setpoint",
+      // Control refuses to switch on without one, and it is the name the
+      // setpoint event goes out under.
+      controlKey: "home_battery",
     });
 
     expect(await messages()).toEqual([]);
@@ -199,25 +206,20 @@ describe("battery control", () => {
       .toContainEqual(expect.stringContaining("Home battery: discharge at"));
   });
 
-  it("writes the setpoint from inside the real server process", async () => {
+  it("publishes the setpoint from inside the real server process", async () => {
     // The unit tests import the loop and call it. This is the one place the
-    // write leaves the process that actually serves the add-on, over the same
-    // Supervisor proxy it would use inside Home Assistant.
+    // setpoint leaves the process that actually serves the add-on, over the
+    // same Supervisor proxy it would use inside Home Assistant.
     await expect
-      .poll(
-        () =>
-          stack.ha.serviceCalls.filter((call) => call.service === "set_value")
-            .length,
-        { timeout: 5_000 },
-      )
+      .poll(() => setpointEvents().length, { timeout: 5_000 })
       .toBeGreaterThan(0);
 
-    const [call] = stack.ha.serviceCalls.filter(
-      (entry) => entry.service === "set_value",
-    );
-    expect(call).toMatchObject({
-      domain: "input_number",
-      data: { entity_id: "input_number.battery_setpoint", value: -800 },
+    expect(setpointEvents()[0]).toMatchObject({
+      key: "home_battery",
+      title: "Home battery",
+      power_w: -842,
+      discharge_w: 842,
+      released: false,
     });
   });
 
@@ -228,13 +230,14 @@ describe("battery control", () => {
       intervalSeconds: "1",
     });
 
-    const values = stack.ha.serviceCalls
-      .filter((call) => call.service === "set_value")
-      .map((call) => (call.data as { value?: unknown }).value);
-
-    // Whatever it wrote along the way, the last thing it said before letting go
-    // has to be 0 — a stopped loop must not leave a battery being driven.
-    expect(values.at(-1)).toBe(0);
+    // Whatever it asked for along the way, the last thing it said before
+    // letting go has to be 0 — a stopped loop must not leave a battery being
+    // driven — and it has to say that it was letting go rather than merely
+    // commanding a stop.
+    expect(setpointEvents().at(-1)).toMatchObject({
+      power_w: 0,
+      released: true,
+    });
   });
 
   it("hands the whole log over as a text file", async () => {

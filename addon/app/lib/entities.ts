@@ -1,6 +1,6 @@
 /**
- * A Home Assistant entity as offered by the `/api/entities` route — a `sensor`
- * by default, or whichever domains the field asked that route for.
+ * A Home Assistant entity as offered by the `/api/entities` route, which
+ * offers `sensor` entities: every field that picks one is picking a reading.
  */
 export type EntityOption = {
   entityId: string;

@@ -26,8 +26,8 @@
  *
  * ## Batteries that cannot be steered
  *
- * A battery with no target power entity keeps doing whatever it was doing, so
- * it gets no share of the target — but it must also be left out of the
+ * A battery with no control key keeps doing whatever it was doing, so it gets
+ * no share of the target — but it must also be left out of the
  * `currentBatteryPower` above, which is less obvious. Writing `C` for the
  * steerable batteries' current power and `U` for the unsteerable ones':
  *
@@ -44,8 +44,8 @@
  *
  * ## Power limits
  *
- * Each battery's share is capped by what its inverter can deliver, which is
- * either typed into settings or read off the target entity's own range. The
+ * Each battery's share is capped by what its inverter can deliver, as typed
+ * into settings. The
  * feedback term above is also what makes a cap safe to apply per battery and
  * leave there: whatever the cap holds back keeps the meter off zero, so the
  * next tick asks for it again and the batteries with headroom take it up over a
@@ -55,8 +55,8 @@
 /** Below this the meter counts as balanced; chasing noise would only cycle the battery. */
 export const DEADBAND_W = 25;
 
-/** Why a battery with no target power entity sits out every plan. */
-export const UNSTEERED_REASON = "no target power entity — not steered";
+/** Why a battery with no control key sits out every plan. */
+export const UNSTEERED_REASON = "no control key — not steered";
 
 export type BatterySnapshot = {
   id: string;
@@ -73,9 +73,9 @@ export type BatterySnapshot = {
   /** The same for discharging, as a positive magnitude. Null when unconstrained. */
   maxDischargeW: number | null;
   /**
-   * Whether a setpoint can be written to this battery at all — false when it
-   * has no target power entity. An unsteered battery is still part of the
-   * house, but it is not part of the plan; see `planNetZero`.
+   * Whether a setpoint can be published for this battery at all — false when
+   * it has no control key. An unsteered battery is still part of the house, but
+   * it is not part of the plan; see `planNetZero`.
    */
   steerable: boolean;
 };
@@ -89,14 +89,14 @@ export type BatteryDecision = {
   /** Where the battery should be, in W: positive charging, negative discharging. */
   setpointW: number;
   /**
-   * What to write to the target entity, or **null to write nothing and leave
-   * the last setpoint standing**.
+   * What to command, or **null to say nothing and leave the last setpoint
+   * standing**.
    *
    * Not the same as `setpointW`, and the difference is the whole reason this
    * field exists. A hold inside the deadband reports `setpointW` as the
    * battery's *measured* power, which is the right thing to display and the
-   * wrong thing to command: writing a measurement back as a setpoint would let
-   * sensor noise walk the commanded value around, tick after tick, for a house
+   * wrong thing to command: publishing a measurement back as a setpoint would
+   * let sensor noise walk the commanded value around, tick after tick, for a house
    * that is already balanced. A hold forced by a limit is the opposite — it is
    * an active decision to stop, so it commands 0.
    */
@@ -197,10 +197,9 @@ function blockedReason(
 
   // A limit of zero takes the battery out of the plan rather than leaving it in
   // with a 0 W share: it cannot contribute either way, and dropping it here is
-  // what lets the batteries that *can* help take the whole target. This is the
-  // shape a target entity that cannot express the direction arrives in — an
-  // `input_number` left on its default 0–100 range, say — so it wants a reason
-  // that points at the limit rather than at the battery.
+  // what lets the batteries that *can* help take the whole target. The reason
+  // points at the limit rather than at the battery, since that is the thing
+  // somebody reading the log would have to go and change.
   const limit = limitFor(battery, direction);
   if (limit === 0) return `${direction} power limited to 0 W`;
 
@@ -264,7 +263,7 @@ export function planNetZero(input: {
   }
 
   // Reachable even though the settings form refuses to enable control without
-  // one: the target can be cleared from a battery afterwards.
+  // one: the key can be cleared from a battery afterwards.
   if (steerable.length === 0) {
     return {
       netW: gridPowerW,
@@ -273,7 +272,7 @@ export function planNetZero(input: {
       decisions: batteries.map((battery) =>
         hold(battery, UNSTEERED_REASON, battery.powerW ?? 0),
       ),
-      summary: "No battery has a target power entity — nothing to steer.",
+      summary: "No battery has a control key — nothing to steer.",
       warnings,
     };
   }
@@ -340,7 +339,7 @@ export function planNetZero(input: {
   const decisions = batteries.map((battery): BatteryDecision => {
     // Held at what it is already doing, not at 0: the other holds below are a
     // decision to stop, and this one is the absence of any decision at all.
-    // Nothing can be written here, so nothing is being asked for.
+    // Nothing goes out for this battery, so nothing is being asked of it.
     if (!battery.steerable) {
       return hold(battery, UNSTEERED_REASON, battery.powerW ?? 0);
     }

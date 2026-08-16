@@ -1,14 +1,14 @@
 /**
  * The configured batteries. Capacity and the charge window are things the
  * installer knows and Home Assistant does not, so they are typed in; the three
- * live values come from HA entities, and a fourth, `targetPowerEntityId`, is
- * the writable one the setpoint goes to.
+ * live values come from HA entities, and `controlKey` names the battery in the
+ * setpoint event an automation listens for.
  *
  * Both power entities are read with the sign convention **positive = charging,
  * negative = discharging**. That is a decision rather than an observation —
  * inverters disagree, and plenty publish the opposite — and it is the convention
  * the strategy's arithmetic and the log lines are written against, so it is also
- * the one the write path uses.
+ * the one the setpoint event carries.
  *
  * Pure; persistence lives in `batteries.server.ts`.
  */
@@ -28,24 +28,31 @@ export type BatteryFields = {
   /** State of charge, in percent. */
   socEntityId: string;
   /**
-   * Where the setpoint gets written: a writable entity — a `number` from an
-   * inverter integration, or an `input_number` an automation forwards to
-   * `modbus.write_register` — read with the same sign convention as
-   * `powerEntityId`, positive charging and negative discharging.
+   * How this battery is named in the setpoint event, and by that the one thing
+   * that decides whether it is steered at all.
+   *
+   * The add-on does not write to the battery itself: it fires one Home
+   * Assistant event per setpoint and an automation turns that into whatever
+   * the hardware wants. This key is what the automation's event trigger
+   * matches on, so it is chosen by whoever writes the automation rather than
+   * derived from anything — a generated record id would be unreadable in YAML,
+   * and the title is renamed the moment somebody tidies up the settings page.
    *
    * Optional. Empty means this battery is watched but not steered, which is
    * what every record saved before this field existed becomes.
    */
-  targetPowerEntityId: string;
+  controlKey: string;
   /**
-   * Most this battery may be asked to charge at, in W. Null falls back to the
-   * target entity's own `max` attribute; see `resolvePowerLimits`.
+   * Most this battery may be asked to charge at, in W, or null for no limit.
+   *
+   * The only place a limit can come from now that nothing is written to an
+   * entity: an event has no `min`/`max` to read a battery's rating off, so a
+   * cap left empty here is genuinely no cap.
    */
   maxChargePowerW: number | null;
   /**
    * The same for discharging, as a **positive magnitude** — the form asks for
-   * "5000 W", not "-5000 W", and the sign is applied where it is used. Null
-   * falls back to the target entity's own `min` attribute.
+   * "5000 W", not "-5000 W", and the sign is applied where it is used.
    */
   maxDischargePowerW: number | null;
 };
@@ -95,6 +102,13 @@ function toOptionalPowerW(value: unknown): number | null {
  * sensible to be: the three control fields below all read as "not configured"
  * when they are missing, so an installation that predates them keeps behaving
  * exactly as it did.
+ *
+ * A record from the version that wrote setpoints to an entity lands here too,
+ * carrying a `targetPowerEntityId` and no `controlKey`, and comes out
+ * unsteered. That is the honest reading rather than a lossy one: the setpoint
+ * now goes out as an event that nothing is listening for until an automation
+ * exists, so keeping the battery "steered" through the upgrade would mean
+ * claiming to command hardware that has stopped hearing us.
  */
 export function normalizeBattery(battery: Battery): Battery {
   return {
@@ -109,26 +123,26 @@ export function normalizeBattery(battery: Battery): Battery {
       battery.maxChargePercent,
       BATTERY_DEFAULTS.maxChargePercent,
     ),
-    targetPowerEntityId: battery.targetPowerEntityId?.trim() ?? "",
+    controlKey: battery.controlKey?.trim() ?? "",
     maxChargePowerW: toOptionalPowerW(battery.maxChargePowerW),
     maxDischargePowerW: toOptionalPowerW(battery.maxDischargePowerW),
   };
 }
 
 /**
- * Whether a setpoint can be written to this battery at all.
+ * Whether a setpoint can be published for this battery at all.
  *
  * The one thing that separates a battery the strategy may command from one it
  * can only watch, so it is a named function rather than a truthiness check
  * spelled out at each of the three call sites that need it.
  */
 export function isSteerable(
-  battery: Pick<BatteryFields, "targetPowerEntityId">,
+  battery: Pick<BatteryFields, "controlKey">,
 ): boolean {
-  return Boolean(battery.targetPowerEntityId?.trim());
+  return Boolean(battery.controlKey?.trim());
 }
 
-/** What a battery may be asked for, once config and the entity are both in. */
+/** What a battery may be asked for. */
 export type PowerLimits = {
   /** Most it may charge at, in W. Null when nothing constrains it. */
   maxChargeW: number | null;
@@ -137,38 +151,26 @@ export type PowerLimits = {
 };
 
 /**
- * The range a writable entity publishes about itself. `number` entities always
- * carry `min`/`max` — they are required properties of the platform — and so do
- * `input_number` helpers, so in practice this is nearly always available.
- */
-export type EntityRange = { min: number | null; max: number | null };
-
-/**
- * What the battery may actually be asked for, from the two sources that know:
- * the fields typed into settings and the target entity's own range.
+ * What the battery may actually be asked for.
  *
- * **Configured values win.** The entity's range is a good default but not a
- * trustworthy one — an `input_number` helper created through the UI defaults to
- * 0–100, which would cap a 5 kW battery at 100 W — so the override has to be
- * able to say otherwise rather than merely narrow it.
+ * Settings are the only source. While the setpoint was written to an entity
+ * there was a second one — the `min`/`max` a `number` or `input_number`
+ * publishes about itself — and an empty field fell back to it. An event has no
+ * such range, and inventing one from the battery's capacity would be a guess
+ * about hardware, so an empty field now means exactly what it says: this
+ * direction is uncapped, and it is the strategy's SoC window that keeps the
+ * battery inside its own limits.
  *
- * A range that cannot express a direction caps that direction at 0 rather than
- * leaving it open: `min: 0` on a signed setpoint entity means negative values
- * are not writable, so discharging through it is not something we can do. That
- * is also exactly what the mis-created helper above looks like, and a 0 is a
- * visible symptom where silently writing out of range would not be.
+ * A one-field-per-direction rename rather than a bare property read, because
+ * "the cap on charging" and "the field the form calls maxChargePowerW" are
+ * different enough that the strategy should not have to know the second name.
  */
 export function resolvePowerLimits(
   battery: Pick<BatteryFields, "maxChargePowerW" | "maxDischargePowerW">,
-  range: EntityRange | null,
 ): PowerLimits {
   return {
-    maxChargeW:
-      battery.maxChargePowerW ??
-      (range?.max == null ? null : Math.max(0, range.max)),
-    maxDischargeW:
-      battery.maxDischargePowerW ??
-      (range?.min == null ? null : Math.max(0, -range.min)),
+    maxChargeW: battery.maxChargePowerW,
+    maxDischargeW: battery.maxDischargePowerW,
   };
 }
 
@@ -205,9 +207,8 @@ export function parseBattery(
     formData.get("energyEntityId")?.toString().trim() ?? "";
   const powerEntityId = formData.get("powerEntityId")?.toString().trim() ?? "";
   const socEntityId = formData.get("socEntityId")?.toString().trim() ?? "";
-  // Optional: a battery with no target entity is watched but not steered.
-  const targetPowerEntityId =
-    formData.get("targetPowerEntityId")?.toString().trim() ?? "";
+  // Optional: a battery with no control key is watched but not steered.
+  const controlKey = formData.get("controlKey")?.toString().trim() ?? "";
   const capacityKwh = readNumber(formData, "capacityKwh");
   const minChargePercent = readNumber(formData, "minChargePercent");
   const maxChargePercent = readNumber(formData, "maxChargePercent");
@@ -269,7 +270,7 @@ export function parseBattery(
       energyEntityId,
       powerEntityId,
       socEntityId,
-      targetPowerEntityId,
+      controlKey,
       // Both are known good here: an unparseable one is an error above.
       maxChargePowerW: maxChargePowerW.ok ? maxChargePowerW.value : null,
       maxDischargePowerW: maxDischargePowerW.ok

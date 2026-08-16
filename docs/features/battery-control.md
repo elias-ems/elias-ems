@@ -3,10 +3,12 @@
 The first EMS feature: a loop that watches the grid meter and works out what the
 house battery should be doing to keep it at zero.
 
-**It decides, writes, and logs.** Each tick works out what every battery should
-be doing, writes that to the battery's target power entity, and records both the
-decision and what was written. What it cannot yet do is put an inverter into the
-mode that makes it *listen* — see [Not done yet](#not-done-yet).
+**It decides, publishes, and logs.** Each tick works out what every battery
+should be doing, publishes that as a Home Assistant event, and records both the
+decision and what went out. It does not touch the hardware itself: an
+automation you write listens for the event and turns it into whatever your
+inverter wants — see [Connecting the event to a
+battery](#connecting-the-event-to-a-battery).
 
 Tracked in [issue #4](https://github.com/elias-ems/elias-ems/issues/4).
 
@@ -38,7 +40,7 @@ and that is what to point this at.
 
 One or more. Capacity and the charge window are things the installer knows and
 Home Assistant does not, so they are typed in; the three live values are
-entities, and a fourth — the target — is the writable one.
+entities, and the control key is what names the battery in the setpoint event.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -49,72 +51,56 @@ entities, and a fourth — the target — is the writable one.
 | `energyEntityId` | entity | cumulative energy counter, kWh |
 | `powerEntityId` | entity | current power, W — see the sign convention below |
 | `socEntityId` | entity | state of charge, % |
-| `targetPowerEntityId` | entity | **optional** — the writable entity the setpoint goes to |
+| `controlKey` | text | **optional** — the name this battery's setpoints go out under |
 | `maxChargePowerW` | number | **optional** — cap on charge power, W |
 | `maxDischargePowerW` | number | **optional** — cap on discharge power, W, as a positive number |
 
 **Sign convention: both power fields are read as positive = charging, negative =
 discharging.** This is a decision, not an observation — inverters disagree, and
-plenty publish the opposite. It is the convention the strategy's arithmetic and
-the log lines are written against, and it will be the one the write path uses.
-If your battery reports the other way round, wrap it in a Home Assistant
-template sensor that negates it.
+plenty publish the opposite. It is the convention the strategy's arithmetic, the
+log lines and the event payload are all written against. If your battery reports
+the other way round, wrap it in a Home Assistant template sensor that negates
+it.
 
 `minChargePercent` and `maxChargePercent` bound what control may use, not what
 the battery is capable of. Control never discharges below the floor or charges
 above the ceiling.
 
-#### The target power entity
+#### The control key
 
-`targetPowerEntityId` is where the setpoint gets written, and it is what turns a
-battery from something watched into something steered. Leaving it empty is a
-supported state, not an unfinished one — but it has consequences, described
+`controlKey` is the name this battery's setpoints go out under, and it is what
+turns a battery from something watched into something steered. Leaving it empty
+is a supported state, not an unfinished one — but it has consequences, described
 under [Batteries that cannot be steered](#batteries-that-cannot-be-steered)
-below. Every record saved before this field existed reads as empty, so no
-existing installation starts being steered by an upgrade.
+below.
+
+It is free text rather than an entity, because there is no entity involved any
+more: the setpoint leaves as an event and the thing that matches on this key is
+an automation's `event_data` filter. Which means the key has to be **chosen by
+whoever writes that automation**. The two things it could have been derived from
+are both worse — the record's generated id is unreadable in YAML, and the title
+is renamed the moment somebody tidies up the settings page, silently detaching
+the automation from the battery it was written for.
 
 **Battery control cannot be enabled until at least one battery has one.** The
 checkbox on the Settings page is disabled until then, and the action rejects the
-save even if the form is posted directly — a target can be cleared after control
+save even if the form is posted directly — a key can be cleared after control
 was switched on, so the server cannot trust the form to have been rendered in
 the current state. Switching control *off* is always allowed, which is the way
 out of that state.
 
 The rule is "at least one", not "all": a house can reasonably have one steerable
 battery and one that only reports. What it cannot have is control enabled with
-nothing to write to, because a loop that decides correctly and changes nothing
+nothing to command, because a loop that decides correctly and changes nothing
 looks exactly like a loop that is broken.
 
-It wants a **writable** entity, which in practice means one of two things:
-
-- a **`number.*`** from an inverter integration — `huawei_solar`,
-  `solaredge_modbus_multi`, Victron, and friends all publish one;
-- an **`input_number.*`** helper that a Home Assistant automation forwards to
-  the device, which is how a plain Modbus setup does it. Home Assistant's
-  built-in `modbus` integration has **no `number` platform** — it offers
-  `climate`, `cover`, `switch`, `light`, `fan`, `sensor` and `binary_sensor`
-  only — so writing a register means calling `modbus.write_register` from an
-  automation, and the `input_number` is the thing to point this field at.
-
-The loop reads it every tick for its `min`/`max`, but it is **not** one of the
-entities whose changes provoke a tick, and it is left out of the "oldest
-reading" the log stamps each decision with. A target is an output: once the
-write path exists, watching it would mean every setpoint we write comes back as
-a change, provokes another tick, and is written again, with nothing damping the
-loop. And being a setpoint rather than a sensor, it can sit untouched for hours
-without anything being wrong — which would make it permanently the oldest thing
-the loop had read, and that clause is there to expose a stuck *sensor*.
-
-Those two are what the field's autocomplete suggests, via the `domains`
-parameter on [`/api/entities`](../../addon/app/routes/api.entities.tsx); every
-other field asks that route for `sensor` and gets the old behaviour. The field
-still accepts anything typed into it by hand, which is the escape hatch for a
-setup whose control surface is some other domain entirely.
-
-There is deliberately no mode/`select` entity here yet, and no split
-charge/discharge pair. Plenty of inverters need the mode set to something like
-"forced" before a setpoint is honoured; that is real, and it is the next shape
-this configuration will have to grow. See [Not done yet](#not-done-yet).
+**Upgrades from the version that wrote to an entity arrive unsteered.** Those
+records carry a `targetPowerEntityId` and no `controlKey`, and
+`normalizeBattery` reads them as "not steered" rather than migrating the entity
+id into a key. That is the honest reading: nothing is listening for the event
+until an automation exists, so carrying the battery across as steered would be
+claiming to command hardware that has stopped hearing us. Filling in a key and
+writing the automation is one deliberate step, in that order.
 
 #### Power limits
 
@@ -123,26 +109,19 @@ battery for, so the proportional split cannot request more than the inverter can
 deliver. Both are **positive magnitudes** — "5000", not "-5000" for discharge —
 and the sign is applied where it is used.
 
-Both are optional, because the target entity usually already knows. `number`
-entities are required by their platform to publish `min` and `max`, and
-`input_number` helpers publish them too, so when the fields are left empty the
-entity's own range is read instead: `max` becomes the charge limit and `-min`
-the discharge limit.
+Settings are the **only** source of a limit. While the setpoint was written to
+an entity there was a second one — the `min`/`max` that `number` and
+`input_number` entities publish about themselves — and an empty field fell back
+to it. An event has no such range, and deriving one from `capacityKwh` would be
+a guess about hardware, so an empty field now means exactly what it says: that
+direction is uncapped, and the SoC window is what keeps the battery inside its
+own limits.
 
-**A configured value overrides the entity's range rather than narrowing it.**
-That direction matters. An `input_number` created through the Home Assistant UI
-defaults to a 0–100 range, which as a power limit would cap a 5 kW battery at
-100 W — so the override has to be able to say "no, it's 5000" and be believed.
-Taking the tighter of the two would make that unfixable without editing the
-helper.
-
-A range that cannot express a direction caps it at **0**, and a battery with a
-limit of 0 drops out of the plan the same way one at its SoC ceiling does, with
-`discharge power limited to 0 W` as the reason. `min: 0` on a signed setpoint
-entity genuinely means negative values are not writable — but it is also exactly
-what that mis-created helper looks like, and a battery visibly sitting out with
-that reason is a far better symptom than a setpoint being silently written out
-of range.
+That is a little less automatic and considerably less surprising. The old
+fallback's worst case was an `input_number` created through the Home Assistant
+UI, which defaults to a 0–100 range: as a power limit that capped a 5 kW battery
+at 100 W, and the only symptom was a battery quietly delivering a fortieth of
+what the meter asked for.
 
 ### Battery control — `control.json`
 
@@ -186,7 +165,7 @@ to the same reading, and the correct one.
 
 ### Batteries that cannot be steered
 
-A battery with no target power entity is left out of the plan: it keeps doing
+A battery with no control key is left out of the plan: it keeps doing
 whatever it was doing, and gets a decision line saying so rather than a
 setpoint. The less obvious half is that it must also be left out of
 `currentBatteryPower`. Writing `C` for the steerable batteries' combined power
@@ -219,8 +198,8 @@ nothing, so unlike a steerable battery's missing reading it produces no warning.
 3. Otherwise `target = currentBatteryPower - net`, over the **steerable**
    batteries only; positive means charge, negative means discharge.
 4. A battery drops out of the plan when it cannot help in that direction:
-   - it has no target power entity, so nothing can be written to it. Unlike the
-     cases below it holds at its *current* power rather than at 0 — those are a
+   - it has no control key, so nothing can be said to it. Unlike the cases
+     below it holds at its *current* power rather than at 0 — those are a
      decision to stop, this is the absence of any decision at all;
    - at or above `maxChargePercent` and the target is to charge;
    - at or below `minChargePercent` and the target is to discharge;
@@ -248,14 +227,65 @@ zero, so the next tick's `currentBatteryPower - net` asks for it again, and the
 batteries with headroom take it up over a few ticks. The feedback term is what
 makes the simpler per-battery cap correct rather than merely cheaper.
 
-## Writing the setpoint
+## Publishing the setpoint
 
 In [addon/app/lib/setpoints.server.ts](../../addon/app/lib/setpoints.server.ts),
 kept apart from the strategy (which stays pure) and from the loop (which is
 about *when* to decide). What arrives is a number in watts with the sign
-convention already applied; what leaves is a Home Assistant service call.
+convention already applied; what leaves is one Home Assistant event per battery.
 
-### What gets written, which is not the setpoint
+### Why an event and not a write
+
+This used to call `number.set_value` or `input_number.set_value` on an entity
+configured per battery. It worked, and it left a trail. Every setpoint was a
+state change, and a state change in Home Assistant is a logbook line, a recorder
+row and an entry in that entity's activity feed. A loop that reconsiders every
+few seconds turns that into thousands of rows a day whose entire content is the
+add-on talking to itself — and it buries the state changes somebody actually
+wants to look at.
+
+An event carries the same instruction and leaves none of that: nothing stores
+it, nothing renders it in a history. Two things come with that, and both are
+improvements rather than consolations:
+
+- **The add-on stops needing to know what kind of thing is behind the battery.**
+  A `number` entity can only be set to a value. An automation can set a mode
+  first, write two registers instead of one, negate the sign for an inverter
+  that disagrees with ours, or call something that isn't in Home Assistant at
+  all. Everything under [Not done yet](#not-done-yet) that used to need another
+  configuration field is now expressible without one.
+- **The `input_number` middleman becomes optional.** A plain Modbus setup used
+  to need a helper purely because Home Assistant's `modbus` integration has no
+  `number` platform, so the add-on wrote the helper and an automation forwarded
+  it to `modbus.write_register`. That automation can now listen for the event
+  directly, and the helper — the thing whose activity feed started this — can go.
+
+### The event
+
+`elias_ems_setpoint`, one per steerable battery per publish, with this payload:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `key` | string | the battery's `controlKey` — what an automation matches on |
+| `battery_id` | string | the stored record's id, stable across renames |
+| `title` | string | what the settings page and the log call this battery |
+| `power_w` | number | the setpoint, signed: **positive charging, negative discharging** |
+| `charge_w` | number | `power_w` when charging, else 0 — an unsigned magnitude |
+| `discharge_w` | number | `-power_w` when discharging, else 0 |
+| `released` | boolean | true only when the add-on is [letting go](#letting-go) |
+
+`charge_w` and `discharge_w` are the same number restated, and they are there
+because plenty of inverters have a charge register and a discharge register
+rather than one signed setpoint. Doing the split here keeps that automation free
+of Jinja arithmetic whose sign is easy to get wrong in exactly the way that
+drives a battery backwards.
+
+One event type for every battery, rather than one type per key, so that a house
+with three batteries can be served by one automation that reads
+`trigger.event.data.key` — while an automation that only cares about one battery
+can still say so by matching `event_data`.
+
+### What gets published, which is not the setpoint
 
 Each decision carries a `commandW` alongside its `setpointW`, and they are
 deliberately different things:
@@ -264,15 +294,15 @@ deliberately different things:
 | --- | --- | --- |
 | charge / discharge | the share, capped | the same |
 | at an SoC or power limit | 0 | **0** — an active stop |
-| inside the grid deadband | the battery's *measured* power | **null** — write nothing |
+| inside the grid deadband | the battery's *measured* power | **null** — publish nothing |
 | grid sensor unreadable | measured power | **0** for steerable batteries |
-| no target entity | measured power | null |
+| no control key | measured power | null |
 
 The deadband row is the one worth explaining. A hold reports the battery's
 measured power, which is the right thing to *display* and the wrong thing to
-*command*: writing a measurement back as a setpoint would let sensor noise walk
-the commanded value around tick after tick, on a house that is already balanced.
-So a deadband hold writes nothing and the previous setpoint stands.
+*command*: publishing a measurement back as a setpoint would let sensor noise
+walk the commanded value around tick after tick, on a house that is already
+balanced. So a deadband hold says nothing and the previous setpoint stands.
 
 The unreadable-grid row goes the other way. That is the blind case, and a
 battery left forcing kilowatts because the meter it was following broke is the
@@ -280,53 +310,224 @@ one hold that must not persist. An unreachable Home Assistant never gets this
 far — the tick fails first — so a null reading here means a genuinely broken
 sensor.
 
-### Which service
+### The publish deadband, and why it needs a refresh
 
-From the target entity's own domain: `number.set_value` for a `number`,
-`input_number.set_value` for an `input_number`, both taking
-`{ entity_id, value }`. Any other domain is refused rather than guessed at —
-this writes to hardware, and a service name invented from an entity id is
-exactly the guess that should fail loudly and change nothing.
+A setpoint goes out when it differs from **the last one we published** for that
+battery by at least 50 W. The loop can tick every second and a house is never
+still, so a strategy recalculating a few watts lower each time would otherwise
+fire an event every tick — and on the other end of each one is an automation
+doing real work against hardware that on some brands commits setpoints to flash.
 
-### The write deadband
+The comparison used to be against what the target entity read *now*, which made
+it self-correcting and stateless: something else moving the entity showed up as
+a difference on the next tick and was written back, with nothing remembered in
+between. An event has no read-back — a 200 from Home Assistant means the event
+reached the bus, not that any automation was listening, let alone that the
+hardware obeyed — so the comparison is now against a value this process
+remembers, which is an assumption rather than an observation.
 
-A write only happens when the entity's current value differs from what we want
-by at least **50 W**. The loop can tick every second and a house is never still,
-so a strategy recalculating a few watts lower each time would otherwise produce a
-service call every tick — thousands an hour, against hardware that on some brands
-commits setpoints to flash.
+**`REPUBLISH_MS` is what stops that assumption becoming an indefinite one.** A
+setpoint older than 30 seconds is restated even when nothing has moved, so an
+automation that was reloaded, an inverter that was power-cycled, or a Home
+Assistant that restarted mid-tick all converge again within a tick or two
+instead of waiting for the house to swing by 50 W. It is half the idle tick, so
+a quiet house restates on the next idle tick rather than every other one.
 
-Comparing against **what the entity reads now**, rather than against what we last
-sent, is what makes this self-correcting and stateless: something else moving the
-entity shows up as a difference on the next tick and gets written back, with
-nothing remembered in between. Values are rounded to the entity's own `step`
-first, so a device that quantises 582 W to 600 W and reports that back doesn't
-leave a permanent gap between what we asked for and what we read.
+The memory is deliberately not persisted, and a failed publish is deliberately
+not recorded. A restart is exactly the moment when what the hardware is doing is
+least certain, so starting with nothing remembered and publishing on the first
+tick is the right recovery; and remembering an event that never made it onto the
+bus would let the deadband suppress its own retry.
 
-A failed write is one battery not doing as it was told: it is logged, the other
-batteries are still written, and the next tick tries again. It is never allowed
+A failed publish is one battery not hearing what it was told: it is logged, the
+other batteries still go out, and the next tick tries again. It is never allowed
 to end the loop.
 
 ### Letting go
 
-`releaseBatteries()` commands 0 to every steerable battery, and runs when control
-is switched off and on `SIGTERM`/`SIGINT`. A battery left forcing kilowatts
-because the thing that told it to is gone is the worst failure this feature has —
-from the battery's side there is no difference between a setpoint that is still
-wanted and one whose author died ten minutes ago.
+`releaseBatteries()` publishes 0 for every steerable battery with `released:
+true`, and runs when control is switched off and on `SIGTERM`/`SIGINT`. A
+battery left forcing kilowatts because the thing that told it to is gone is the
+worst failure this feature has — from the battery's side there is no difference
+between a setpoint that is still wanted and one whose author died ten minutes
+ago.
 
-Two honest limits. Zero is the **safe** value, not necessarily the *correct*
-one: it stops the battery being driven either way, which is safe on every
-inverter, but handing it back to its own self-consumption logic means restoring a
-mode on many brands. And nothing here survives `kill -9`, a power cut, or a
+Zero is the **safe** value, not necessarily the *correct* one: it stops the
+battery being driven either way, which is safe on every inverter, but handing it
+back to its own self-consumption logic means restoring a mode on many brands.
+`released` is how that becomes somebody's to fix — the watts are 0 either way,
+and the flag is what lets an automation tell "stop" from "stop, and I am no
+longer in charge of you". The add-on still only knows how to say the first.
+
+What no flag can help with: nothing here survives `kill -9`, a power cut, or a
 container the supervisor destroys without asking. The only real answer to those
 is an inverter whose forced mode expires on its own — a command timeout, which
 some brands have and others do not.
 
-The release deliberately ignores the write deadband: letting go is worth one
-unconditional write even when the entity looks like it already reads 0, because
-the entity's last known value is the very thing in doubt when something has gone
-wrong enough to be switching control off.
+The release deliberately ignores the deadband, and clears the memory behind it.
+Letting go is worth one event even when we think the battery is already at 0,
+because what we think is the very thing in doubt when something has gone wrong
+enough to be stopping.
+
+## Connecting the event to a battery
+
+The event is half the feature; the automation is the other half, and it is the
+half that knows what your inverter is. Everything below assumes a battery whose
+`controlKey` is `home_battery`.
+
+**Watch it first.** Developer Tools → Events → listen to `elias_ems_setpoint`,
+then enable control. Every payload above shows up there, which is how to check
+the key, the sign and the magnitude before anything is wired to hardware.
+
+### Writing a Modbus register
+
+The case the `input_number` helper existed to serve, now with nothing in the
+middle:
+
+```yaml
+alias: Battery setpoint → inverter
+mode: queued
+max: 10
+triggers:
+  - trigger: event
+    event_type: elias_ems_setpoint
+    event_data:
+      key: home_battery
+actions:
+  - action: modbus.write_register
+    data:
+      hub: inverter
+      slave: 1
+      address: 40200
+      value: "{{ trigger.event.data.power_w | int }}"
+```
+
+`mode: queued` matters. The default, `single`, drops an event that arrives while
+the previous run is still going and writes a warning to the log — which on a
+house that has just swung hard is precisely the setpoint you wanted. A small
+`max` bounds the queue so a stalled Modbus write cannot grow one without limit.
+
+A register that wants an unsigned magnitude per direction takes `charge_w` and
+`discharge_w` instead, and needs no template arithmetic to get there:
+
+```yaml
+actions:
+  - action: modbus.write_register
+    data:
+      hub: inverter
+      slave: 1
+      address: 40200
+      value: "{{ trigger.event.data.charge_w | int }}"
+  - action: modbus.write_register
+    data:
+      hub: inverter
+      slave: 1
+      address: 40201
+      value: "{{ trigger.event.data.discharge_w | int }}"
+```
+
+### Setting a `number` entity
+
+An inverter integration that publishes a writable `number` needs one action, and
+this is the shape that reproduces exactly what the add-on used to do by itself:
+
+```yaml
+alias: Battery setpoint → inverter
+mode: queued
+max: 10
+triggers:
+  - trigger: event
+    event_type: elias_ems_setpoint
+    event_data:
+      key: home_battery
+actions:
+  - action: number.set_value
+    target:
+      entity_id: number.battery_target_power
+    data:
+      value: "{{ trigger.event.data.power_w }}"
+```
+
+Worth knowing what you are choosing here: setting an entity is a state change,
+so this automation puts the setpoint back into the logbook and the recorder. If
+that is the noise you were trying to get rid of, write the register directly
+instead, or exclude the entity in `recorder:`/`logbook:` — but an inverter's own
+`number` entity is a real reading of the device, and hiding it is a different
+decision from not writing to it several times a minute.
+
+### The mode entity, and putting it back
+
+The one that used to be listed as missing. An inverter that ignores a setpoint
+until it is in a forced mode wants two actions on the way in and a different one
+on the way out, and `released` is what separates them:
+
+```yaml
+alias: Battery setpoint → inverter
+mode: queued
+max: 10
+triggers:
+  - trigger: event
+    event_type: elias_ems_setpoint
+    event_data:
+      key: home_battery
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.released }}"
+        sequence:
+          # Elias ems is standing down: hand the battery back to its own logic
+          # rather than leaving it forced at 0 W.
+          - action: select.select_option
+            target:
+              entity_id: select.inverter_working_mode
+            data:
+              option: Self consumption
+    default:
+      - action: select.select_option
+        target:
+          entity_id: select.inverter_working_mode
+        data:
+          option: Forced charge/discharge
+      - action: number.set_value
+        target:
+          entity_id: number.battery_target_power
+        data:
+          value: "{{ trigger.event.data.power_w }}"
+```
+
+Re-selecting a mode that is already selected is a no-op on every integration
+worth using, so there is no need to guard the `select` with a condition.
+
+### Several batteries, one automation
+
+Drop the `event_data` filter and the automation hears every battery; `key` says
+which one each event is about:
+
+```yaml
+alias: Battery setpoints → inverters
+mode: queued
+max: 10
+triggers:
+  - trigger: event
+    event_type: elias_ems_setpoint
+actions:
+  - action: number.set_value
+    target:
+      entity_id: >-
+        {{ {'home_battery': 'number.home_battery_target_power',
+            'garage_battery': 'number.garage_battery_target_power'}[trigger.event.data.key] }}
+    data:
+      value: "{{ trigger.event.data.power_w }}"
+```
+
+### If the automation itself is the noise
+
+An automation that runs leaves its own trace: `last_triggered` moves and the
+logbook shows it being triggered. That is far less than a state change per
+setpoint, and it is per automation rather than per battery entity, but it is not
+nothing. `logbook:`/`recorder:` exclusions take an `automation.*` entity id the
+same way they take any other, which is the place to say so.
 
 ## The loop
 
@@ -391,7 +592,13 @@ A tick looks like this:
 22:50:57 Grid net +842 W (importing), batteries at 0 W → discharge 842 W total. (via live cache, oldest reading 3s)
          Home battery: discharge at 561 W (SoC 76%, 6.6 kWh to 10%)
          Garage battery: discharge at 281 W (SoC 76%, 2.8 kWh to 20%)
+         Published: Home battery → -561 W; Garage battery → -281 W
 ```
+
+The last line is what actually left the process, and it is deliberately not a
+repeat of the ones above it: a tick whose deadband held everything back has the
+decisions and no `Published:` line at all, which is the difference between "it
+decided this" and "it said this out loud".
 
 The clause in brackets is the provenance: which source the numbers came from and
 how old the oldest of them was. Since nothing refuses to act on an old reading,
@@ -435,12 +642,12 @@ concatenation.
 | Suite | What it covers |
 | --- | --- |
 | `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split, and the power caps — each direction independently, and a battery limited to 0 W leaving the split to the others. Also the unsteerable cases: dropping out of the plan, and not being counted into the feedback term |
-| `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config, including `resolvePowerLimits` and a battery record saved before the control fields existed |
+| `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config, including `resolvePowerLimits`, a battery record saved before the control fields existed, and one from the version that named a target entity |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
-| `test/unit/setpoints.test.ts` | the write itself: the service picked from the entity's domain, a refused domain, rounding to `step`, the deadband skipping a redundant write and clearing it not doing, correcting an entity something else moved, and a failure on one battery leaving its neighbour written |
-| `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, and files its lines under the right origin. Also that a target entity's own range reaches the strategy, that a configured cap overrides it rather than narrowing it, and that a change to a target provokes no tick. Also the write from the loop's side: that a tick writes what it decided, that a second tick doesn't repeat it, that a deadband hold writes nothing, that an unreadable grid cancels a standing command, and that switching control off releases the batteries |
-| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, the writable-domain filter on `/api/entities`, and that control refuses to switch on with no steerable battery but can always be switched off |
-| `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy — including the setpoint leaving that process over the Supervisor proxy, and the release landing when control is switched off |
+| `test/unit/setpoints.test.ts` | the publish itself: the payload an automation acts on, both directions of the charge/discharge split, rounding, the deadband holding a setpoint back and a move clearing it, a stale setpoint being restated, a release going out past the deadband and saying so, and a failed publish not being remembered so the retry survives |
+| `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, and files its lines under the right origin. Also that a configured cap reaches the strategy, and that an entity an automation moved on our behalf provokes no tick. Also the publish from the loop's side: that a tick publishes what it decided under the battery's key, that a second tick doesn't repeat it, that a deadband hold publishes nothing, that an unreadable grid cancels a standing command, and that switching control off releases the batteries |
+| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/entities` offering readings only, and that control refuses to switch on with no steerable battery but can always be switched off |
+| `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy — including the setpoint event leaving that process over the Supervisor proxy, and the release landing, flagged as one, when control is switched off |
 | `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves. What it reads is the diagnostics entry `syncControlLoop()` writes when it starts an interval: nothing in that process has posted the settings form, so only the boot-time call can have produced it |
 | `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the diagnostics box fill |
 
@@ -453,18 +660,16 @@ tick currently in flight, since advancing a clock only *starts* one.
 
 ## Not done yet
 
-- **A mode entity.** Many inverters ignore a setpoint until a `select.*` is put
-  into a forced or manual mode, and want it returned to self-consumption
-  afterwards. This is the biggest remaining gap and the most likely reason a
-  correctly written setpoint does nothing: the write lands on the entity, the
-  entity reads back what we asked for, and the hardware carries on doing
-  whatever its own logic says. It is a second field and a lifecycle, not just
-  another write, and it is also what would make [letting go](#letting-go) mean
-  "resume self-consumption" rather than merely "stop".
-- **Noticing that the hardware disagreed.** The read-back confirms the *entity*
-  took the value, which is not the same as the inverter obeying it. Comparing
-  the battery's measured power against its setpoint over a few ticks would
-  catch a setpoint being ignored — the failure the mode entity above causes.
+- **Knowing whether anything is listening.** The event goes on the bus and the
+  add-on hears nothing back. No automation, a typo in the key, a `mode: single`
+  automation dropping events under load: all three look identical from here, and
+  all three look like a loop that is working. Comparing the battery's measured
+  power against the setpoint over a few ticks is what would catch every one of
+  them, and it is the biggest remaining gap now that the mode entity is the
+  automation's business rather than a missing field.
+- **A worked example per inverter family.** The recipes above are the shapes,
+  not a catalogue. The register numbers, mode names and sign conventions differ
+  per brand, and that is exactly the knowledge this project does not have yet.
 - **Redistributing what a power cap holds back** within a single tick, rather
   than letting the feedback term converge on it over several. Worth doing if the
   convergence turns out to be visible in practice.

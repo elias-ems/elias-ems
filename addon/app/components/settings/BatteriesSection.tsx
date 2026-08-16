@@ -24,7 +24,7 @@ export default function BatteriesSection({
   return (
     <Section
       title="Batteries"
-      description="Capacity and the charge window are typed in; the readings and the target come from Home Assistant."
+      description="Capacity, the charge window and the control key are typed in; the readings come from Home Assistant."
       add={{
         label: "Add battery",
         open: editor.showAdd,
@@ -56,12 +56,12 @@ export default function BatteriesSection({
               Charge: <code>{battery.socEntityId}</code>
             </div>
             <div style={{ fontSize: "0.875rem" }}>
-              {battery.targetPowerEntityId ? (
+              {battery.controlKey ? (
                 <>
-                  Target: <code>{battery.targetPowerEntityId}</code>
+                  Control key: <code>{battery.controlKey}</code>
                 </>
               ) : (
-                "Target: not set — watched, not steered"
+                "Control key: not set — watched, not steered"
               )}
             </div>
           </>
@@ -134,14 +134,13 @@ export default function BatteriesSection({
                 defaultValue={battery?.socEntityId}
                 error={errors.socEntityId}
               />
-              <EntityAutocomplete
-                name="targetPowerEntityId"
-                label="Target power (W) — optional"
-                placeholder="e.g. number.battery_target_power"
-                defaultValue={battery?.targetPowerEntityId}
-                error={errors.targetPowerEntityId}
-                domains={["number", "input_number"]}
-                hint="Where the setpoint is written, same sign convention as Power. Suggests number and input_number entities, but accepts any id you type. Leave empty to watch this battery without steering it."
+              <Field
+                name="controlKey"
+                label="Control key — optional"
+                placeholder="e.g. home_battery"
+                defaultValue={battery?.controlKey}
+                error={errors.controlKey}
+                hint="The name this battery goes out under in the elias_ems_setpoint event, for your automation to match on. Leave empty to watch this battery without steering it."
               />
               <Field
                 name="maxChargePowerW"
@@ -152,7 +151,7 @@ export default function BatteriesSection({
                 placeholder="e.g. 5000"
                 defaultValue={battery?.maxChargePowerW ?? ""}
                 error={errors.maxChargePowerW}
-                hint="Leave empty to use the target entity's own limit."
+                hint="Leave empty for no limit."
               />
               <Field
                 name="maxDischargePowerW"
@@ -163,7 +162,7 @@ export default function BatteriesSection({
                 placeholder="e.g. 5000"
                 defaultValue={battery?.maxDischargePowerW ?? ""}
                 error={errors.maxDischargePowerW}
-                hint="A positive number. Leave empty to use the target entity's own limit."
+                hint="A positive number. Leave empty for no limit."
               />
             </>
           );

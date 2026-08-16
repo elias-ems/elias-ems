@@ -4,11 +4,11 @@
  * asks the configured strategy what the batteries should be doing, and writes
  * the answer to diagnostics.
  *
- * Each tick then writes what it decided to each battery's target power entity
- * and records both halves. The decision and the actuation stay separable —
- * `net-zero.ts` works out what should happen and `setpoints.server.ts` makes it
- * happen — which is what lets the strategy stay a pure function with no idea
- * that Home Assistant exists.
+ * Each tick then publishes what it decided as a setpoint event per battery and
+ * records both halves. The decision and the actuation stay separable —
+ * `net-zero.ts` works out what should happen and `setpoints.server.ts` puts it
+ * on Home Assistant's bus for an automation to carry out — which is what lets
+ * the strategy stay a pure function with no idea that Home Assistant exists.
  *
  * A stopped loop lets the batteries go; see `releaseBatteries`.
  *
@@ -25,11 +25,14 @@ import type { DiagnosticsLevel } from "./diagnostics";
 import { appendDiagnostic } from "./diagnostics.server";
 import { type Grid, isGridConfigured } from "./grid";
 import { readGrid } from "./grid.server";
-import type { HaState } from "./ha.server";
 import { onHaChange } from "./ha-live.server";
 import { type BatterySnapshot, planNetZero } from "./net-zero";
-import { toNumber, toRange } from "./readings.server";
-import { describeWrites, writeSetpoints } from "./setpoints.server";
+import { toNumber } from "./readings.server";
+import {
+  describePublishes,
+  forgetPublishedSetpoints,
+  publishSetpoints,
+} from "./setpoints.server";
 import { readingAge, readStates } from "./states.server";
 
 /**
@@ -96,13 +99,13 @@ async function readTickConfig(): Promise<TickConfig> {
  * save landing in between leaves a tick holding a battery's settings and another
  * battery's readings.
  *
- * Deliberately **not** the target power entities. This is also the set whose
- * changes provoke a tick, and a target is an output, not a reading: watching it
- * would mean every setpoint we write comes back as a change, provokes another
- * tick, and writes again — a feedback loop with nothing damping it. It is also
- * what "oldest reading" is measured over, and a setpoint nobody has touched for
- * hours would dominate that number while saying nothing about whether the
- * sensors are alive.
+ * This is also the set whose changes provoke a tick, which is why it is only
+ * ever inputs. Nothing the loop *commands* belongs here: when a setpoint used
+ * to be written to an entity, watching that entity meant every setpoint came
+ * back as a change, provoked another tick and was written again, with nothing
+ * damping the loop. Publishing an event instead removes the entity but not the
+ * rule — whatever an automation does with a setpoint on the way to the
+ * hardware must not become the reason for the next one.
  */
 function controlReadingIds({ grid, batteries }: TickConfig): string[] {
   return [
@@ -112,20 +115,6 @@ function controlReadingIds({ grid, batteries }: TickConfig): string[] {
       battery.powerEntityId,
     ]),
   ].filter(Boolean);
-}
-
-/**
- * The target entities, read for their `min`/`max` rather than their value:
- * those are what bound the setpoint when settings don't. From the same
- * `TickConfig` as the readings, so the batteries written to and the batteries
- * decided about cannot come from two different reads of the store.
- *
- * Unconfigured ids are dropped, so a battery that isn't steered costs nothing.
- */
-function controlTargetIds({ batteries }: TickConfig): string[] {
-  return batteries
-    .map((battery) => battery.targetPowerEntityId)
-    .filter(Boolean);
 }
 
 /**
@@ -141,18 +130,15 @@ async function readSnapshots(): Promise<{
   batteries: BatterySnapshot[];
   gridConfigured: boolean;
   provenance: string;
-  /** Each steerable battery's target entity and its state, ready to be written. */
-  targets: Map<string, { entityId: string; state: HaState | null }>;
+  /** Each steerable battery's control key, by battery id, ready to publish under. */
+  keys: Map<string, string>;
 }> {
   const config = await readTickConfig();
   const { grid, batteries } = config;
   const gridConfigured = isGridConfigured(grid);
 
   const readingIds = controlReadingIds(config);
-  const { states, error } = await readStates([
-    ...readingIds,
-    ...controlTargetIds(config),
-  ]);
+  const { states, error } = await readStates(readingIds);
 
   // The page can render dashes when Home Assistant is unreachable; a decision
   // cannot be made out of them. Raising it here turns the outage into one
@@ -162,9 +148,6 @@ async function readSnapshots(): Promise<{
 
   const stateOf = (id: string) => states.get(id)?.state ?? null;
 
-  // Provenance over the readings alone, for the reason `controlReadingIds`
-  // gives: a target's age says nothing about whether the house is being
-  // observed, and being static it would always be the oldest thing here.
   const readings = new Map(
     readingIds.flatMap((id) => {
       const read = states.get(id);
@@ -184,22 +167,13 @@ async function readSnapshots(): Promise<{
       socPercent: toNumber(stateOf(battery.socEntityId)),
       powerW: toNumber(stateOf(battery.powerEntityId)),
       steerable: isSteerable(battery),
-      ...resolvePowerLimits(
-        battery,
-        battery.targetPowerEntityId
-          ? toRange(stateOf(battery.targetPowerEntityId))
-          : null,
-      ),
+      ...resolvePowerLimits(battery),
     })),
     provenance: describeSource(readings),
-    targets: new Map(
-      batteries.filter(isSteerable).map((battery) => [
-        battery.id,
-        {
-          entityId: battery.targetPowerEntityId,
-          state: stateOf(battery.targetPowerEntityId),
-        },
-      ]),
+    keys: new Map(
+      batteries
+        .filter(isSteerable)
+        .map((battery) => [battery.id, battery.controlKey]),
     ),
   };
 }
@@ -247,36 +221,33 @@ export async function runControlTick(): Promise<void> {
   // few seconds; logged separately they interleave, so the log's
   // repeated-line collapsing never gets two identical entries in a row and the
   // buffer fills with near-duplicates instead of holding useful history.
-  // Written before the decision is logged, so that a line saying what was
+  // Published before the decision is logged, so that a line saying what was
   // decided and a line saying what was done cannot end up in the other order.
-  const writes = await writeSetpoints(
+  const publishes = await publishSetpoints(
     plan.decisions.flatMap((decision) => {
-      const target = inputs.targets.get(decision.batteryId);
-      if (!target) return [];
+      const key = inputs.keys.get(decision.batteryId);
+      if (!key) return [];
       return [
         {
           batteryId: decision.batteryId,
           title: decision.title,
-          entityId: target.entityId,
-          state: target.state,
+          key,
           commandW: decision.commandW,
         },
       ];
     }),
   );
 
-  const written = describeWrites(writes);
+  const sent = describePublishes(publishes);
 
   const lines = [
     `${plan.summary} (${inputs.provenance})`,
     ...plan.warnings.map((warning) => `! ${warning}`),
     ...plan.decisions.map((decision) => decision.message),
-    ...(written ? [written] : []),
+    ...(sent ? [sent] : []),
   ];
 
-  const troubled = writes.some(
-    (write) => write.status === "failed" || write.status === "unsupported",
-  );
+  const troubled = publishes.some((publish) => publish.status === "failed");
   logControl(
     plan.warnings.length > 0 || troubled ? "warn" : "info",
     lines.join("\n"),
@@ -286,7 +257,7 @@ export async function runControlTick(): Promise<void> {
 }
 
 /**
- * Hands every steerable battery back by commanding 0, and waits for it.
+ * Hands every steerable battery back by publishing 0 for it, and waits for it.
  *
  * Called when control is switched off and when the process is asked to stop. A
  * battery left forcing kilowatts because the thing that told it to is gone is
@@ -298,9 +269,10 @@ export async function runControlTick(): Promise<void> {
  * worth being honest about. It stops the battery being driven in either
  * direction, which is safe on every inverter; it does not necessarily hand the
  * battery back to its own self-consumption logic, which on many brands means
- * putting a mode entity back rather than writing a power. That is the
- * mode-entity work, and until it exists this is the floor rather than the
- * finished thing.
+ * putting a mode entity back rather than commanding a power. The event says
+ * which of the two this is — `released: true` — so an automation that knows how
+ * to restore its inverter's mode has something to trigger on, but the add-on
+ * itself still only knows how to say "stop".
  *
  * Nothing here can survive `kill -9`, a power cut, or a container the
  * supervisor destroys without asking. The only real answer to those is an
@@ -311,27 +283,35 @@ export async function releaseBatteries(): Promise<void> {
   const batteries = (await listBatteries()).filter(isSteerable);
   if (batteries.length === 0) return;
 
-  const writes = await writeSetpoints(
+  const publishes = await publishSetpoints(
     batteries.map((battery) => ({
       batteryId: battery.id,
       title: battery.title,
-      entityId: battery.targetPowerEntityId,
-      // No state, so the deadband cannot decide the entity already reads 0 and
-      // skip: releasing is worth one unconditional write even when it is
-      // probably redundant.
-      state: null,
+      key: battery.controlKey,
       commandW: 0,
+      // Past the deadband: letting go is worth one event even when we think
+      // the battery is already at 0, because what we think is the very thing
+      // in doubt when something has gone wrong enough to be stopping.
+      force: true,
     })),
   );
 
-  const trouble = writes.filter((write) => write.status !== "written");
+  // Nothing is steering these batteries any more, so nothing should be
+  // remembered about them either — the next tick after control comes back on
+  // publishes from scratch rather than deciding it already said this.
+  forgetPublishedSetpoints();
+
+  const trouble = publishes.filter((publish) => publish.status !== "published");
   logControl(
     trouble.length > 0 ? "error" : "info",
     trouble.length > 0
       ? `Released the batteries, but ${trouble
-          .map((write) => `${write.title} (${write.detail ?? write.status})`)
-          .join(", ")} did not take it — check it is not still being driven.`
-      : `Released ${writes.length === 1 ? "the battery" : "the batteries"} to 0 W.`,
+          .map(
+            (publish) =>
+              `${publish.title} (${publish.detail ?? publish.status})`,
+          )
+          .join(", ")} did not go out — check it is not still being driven.`
+      : `Released ${publishes.length === 1 ? "the battery" : "the batteries"} to 0 W.`,
   );
 }
 
@@ -535,6 +515,10 @@ export function controlLoopStatus(): ControlLoopStatus {
 /** Test-only: forget everything this module remembers between cases. */
 export function resetControlLoop(): void {
   stopControlLoop();
+  // Including what was published: a case that starts with a battery already
+  // "told" what the previous case told it would see its first setpoint held
+  // back by the deadband.
+  forgetPublishedSetpoints();
   state.config = null;
   state.inFlight = null;
   state.lastTickAt = null;

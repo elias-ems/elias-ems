@@ -45,6 +45,7 @@ import {
   startHaLive,
   stopHaLive,
 } from "../../app/lib/ha-live.server";
+import { SETPOINT_EVENT } from "../../app/lib/setpoints.server";
 import { defaultStates, startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
@@ -63,9 +64,6 @@ async function subscribe(): Promise<void> {
 
 const GRID = { powerEntityId: "sensor.grid_power" };
 
-/** The fixture's writable entity: -5000..5000 in steps of 100. */
-const SETPOINT_ENTITY = "input_number.battery_setpoint";
-
 const BATTERY = {
   title: "Home battery",
   capacityKwh: 10,
@@ -75,10 +73,8 @@ const BATTERY = {
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
   // Steerable, since an unsteered battery sits out of every plan and these
-  // cases are about scheduling. Pointed at the wide-range fixture entity
-  // (-5000..5000) rather than number.battery_target_power, whose deliberately
-  // tight -500 W floor would cap the setpoints they assert on.
-  targetPowerEntityId: "input_number.battery_setpoint",
+  // cases are about scheduling.
+  controlKey: "home_battery",
   maxChargePowerW: null,
   maxDischargePowerW: null,
 };
@@ -94,13 +90,13 @@ function logged(fragment: string): boolean {
   return messages().some((message) => message.includes(fragment));
 }
 
-/** Every setpoint written so far, as [entity, value] pairs, in order. */
-function setValueCalls(): Array<[string, unknown]> {
-  return ha.serviceCalls
-    .filter((call) => call.service === "set_value")
-    .map((call) => [
-      String((call.data as { entity_id?: string }).entity_id),
-      (call.data as { value?: unknown }).value,
+/** Every setpoint published so far, as [key, watts] pairs, in order. */
+function setpointEvents(): Array<[string, unknown]> {
+  return ha.events
+    .filter((event) => event.eventType === SETPOINT_EVENT)
+    .map((event) => [
+      String((event.data as { key?: string }).key),
+      (event.data as { power_w?: unknown }).power_w,
     ]);
 }
 
@@ -147,7 +143,7 @@ beforeEach(async () => {
   // reconnect timers to whatever clock the case is running.
   process.env.SUPERVISOR_WS = UNREACHABLE_WS;
   ha.setStates(await defaultStates());
-  ha.serviceCalls.length = 0;
+  ha.events.length = 0;
   for (const battery of await listBatteries()) await removeBattery(battery.id);
   await saveGrid(GRID);
   clearDiagnostics();
@@ -190,32 +186,32 @@ describe("runControlTick", () => {
     expect(logged("state of charge unknown")).toBe(true);
   });
 
-  it("writes the setpoint it decided on to the target entity", async () => {
+  it("publishes the setpoint it decided on under the battery's control key", async () => {
     await addBattery(BATTERY);
 
     await runControlTick();
 
     // The fixture imports 842 W with the battery idle, so the decision is to
-    // discharge 842 W, and the entity's step of 100 rounds it to 800.
-    expect(setValueCalls()).toEqual([["input_number.battery_setpoint", -800]]);
-    expect(logged("Wrote: Home battery → -800 W")).toBe(true);
+    // discharge 842 W.
+    expect(setpointEvents()).toEqual([["home_battery", -842]]);
+    expect(logged("Published: Home battery → -842 W")).toBe(true);
   });
 
-  it("does not write again while the entity already says what it wants", async () => {
+  it("does not publish again while the setpoint has not moved", async () => {
     await addBattery(BATTERY);
 
     await runControlTick();
     await runControlTick();
 
-    // The second tick reads back the value the first one wrote and finds
-    // nothing worth saying. Without this the loop would write every tick, which
-    // on a house that ticks every second is thousands of writes an hour.
-    expect(setValueCalls()).toHaveLength(1);
+    // The second tick decides the same thing and finds nothing worth saying.
+    // Without this the loop would fire an event every tick, and on the other
+    // end of each one is an automation writing to real hardware.
+    expect(setpointEvents()).toHaveLength(1);
   });
 
-  it("leaves the setpoint standing when the grid is inside the deadband", async () => {
+  it("says nothing at all when the grid is inside the deadband", async () => {
     // A hold reports the battery's *measured* power as its setpoint, which is
-    // the right thing to show and the wrong thing to command: writing a
+    // the right thing to show and the wrong thing to command: publishing a
     // measurement back would let sensor noise walk the commanded value around.
     ha.setState("sensor.grid_power", "4", { unit_of_measurement: "W" });
     await addBattery(BATTERY);
@@ -223,53 +219,39 @@ describe("runControlTick", () => {
     await runControlTick();
 
     expect(logged("deadband")).toBe(true);
-    expect(setValueCalls()).toEqual([]);
+    expect(setpointEvents()).toEqual([]);
   });
 
   it("cancels a standing command when the grid sensor cannot be read", async () => {
     // The blind case. A battery left forcing kilowatts because the meter it
-    // was following went unreadable is the one hold that must not persist, so
-    // the setpoint starts where a previous tick would have left it.
+    // was following went unreadable is the one hold that must not persist.
     await addBattery(BATTERY);
-    ha.setState(SETPOINT_ENTITY, "-2000", {
-      min: -5000,
-      max: 5000,
-      step: 100,
-    });
+    await runControlTick();
     ha.setState("sensor.grid_power", "unavailable", {});
-    ha.serviceCalls.length = 0;
+    ha.events.length = 0;
 
     await runControlTick();
 
     expect(logged("grid power sensor is not readable")).toBe(true);
-    expect(setValueCalls()).toEqual([[SETPOINT_ENTITY, 0]]);
+    expect(setpointEvents()).toEqual([["home_battery", 0]]);
   });
 
-  it("caps the setpoint at the target entity's own range", async () => {
-    // Nothing is typed into settings, so the entity is the only thing that can
-    // produce a cap. The fixture's number.battery_target_power has a -500 W
-    // floor — deliberately tighter than the 842 W the meter is asking for, so
-    // that a range which never reached the strategy would be visible here.
-    await addBattery({
-      ...BATTERY,
-      targetPowerEntityId: "number.battery_target_power",
-    });
+  it("caps the setpoint at the configured discharge limit", async () => {
+    // Settings are the only source of a limit now that nothing is written to
+    // an entity, so a cap that never reached the strategy would be visible
+    // here: the meter is asking for 842 W and the inverter can do 500 W.
+    await addBattery({ ...BATTERY, maxDischargePowerW: 500 });
 
     await runControlTick();
 
     expect(logged("discharge at 500 W, capped from 842 W")).toBe(true);
   });
 
-  it("lets a configured cap override the entity's range rather than narrow it", async () => {
-    await addBattery({
-      ...BATTERY,
-      targetPowerEntityId: "number.battery_target_power",
-      maxDischargePowerW: 5000,
-    });
+  it("leaves a battery with no limits uncapped", async () => {
+    await addBattery(BATTERY);
 
     await runControlTick();
 
-    // 5000 W beats the entity's -500 W floor, so the full 842 W goes through.
     expect(logged("discharge at 842 W")).toBe(true);
     expect(logged("capped from")).toBe(false);
   });
@@ -351,11 +333,11 @@ describe("syncControlLoop", () => {
     expect(decisionTicks()).toBe(before);
   });
 
-  it("does not tick on a change to the target entity it writes", async () => {
-    // The target is an output. Once the write path lands, a setpoint we wrote
-    // would come back as a state change, provoke another tick, and be written
-    // again — a feedback loop with nothing damping it. It is read every tick
-    // for its min/max, but it must never be what causes one.
+  it("does not tick on an entity an automation moved on our behalf", async () => {
+    // Whatever the automation does with a setpoint on the way to the hardware
+    // is an output, not a reading. Watching it would mean every setpoint came
+    // back as a change, provoked another tick and was published again — a
+    // feedback loop with nothing damping it.
     await subscribe();
     await addBattery(BATTERY);
     await saveControlConfig({
@@ -470,7 +452,7 @@ describe("syncControlLoop", () => {
     await syncControlLoop();
     await pendingControlTick();
 
-    expect(setValueCalls()).toEqual([["input_number.battery_setpoint", -800]]);
+    expect(setpointEvents()).toEqual([["home_battery", -842]]);
 
     await saveControlConfig({
       enabled: false,
@@ -479,20 +461,22 @@ describe("syncControlLoop", () => {
     });
     await syncControlLoop();
 
-    expect(setValueCalls()).toEqual([
-      ["input_number.battery_setpoint", -800],
-      ["input_number.battery_setpoint", 0],
+    expect(setpointEvents()).toEqual([
+      ["home_battery", -842],
+      ["home_battery", 0],
     ]);
     expect(logged("Released the battery to 0 W")).toBe(true);
   });
 
-  it("releases unconditionally, even when the entity already reads 0", async () => {
+  it("releases unconditionally, and says it is letting go rather than stopping", async () => {
     // The deadband is a tick-rate optimisation, not something the release
-    // should inherit: letting go is worth one write even when it looks
-    // redundant, because the entity's last known value is the very thing in
-    // doubt when something has gone wrong enough to be switching control off.
+    // should inherit: letting go is worth one event even when it looks
+    // redundant, because what we think the battery is doing is the very thing
+    // in doubt when something has gone wrong enough to be switching control
+    // off. `released` is what lets an automation tell the two zeros apart.
     vi.useFakeTimers();
-    await addBattery({ ...BATTERY, targetPowerEntityId: SETPOINT_ENTITY });
+    ha.setState("sensor.grid_power", "4", { unit_of_measurement: "W" });
+    await addBattery(BATTERY);
     await saveControlConfig({
       enabled: true,
       strategy: "net-zero-energy",
@@ -500,8 +484,8 @@ describe("syncControlLoop", () => {
     });
     await syncControlLoop();
     await pendingControlTick();
-    ha.setState(SETPOINT_ENTITY, "0", { min: -5000, max: 5000, step: 100 });
-    ha.serviceCalls.length = 0;
+    // A balanced house, so the tick above published nothing at all.
+    expect(setpointEvents()).toEqual([]);
 
     await saveControlConfig({
       enabled: false,
@@ -510,7 +494,8 @@ describe("syncControlLoop", () => {
     });
     await syncControlLoop();
 
-    expect(setValueCalls()).toEqual([[SETPOINT_ENTITY, 0]]);
+    expect(setpointEvents()).toEqual([["home_battery", 0]]);
+    expect(ha.events.at(-1)?.data).toMatchObject({ released: true });
   });
 
   it("picks up a changed interval", async () => {
@@ -599,8 +584,8 @@ describe("where a tick's numbers came from", () => {
     await subscribe();
     await addBattery(BATTERY);
 
-    // Reads only. The tick also *writes* a setpoint, which is a round trip by
-    // definition and the one this exercise was never about avoiding.
+    // Reads only. The tick also *publishes* a setpoint, which is a round trip
+    // by definition and the one this exercise was never about avoiding.
     const stateReads = () =>
       ha.requests.filter((request) =>
         request.path.startsWith("/core/api/states"),

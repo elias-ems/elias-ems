@@ -50,42 +50,44 @@ Home Assistant.
 
 ## Battery control won't switch on
 
-The checkbox is disabled until **at least one battery has a target power
-entity**. A loop that decides correctly and can change nothing looks exactly
-like a loop that is broken, so it is not allowed to start in that state. See
-[Target power](/guide/configure#target-power-watched-vs-steered).
+The checkbox is disabled until **at least one battery has a control key**. A
+loop that decides correctly and can command nothing looks exactly like a loop
+that is broken, so it is not allowed to start in that state. See [The control
+key](/guide/configure#the-control-key-watched-vs-steered).
 
 Switching control *off* is always allowed, whatever the configuration looks
 like.
 
 ## The log looks right but the battery does nothing
 
-The most likely cause by far: **your inverter needs its mode set before it will
-honour a setpoint**, and Elias ems does not do that yet. The value lands on the
-entity, the entity reads it back, the log looks perfect, and the hardware carries
-on running its own logic. See
-[what battery control cannot do yet](/guide/battery-control#what-it-cannot-do-yet).
+The log only proves Elias ems decided and published. Everything after that is
+your automation, so work outwards in this order:
 
-An automation of your own that puts the inverter into its forced mode is the
-workaround for now.
+1. **Is the event being fired?** Developer Tools → **Events** → listen to
+   `elias_ems_setpoint`. Nothing arriving means control is off, the battery has
+   no control key, or every setpoint is inside the 50 W deadband — wait 30
+   seconds and one will be restated anyway.
+2. **Does the key match?** The `key` in the payload has to be exactly what the
+   automation's `event_data` says. A stray space or a rename on either side
+   detaches them silently.
+3. **Did the automation run?** Its trace shows each run and what it called. An
+   automation still on Home Assistant's default `mode: single` **drops** events
+   that arrive while it is busy — use `mode: queued`.
+4. **Did the inverter honour it?** Many ignore a setpoint until a `select`
+   entity is in a forced or manual mode. That is [an automation
+   step](/guide/battery-control#an-inverter-that-needs-its-mode-set), and on
+   those brands it is the difference between a setpoint that lands and one that
+   changes nothing.
 
-Other things to rule out:
-
-- **The target entity is not actually writable.** A `sensor` cannot be written
-  to. It wants a `number` or an `input_number` — anything else is refused rather
-  than guessed at, and the refusal is in the log.
-- **The write is being skipped as redundant.** A setpoint is only sent when it
-  differs from the entity's current value by at least 50 W.
+Elias ems cannot tell these apart from where it stands — see [what it cannot do
+yet](/guide/battery-control#what-it-cannot-do-yet).
 
 ## A battery sits out with "power limited to 0 W"
 
-Its target entity's range cannot express that direction. An `input_number`
-created through the Home Assistant UI defaults to 0–100, and a `min` of 0 means
-negative values — discharging — are not writable at all.
-
-Fix the helper's range, or fill in **Maximum charge power** and **Maximum
-discharge power** on the battery, which override the entity's range. See
-[Power limits](/guide/configure#power-limits).
+Its **Maximum charge power** or **Maximum discharge power** is set to something
+that leaves it nothing to do in the direction the meter needs. Clear the field
+to leave that direction uncapped, or set it to what the inverter can really
+deliver. See [Power limits](/guide/configure#power-limits).
 
 ## The meter goes the wrong way
 

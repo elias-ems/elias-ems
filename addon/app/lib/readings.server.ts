@@ -1,4 +1,3 @@
-import type { EntityRange } from "./batteries";
 import type { HaState } from "./ha.server";
 import type { Reading } from "./readings";
 
@@ -37,30 +36,4 @@ export function toNumber(state: HaState | null): number | null {
   if (!state) return null;
   const value = Number(state.state);
   return Number.isFinite(value) ? value : null;
-}
-
-function attributeNumber(state: HaState, name: string): number | null {
-  const value = Number(state.attributes?.[name]);
-  // `Number(undefined)` is NaN, so a missing attribute falls out here — but
-  // `Number(null)` is 0, and a range of 0 is a very different claim from one
-  // that was never made.
-  if (state.attributes?.[name] === null) return null;
-  return Number.isFinite(value) ? value : null;
-}
-
-/**
- * The range a writable entity publishes about itself, or null when there is no
- * entity to ask.
- *
- * `number` entities always carry `min`/`max` — the platform requires them — and
- * `input_number` helpers do too, so this is nearly always populated. Each half
- * is still independently nullable: the entity may be some other domain
- * entirely, in which case saying so is better than inventing a bound.
- */
-export function toRange(state: HaState | null): EntityRange | null {
-  if (!state) return null;
-  return {
-    min: attributeNumber(state, "min"),
-    max: attributeNumber(state, "max"),
-  };
 }
