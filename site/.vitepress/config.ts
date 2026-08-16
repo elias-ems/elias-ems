@@ -19,7 +19,10 @@ export default defineConfig({
 
   head: [
     ["meta", { name: "theme-color", content: "#0288d1" }],
-    ["link", { rel: "icon", href: "/elias-ems/favicon.svg", type: "image/svg+xml" }],
+    [
+      "link",
+      { rel: "icon", href: "/elias-ems/favicon.svg", type: "image/svg+xml" },
+    ],
   ],
 
   themeConfig: {

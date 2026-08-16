@@ -1,0 +1,22 @@
+{
+  // Only .vitepress/config.ts. VitePress loads it through esbuild, which strips
+  // the types without checking them, so a config option with the wrong type
+  // builds green and is only wrong at runtime — `npm run typecheck` is what
+  // catches it. scripts/sync-docs.mjs stays out: it is plain JavaScript run
+  // straight by node, like addon/server.js and the test harness.
+  "include": [".vitepress/config.ts"],
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true
+  }
+}

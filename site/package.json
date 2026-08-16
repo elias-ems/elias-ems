@@ -10,7 +10,11 @@
     "docs:dev": "node scripts/sync-docs.mjs && vitepress dev",
     "docs:build": "node scripts/sync-docs.mjs && vitepress build",
     "docs:preview": "vitepress preview",
-    "sync": "node scripts/sync-docs.mjs"
+    "sync": "node scripts/sync-docs.mjs",
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "lint": "npm --prefix ../addon exec --no -- biome check --config-path ../addon .",
+    "lint:fix": "npm --prefix ../addon exec --no -- biome check --write --config-path ../addon .",
+    "typecheck": "npm --prefix ../addon exec --no -- tsc -p ."
   },
   "devDependencies": {
     "vitepress": "^1.6.4"

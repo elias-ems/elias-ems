@@ -14,7 +14,7 @@ from one directory or the other:
 | Project | What it is | Verified by |
 | --- | --- | --- |
 | `addon/` | The add-on itself. Dozens of dependencies. | `npm run lint`, `npm run typecheck`, `npm run test:all` |
-| `site/` | The VitePress documentation site. One dependency. | `npm run docs:build` |
+| `site/` | The VitePress documentation site. One dependency. | `npm run lint`, `npm run typecheck`, `npm test`, `npm run docs:build` |
 
 Do both in one pass and one PR — `site/` has a single dependency and skipping it
 is how it drifts.
@@ -99,18 +99,24 @@ the rest of the update.
 
 ## 4. `site/`: apply and verify
 
-Same two commands, from `site/`:
+From `site/`:
 
 ```bash
 npm update
-npm run docs:build
+npm run lint && npm run typecheck && npm test && npm run docs:build
 ```
 
-`docs:build` is the whole gate — there is no lint or test suite here. It is also
-exactly what [.github/workflows/docs.yml](../../../.github/workflows/docs.yml)
-runs, and it fails on a dead link, which is the failure a VitePress bump is most
-likely to cause. It regenerates `site/internals/` from `docs/` first; that
-directory is gitignored output, so it should not show up in `git status`.
+`docs:build` is the one that matters most for a VitePress bump: it is exactly
+what [.github/workflows/docs.yml](../../../.github/workflows/docs.yml) runs, and
+it fails on a dead link, which is the breakage a new VitePress is most likely to
+cause. It regenerates `site/internals/` from `docs/` first; that directory is
+gitignored output, so it should not show up in `git status`.
+
+`lint` and `typecheck` here shell out to `addon/node_modules` — the site has no
+Biome or TypeScript of its own — so **run step 3 first**, or at least
+`npm install` in `addon/`. Without it they fail with a missing-package error
+rather than doing nothing, which is the intended behaviour but is easy to
+misread as a broken script.
 
 **VitePress 2 is a deliberate hold while it is pre-release.** `vitepress` is the
 site's only dependency, and 2.0 has been in alpha for a long time; `latest` is
