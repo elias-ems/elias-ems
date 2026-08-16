@@ -23,14 +23,14 @@ export default function ControlSection({
   config,
   /**
    * Whether the grid, at least one battery, and at least one battery with a
-   * target power entity are configured. The last is the only one of the three
-   * that blocks enabling rather than merely warning.
+   * control key are configured. The last is the only one of the three that
+   * blocks enabling rather than merely warning.
    */
   ready,
   actionData,
 }: {
   config: ControlConfig;
-  ready: { grid: boolean; batteries: boolean; targets: boolean };
+  ready: { grid: boolean; batteries: boolean; steerable: boolean };
   actionData?: SettingsActionData;
 }) {
   const navigation = useNavigation();
@@ -50,10 +50,10 @@ export default function ControlSection({
     !ready.batteries && "at least one battery",
   ].filter((item): item is string => Boolean(item));
 
-  // Left interactive while control is already on, so that a target cleared
-  // afterwards leaves a box that can still be unticked rather than a switch
-  // stuck in the on position.
-  const canEnable = ready.targets || config.enabled;
+  // Left interactive while control is already on, so that a control key
+  // cleared afterwards leaves a box that can still be unticked rather than a
+  // switch stuck in the on position.
+  const canEnable = ready.steerable || config.enabled;
 
   return (
     <Section
@@ -76,7 +76,7 @@ export default function ControlSection({
           </label>
         </div>
 
-        {!ready.targets && (
+        {!ready.steerable && (
           <p style={errors.enabled ? errorStyle : hintStyle}>
             {NO_STEERABLE_BATTERY_ERROR}
           </p>

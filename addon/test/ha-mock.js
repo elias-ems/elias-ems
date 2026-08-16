@@ -15,6 +15,9 @@
  * `/core/api/states/<id>`, which is also how the real API does it. A test moves
  * a sensor once and both transports see it.
  *
+ * The third thing the REST half serves is `POST /core/api/events/<type>`, the
+ * one endpoint the add-on uses to ask for something rather than to read it.
+ *
  * `ws` is a devDependency because node ships a WebSocket *client* and no
  * server; the add-on itself needs no such thing, since the client is the half
  * it uses.
@@ -112,13 +115,15 @@ export async function startHaMock({
   const requests = [];
 
   /**
-   * Every service call seen, in order, so a test can assert what the add-on
-   * asked Home Assistant to do rather than only what the state ended up as.
-   * The difference matters: a loop that writes the same value forty times a
-   * minute and one that writes it once leave the same entity behind.
-   * @type {Array<{ domain: string, service: string, data: object }>}
+   * Every event fired on the bus, in order, so a test can assert what the
+   * add-on asked for rather than only what the house ended up doing. The
+   * difference matters, and an event is the only trace there is: unlike a
+   * service call it changes no entity, so a loop that publishes the same
+   * setpoint forty times a minute and one that publishes it once are
+   * indistinguishable from the states alone.
+   * @type {Array<{ eventType: string, data: object }>}
    */
-  const serviceCalls = [];
+  const events = [];
 
   /**
    * Sockets that have authenticated, against the id of their `state_changed`
@@ -183,46 +188,18 @@ export async function startHaMock({
       return sendJson(res, 200, current);
     }
 
-    // Services are how anything actually changes a device. Only the two
-    // `set_value` variants the add-on calls are implemented, and they behave
-    // the way the real ones do in the respect that matters here: the entity
-    // takes the value, subscribers are told, and the response is the list of
-    // states the call changed. A value outside the entity's own min/max is
-    // rejected, which is what makes writing out of range a testable mistake
-    // rather than a silent one.
-    const serviceMatch = pathname.match(
-      /^\/core\/api\/services\/([^/]+)\/(.+)$/,
-    );
-    if (serviceMatch && req.method === "POST") {
-      const [, domain, service] = serviceMatch;
+    // Firing an event is how the add-on asks for anything to happen. Home
+    // Assistant accepts any type with any JSON body, puts it on the bus and
+    // answers with a message — it changes no state and leaves no history,
+    // which is the whole reason the setpoint goes out this way. Recorded here
+    // because the bus is otherwise unobservable from a test.
+    const eventMatch = pathname.match(/^\/core\/api\/events\/(.+)$/);
+    if (eventMatch && req.method === "POST") {
+      const eventType = decodeURIComponent(eventMatch[1]);
       return readJson(req).then(
         (body) => {
-          const entityId = String(body?.entity_id ?? "");
-          const existing = current.find(
-            (entity) => entity.entity_id === entityId,
-          );
-
-          serviceCalls.push({ domain, service, data: body ?? {} });
-
-          if (service !== "set_value" || !existing) {
-            return sendJson(res, 400, { message: "Unknown service call" });
-          }
-
-          const value = Number(body?.value);
-          const { min, max } = existing.attributes ?? {};
-          if (
-            !Number.isFinite(value) ||
-            (Number.isFinite(min) && value < min) ||
-            (Number.isFinite(max) && value > max)
-          ) {
-            return sendJson(res, 400, {
-              message: `Value ${body?.value} outside range`,
-            });
-          }
-
-          const next = { ...existing, state: String(value) };
-          applyState(entityId, next);
-          return sendJson(res, 200, [next]);
+          events.push({ eventType, data: body ?? {} });
+          return sendJson(res, 200, { message: `Event ${eventType} fired.` });
         },
         () => sendJson(res, 400, { message: "Invalid JSON specified." }),
       );
@@ -357,7 +334,7 @@ export async function startHaMock({
     /** What SUPERVISOR_WS should be set to. */
     wsUrl: `ws://127.0.0.1:${boundPort}/core/websocket`,
     requests,
-    serviceCalls,
+    events,
     /** How many clients are subscribed right now — one per add-on process. */
     subscriberCount: () =>
       [...sockets.values()].filter((id) => id !== null).length,

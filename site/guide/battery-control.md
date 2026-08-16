@@ -5,8 +5,13 @@ importing, the battery should be covering it; if it is exporting, the battery
 should be soaking it up.
 
 Every few seconds the add-on reads the grid meter and each battery, decides what
-each one should be doing, writes that to the battery's target power entity, and
-records both halves in the [diagnostics log](/guide/diagnostics).
+each one should be doing, publishes that as a Home Assistant event, and records
+both halves in the [diagnostics log](/guide/diagnostics).
+
+**It does not touch your battery itself.** An automation you write listens for
+that event and turns it into whatever your inverter wants — see [Connecting the
+event to your battery](#connecting-the-event-to-your-battery), which is the step
+that makes any of this do something.
 
 ## Why it isn't "importing 800 W, so discharge 800 W"
 
@@ -34,9 +39,9 @@ asks for the remainder.
 2. **If the meter is within 25 W of zero, everything holds where it is.** Chasing
    meter noise would only cycle the battery for nothing.
 3. Otherwise the target is calculated as above, over the **steerable** batteries
-   only — the ones with a target power entity.
+   only — the ones with a control key.
 4. A battery **drops out of this tick** when it cannot help in that direction:
-   - it has no target power entity, so there is nothing to write to. It holds at
+   - it has no control key, so there is nothing to say to it. It holds at
      whatever it is currently doing, rather than being told to stop;
    - it is at or above its maximum charge and the plan is to charge;
    - it is at or below its minimum charge and the plan is to discharge;
@@ -55,79 +60,262 @@ It does not need to be — whatever goes undelivered keeps the meter off zero, s
 the next tick asks for it again and the batteries with headroom take it up over a
 few seconds.
 
-### Batteries you haven't given a target to
+### Batteries you haven't given a control key
 
-A battery with no target power entity is left out of the plan *and* out of the
+A battery with no control key is left out of the plan *and* out of the
 arithmetic. That second part is less obvious and matters: it is already covering
 some of the load, so counting it in would ask the steerable batteries to cover
 the same watts a second time, and the meter would overshoot by exactly that
 amount. A house importing 200 W with an unsteered battery already discharging
 800 W would end up exporting 800 W.
 
-## What actually gets written
+## What actually gets published
 
 A decision and a command are not the same thing, and the log shows both:
 
-| Situation | What the log reports | What gets written |
+| Situation | What the log reports | What gets published |
 | --- | --- | --- |
 | Charge or discharge | the share, after capping | the same |
 | At a charge or power limit | 0 | **0** — an active stop |
 | Meter inside the 25 W deadband | the battery's measured power | **nothing** |
 | Grid sensor unreadable | measured power | **0** for steerable batteries |
-| No target entity | measured power | nothing |
+| No control key | measured power | nothing |
 
 The deadband row is the interesting one. A hold reports what the battery is
 measured to be doing, which is the right thing to *show* and the wrong thing to
-*command* — writing a measurement back as a setpoint would let sensor noise walk
-the commanded value around on a house that is already balanced. So a hold writes
-nothing and the previous setpoint stands.
+*command* — publishing a measurement back as a setpoint would let sensor noise
+walk the commanded value around on a house that is already balanced. So a hold
+says nothing and the previous setpoint stands.
 
 The unreadable-grid row goes the other way, deliberately. A battery left forcing
 kilowatts because the meter it was following broke is the one hold that must not
 persist, so that case stops the battery rather than holding it.
 
-**Writes are deduplicated.** A setpoint is only sent when the target entity's
-current value differs from what is wanted by at least 50 W — otherwise a loop
-ticking every second would produce thousands of service calls an hour, against
-hardware that on some brands commits setpoints to flash. The comparison is
-against what the entity *reads now*, not against what was last sent, so if
-something else moves the entity it gets corrected on the next tick.
+**Setpoints are deduplicated.** One only goes out when it differs from the last
+one published for that battery by at least 50 W — otherwise a loop ticking every
+second would fire thousands of events an hour, and on the other end of each one
+is your automation doing real work. A setpoint older than 30 seconds is restated
+anyway, so an automation you reloaded or an inverter you power-cycled picks the
+current value back up within a tick or two instead of waiting for the house to
+swing by 50 W.
+
+## The event
+
+`elias_ems_setpoint`, one per steerable battery, carrying:
+
+| Field | Meaning |
+| --- | --- |
+| `key` | the battery's **control key** — what your automation matches on |
+| `battery_id` | the stored record's id, which survives renaming the battery |
+| `title` | what the settings page and the log call this battery |
+| `power_w` | the setpoint, signed: **positive charging, negative discharging** |
+| `charge_w` | `power_w` when charging, otherwise 0 — an unsigned magnitude |
+| `discharge_w` | the same for discharging |
+| `released` | `true` only when Elias ems is [letting go](#switching-it-off) |
+
+`charge_w` and `discharge_w` are the same number restated, for the many
+inverters that have a charge register and a discharge register instead of one
+signed setpoint. Use whichever pair your hardware speaks; the sign arithmetic is
+already done.
+
+::: tip See it before you wire anything to it
+Developer Tools → **Events** → listen to `elias_ems_setpoint`, then enable
+control. Every payload shows up there, which is how to check the key, the sign
+and the magnitude before an inverter is involved.
+:::
+
+## Connecting the event to your battery
+
+This is the part Elias ems cannot do for you, because it is the part that knows
+what your inverter is. All of the examples use a battery whose control key is
+`home_battery`.
+
+::: warning mode: queued, not the default
+Home Assistant's default automation mode is `single`, which **drops** an event
+that arrives while the previous run is still going. On a house that has just
+swung hard, the dropped one is the setpoint you most wanted. Use `mode: queued`
+with a small `max`, as below.
+:::
+
+### A Modbus register
+
+The common case for a plain Modbus setup — and note there is no `input_number`
+helper in it any more:
+
+```yaml
+alias: Battery setpoint → inverter
+mode: queued
+max: 10
+triggers:
+  - trigger: event
+    event_type: elias_ems_setpoint
+    event_data:
+      key: home_battery
+actions:
+  - action: modbus.write_register
+    data:
+      hub: inverter
+      slave: 1
+      address: 40200
+      value: "{{ trigger.event.data.power_w | int }}"
+```
+
+If your inverter has a separate register per direction, use the unsigned pair
+instead:
+
+```yaml
+actions:
+  - action: modbus.write_register
+    data:
+      hub: inverter
+      slave: 1
+      address: 40200
+      value: "{{ trigger.event.data.charge_w | int }}"
+  - action: modbus.write_register
+    data:
+      hub: inverter
+      slave: 1
+      address: 40201
+      value: "{{ trigger.event.data.discharge_w | int }}"
+```
+
+### A `number` entity from an inverter integration
+
+`huawei_solar`, `solaredge_modbus_multi`, Victron and friends publish a writable
+`number`. One action:
+
+```yaml
+alias: Battery setpoint → inverter
+mode: queued
+max: 10
+triggers:
+  - trigger: event
+    event_type: elias_ems_setpoint
+    event_data:
+      key: home_battery
+actions:
+  - action: number.set_value
+    target:
+      entity_id: number.battery_target_power
+    data:
+      value: "{{ trigger.event.data.power_w }}"
+```
+
+Setting an entity is a state change, so this puts a row in your logbook and
+recorder every time the setpoint moves. That is a real cost and it is now your
+choice rather than the add-on's: write the register directly if you would rather
+not have it, or exclude the entity under `recorder:`/`logbook:`.
+
+### An inverter that needs its mode set
+
+Many inverters ignore a setpoint until a `select` entity is put into a forced or
+manual mode — and want it back on self-consumption when Elias ems stands down.
+`released` is what tells the two apart:
+
+```yaml
+alias: Battery setpoint → inverter
+mode: queued
+max: 10
+triggers:
+  - trigger: event
+    event_type: elias_ems_setpoint
+    event_data:
+      key: home_battery
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.released }}"
+        sequence:
+          # Elias ems is standing down — hand the battery back to its own logic
+          # rather than leaving it forced at 0 W.
+          - action: select.select_option
+            target:
+              entity_id: select.inverter_working_mode
+            data:
+              option: Self consumption
+    default:
+      - action: select.select_option
+        target:
+          entity_id: select.inverter_working_mode
+        data:
+          option: Forced charge/discharge
+      - action: number.set_value
+        target:
+          entity_id: number.battery_target_power
+        data:
+          value: "{{ trigger.event.data.power_w }}"
+```
+
+Re-selecting the mode that is already selected is harmless, so it needs no
+guard.
+
+### Several batteries
+
+Leave `event_data` off and one automation hears them all; `key` says which
+battery each event is about:
+
+```yaml
+alias: Battery setpoints → inverters
+mode: queued
+max: 10
+triggers:
+  - trigger: event
+    event_type: elias_ems_setpoint
+actions:
+  - action: number.set_value
+    target:
+      entity_id: >-
+        {{ {'home_battery': 'number.home_battery_target_power',
+            'garage_battery': 'number.garage_battery_target_power'}[trigger.event.data.key] }}
+    data:
+      value: "{{ trigger.event.data.power_w }}"
+```
+
+### Your sign convention is not ours
+
+Elias ems always publishes **positive charging, negative discharging**. If your
+inverter is the other way round, negate it in the automation — a template of
+`-trigger.event.data.power_w` — rather than anywhere else. Doing it in the
+one place that talks to the hardware keeps the log, the dashboard and the
+strategy all agreeing with each other.
 
 ## Switching it off
 
-Switching control off, and shutting the add-on down cleanly, both command **0 W**
-to every steerable battery. A battery left forcing kilowatts because the thing
-that told it to is gone is the worst failure this feature has — from the
-battery's side there is no difference between a setpoint that is still wanted
-and one whose author died ten minutes ago.
+Switching control off, and shutting the add-on down cleanly, both publish **0 W**
+for every steerable battery, with `released: true`. A battery left forcing
+kilowatts because the thing that told it to is gone is the worst failure this
+feature has — from the battery's side there is no difference between a setpoint
+that is still wanted and one whose author died ten minutes ago.
 
 Two honest limits:
 
 - Zero is the **safe** value, not necessarily the *correct* one. It stops the
   battery being driven either way, which is safe on every inverter, but handing
   it back to its own self-consumption logic means restoring a mode on many
-  brands, which Elias ems does not do yet.
+  brands. `released` is there so your automation can do that — see [the mode
+  example](#an-inverter-that-needs-its-mode-set) — but Elias ems itself only
+  knows how to say "stop".
 - Nothing runs at all on a hard kill, a power cut, or a container the Supervisor
   destroys without asking. The only real protection against those is an inverter
   whose forced mode expires on its own — some brands have that, others do not.
 
 ## What it cannot do yet
 
-::: danger The mode entity
-Many inverters ignore a setpoint until a `select` entity is put into a forced or
-manual mode. Elias ems does not touch that entity. **This is the most likely
-reason a correct-looking setup does nothing**: the write lands, the entity reads
-back exactly what was asked for, the log looks perfect, and the hardware carries
-on running its own self-consumption logic.
+::: danger It does not know whether anything is listening
+An event goes on the bus and nothing comes back. No automation, a mistyped
+control key, an automation dropping events because it is still `mode: single`,
+or an inverter that quietly ignores a setpoint all look **exactly the same**
+from Elias ems' side: a log full of correct-looking decisions and a battery that
+does nothing.
 
-If that is your inverter, an automation that puts it into the right mode is the
-workaround for now.
+Until it learns to compare the battery's measured power against what it asked
+for, the check is yours to make — the diagnostics log, the event listener in
+Developer Tools, and the automation's own trace, in that order.
 :::
 
-It also does not notice that the hardware disagreed — it confirms the *entity*
-took the value, which is not the same as the battery obeying it. And there is no
-price awareness of any kind: dynamic prices, negative-price strategies and PV
-curtailment are on the roadmap and not started.
+There is also no price awareness of any kind: dynamic prices, negative-price
+strategies and PV curtailment are on the roadmap and not started.
 
 The full list with the reasoning behind each item is in
 [the internals](/internals/battery-control#not-done-yet).
@@ -140,6 +328,7 @@ A tick in the diagnostics log looks like this:
 22:50:57 Grid net +842 W (importing), batteries at 0 W → discharge 842 W total. (via live cache, oldest reading 3s)
          Home battery: discharge at 561 W (SoC 76%, 6.6 kWh to 10%)
          Garage battery: discharge at 281 W (SoC 76%, 2.8 kWh to 20%)
+         Published: Home battery → -561 W; Garage battery → -281 W
 ```
 
 The summary line is the arithmetic above, made visible. The clause in brackets
@@ -152,6 +341,10 @@ of charge and the energy headroom left in the direction it is going, because
 A decision that was capped says what it was capped from — a plan quietly
 delivering less than the meter needs otherwise reads exactly like one that is on
 target.
+
+The `Published:` line is what actually left the add-on, and a tick can honestly
+end without one: if every battery is inside the 50 W deadband there was nothing
+new to say. What that line does **not** prove is that anything acted on it.
 
 ## Next
 

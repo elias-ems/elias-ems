@@ -37,7 +37,7 @@ const battery = {
   energyEntityId: "sensor.battery_energy_total",
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
-  targetPowerEntityId: "number.battery_target_power",
+  controlKey: "home_battery",
   maxChargePowerW: null,
   maxDischargePowerW: null,
 };

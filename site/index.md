@@ -23,9 +23,10 @@ features:
   - title: Battery control
     details: >-
       A net-zero-energy strategy reads the grid meter, works out what every
-      battery should be doing, and writes the setpoint. It respects your charge
-      limits, splits the target across batteries by capacity, and caps each
-      share at what the inverter can deliver.
+      battery should be doing, and publishes the setpoint as a Home Assistant
+      event for your automation to act on. It respects your charge limits,
+      splits the target across batteries by capacity, and caps each share at
+      what the inverter can deliver.
     link: /guide/battery-control
     linkText: How it decides
   - title: Readings that move
@@ -39,8 +40,8 @@ features:
   - title: One log to send
     details: >-
       Every feature writes to the same diagnostics log: what it read, what it
-      decided, and what it wrote. Read it on screen, or download the whole thing
-      as a text file to attach to an issue.
+      decided, and what it published. Read it on screen, or download the whole
+      thing as a text file to attach to an issue.
     link: /guide/diagnostics
     linkText: Getting a log
 ---
@@ -49,10 +50,11 @@ features:
 
 Elias ems is **pre-1.0 and under active development** — the add-on ships as
 `1.0.0-alpha.N` and is being tested in the field rather than in production
-homes. Battery control decides, writes and logs today; what it cannot yet do is
-put an inverter into the mode that makes it *honour* a setpoint, which on many
-brands is the difference between a setpoint that lands and one that changes
-nothing. That limitation is spelled out in full on the
+homes. Battery control decides, publishes and logs today; the last step to your
+hardware is an automation you write, which is also where an inverter's own
+quirks — a forced mode, a pair of registers, an opposite sign — belong. What it
+cannot yet do is notice that nothing acted on a setpoint. That limitation is
+spelled out in full on the
 [battery control page](/guide/battery-control#what-it-cannot-do-yet), and the
 rest of the plan is on the [roadmap](https://github.com/elias-ems/elias-ems/blob/main/docs/roadmap.md).
 

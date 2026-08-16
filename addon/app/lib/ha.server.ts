@@ -144,32 +144,38 @@ export async function fetchHaState(entityId: string): Promise<HaState | null> {
 }
 
 /**
- * Calls a Home Assistant service — the only way an add-on can *change*
- * anything, since `POST /states` merely rewrites Home Assistant's idea of an
- * entity without telling the device behind it.
+ * Fires an event on Home Assistant's bus — how this add-on asks for anything
+ * to change.
  *
- * Throws on anything but success, and the caller is expected to catch: a write
- * that fails is one battery not doing what it was told, which is worth a log
- * line and another attempt on the next tick, not the end of the control loop.
+ * The alternative is calling a service, which writes to one entity and leaves a
+ * state change, a logbook line and a recorder row behind it for every setpoint.
+ * A control loop that ticks every few seconds would fill a day's activity feed
+ * with its own arithmetic. An event carries the same instruction and none of
+ * that residue: nothing stores it, and an automation is what turns it into
+ * whichever service the hardware actually wants.
  *
- * Home Assistant answers with the states the call changed. That is not proof
- * the hardware obeyed — only that the entity took the value — so the loop
- * confirms by reading the entity back on the next tick rather than by trusting
- * this.
+ * Throws on anything but success, and the caller is expected to catch: a
+ * setpoint that fails to go out is one battery not hearing what it was told,
+ * which is worth a log line and another attempt on the next tick, not the end
+ * of the control loop.
+ *
+ * Fire-and-forget in the way that matters: a 200 means Home Assistant put the
+ * event on the bus, not that any automation was listening, let alone that the
+ * hardware obeyed. Nothing here can tell those apart — see
+ * `setpoints.server.ts` for what is done about it.
  */
-export async function callHaService(
-  domain: string,
-  service: string,
+export async function fireHaEvent(
+  eventType: string,
   data: Record<string, unknown>,
 ): Promise<void> {
   const response = await haFetch<unknown>(
-    `/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`,
+    `/events/${encodeURIComponent(eventType)}`,
     { method: "POST", body: data },
   );
 
   if (!response.ok) {
     throw new Error(
-      `Home Assistant rejected ${domain}.${service}: ${response.status}`,
+      `Home Assistant rejected the ${eventType} event: ${response.status}`,
     );
   }
 }

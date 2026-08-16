@@ -74,14 +74,15 @@ odd and want to report it — **download it before restarting anything.**
 - the downloaded diagnostics file, covering the stretch where the problem
   happened;
 - what you expected the battery to do and what it did instead;
-- the entity ids you configured, and what their domains are — especially the
-  target power entity;
+- the entity ids you configured, and each battery's control key;
+- the automation that listens for `elias_ems_setpoint`, and one of its traces;
 - your inverter or battery make and model, since whether a setpoint is honoured
   at all is brand-specific.
 
-If the log shows a correct-looking setpoint and the battery ignores it, read
-[what battery control cannot do yet](/guide/battery-control#what-it-cannot-do-yet)
-first — an inverter waiting for its mode to be set is the usual explanation.
+If the log shows a correct-looking setpoint and the battery ignores it, walk
+[the log looks right but the battery does
+nothing](/guide/troubleshooting#the-log-looks-right-but-the-battery-does-nothing)
+first — it separates "never published" from "never acted on" in four steps.
 
 ## Next
 

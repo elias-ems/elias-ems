@@ -110,7 +110,7 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       // The form disables the checkbox in this state, but the check has to be
-      // here too: a target can be cleared from a battery after control was
+      // here too: a control key can be cleared from a battery after control was
       // switched on, and nothing stops a form being posted directly.
       if (parsed.config.enabled) {
         const batteries = await listBatteries();
@@ -155,7 +155,7 @@ export default function Settings({
         ready={{
           grid: isGridConfigured(grid),
           batteries: batteries.length > 0,
-          targets: batteries.some(isSteerable),
+          steerable: batteries.some(isSteerable),
         }}
         actionData={actionData}
       />

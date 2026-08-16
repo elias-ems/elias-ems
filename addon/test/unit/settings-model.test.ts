@@ -125,21 +125,21 @@ describe("parseBattery", () => {
     expect(Object.keys(result.errors)).toEqual(["socEntityId"]);
   });
 
-  it("accepts a battery with no target entity, which is watched but not steered", () => {
+  it("accepts a battery with no control key, which is watched but not steered", () => {
     const result = parseBattery(form(validBattery));
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.fields.targetPowerEntityId).toBe("");
+    expect(result.fields.controlKey).toBe("");
     expect(result.fields.maxChargePowerW).toBeNull();
     expect(result.fields.maxDischargePowerW).toBeNull();
   });
 
-  it("takes the target entity and the power caps when they are given", () => {
+  it("takes the control key and the power caps when they are given", () => {
     const result = parseBattery(
       form({
         ...validBattery,
-        targetPowerEntityId: " number.battery_target_power ",
+        controlKey: " home_battery ",
         maxChargePowerW: "5000",
         maxDischargePowerW: "3500",
       }),
@@ -147,9 +147,9 @@ describe("parseBattery", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.fields.targetPowerEntityId).toBe(
-      "number.battery_target_power",
-    );
+    // Trimmed, because it is matched against verbatim in an automation's event
+    // trigger and a trailing space there is invisible and fatal.
+    expect(result.fields.controlKey).toBe("home_battery");
     expect(result.fields.maxChargePowerW).toBe(5000);
     expect(result.fields.maxDischargePowerW).toBe(3500);
   });
@@ -183,7 +183,7 @@ describe("normalizeBattery", () => {
       energyEntityId: "sensor.e",
       powerEntityId: "sensor.p",
       socEntityId: "sensor.s",
-      targetPowerEntityId: "number.t",
+      controlKey: "home_battery",
       maxChargePowerW: "5000" as unknown as number,
       maxDischargePowerW: "3000" as unknown as number,
     });
@@ -205,7 +205,7 @@ describe("normalizeBattery", () => {
       energyEntityId: "sensor.e",
       powerEntityId: "sensor.battery_power",
       socEntityId: "sensor.s",
-      targetPowerEntityId: "",
+      controlKey: "",
       maxChargePowerW: null,
       maxDischargePowerW: null,
     });
@@ -233,9 +233,30 @@ describe("normalizeBattery", () => {
       socEntityId: "sensor.s",
     } as Battery);
 
-    expect(battery.targetPowerEntityId).toBe("");
+    expect(battery.controlKey).toBe("");
     expect(battery.maxChargePowerW).toBeNull();
     expect(battery.maxDischargePowerW).toBeNull();
+  });
+
+  it("reads a record that still names a target entity as unsteered too", () => {
+    // A batteries.json from the version that wrote setpoints to an entity.
+    // Nothing is written to entities any more, so the honest reading is that
+    // this battery is not being steered until a control key and the automation
+    // that listens for it both exist — claiming otherwise would mean claiming
+    // to command hardware that has stopped hearing us.
+    const battery = normalizeBattery({
+      id: "b1",
+      title: "Home battery",
+      capacityKwh: 10,
+      minChargePercent: 10,
+      maxChargePercent: 90,
+      energyEntityId: "sensor.e",
+      powerEntityId: "sensor.p",
+      socEntityId: "sensor.s",
+      targetPowerEntityId: "input_number.battery_setpoint",
+    } as Battery & { targetPowerEntityId: string });
+
+    expect(battery.controlKey).toBe("");
   });
 
   it("drops a power cap of zero rather than freezing the battery at 0 W", () => {
@@ -250,7 +271,7 @@ describe("normalizeBattery", () => {
       energyEntityId: "sensor.e",
       powerEntityId: "sensor.p",
       socEntityId: "sensor.s",
-      targetPowerEntityId: "number.t",
+      controlKey: "home_battery",
       maxChargePowerW: 0,
       maxDischargePowerW: -5000,
     });
@@ -261,46 +282,20 @@ describe("normalizeBattery", () => {
 });
 
 describe("resolvePowerLimits", () => {
-  const unset = { maxChargePowerW: null, maxDischargePowerW: null };
-
-  it("takes the range from the target entity when nothing is configured", () => {
-    expect(resolvePowerLimits(unset, { min: -3000, max: 5000 })).toEqual({
-      maxChargeW: 5000,
-      maxDischargeW: 3000,
-    });
-  });
-
-  it("leaves a direction unbounded when the entity doesn't say", () => {
-    expect(resolvePowerLimits(unset, null)).toEqual({
-      maxChargeW: null,
-      maxDischargeW: null,
-    });
-    expect(resolvePowerLimits(unset, { min: null, max: 5000 })).toEqual({
-      maxChargeW: 5000,
-      maxDischargeW: null,
-    });
-  });
-
-  it("lets the configured value override the entity's own range", () => {
-    // An input_number helper created through the UI defaults to 0–100, which
-    // would cap a 5 kW battery at 100 W. The override has to be able to say
-    // otherwise, not merely narrow what the entity claims.
+  it("leaves a direction the settings don't cap unbounded", () => {
+    // Settings are the only source now. A setpoint that goes out as an event
+    // has no min/max to fall back on, and inventing one from the battery's
+    // capacity would be a guess about hardware — so an empty field means
+    // uncapped, and it is the SoC window that keeps the battery safe.
     expect(
-      resolvePowerLimits(
-        { maxChargePowerW: 5000, maxDischargePowerW: 4000 },
-        { min: 0, max: 100 },
-      ),
-    ).toEqual({ maxChargeW: 5000, maxDischargeW: 4000 });
+      resolvePowerLimits({ maxChargePowerW: null, maxDischargePowerW: null }),
+    ).toEqual({ maxChargeW: null, maxDischargeW: null });
   });
 
-  it("caps a direction the entity's range cannot express at zero", () => {
-    // min: 0 means negative values aren't writable, so discharging through
-    // this entity is not something we can do — and saying 0 makes that visible
-    // where writing out of range silently would not.
-    expect(resolvePowerLimits(unset, { min: 0, max: 100 })).toEqual({
-      maxChargeW: 100,
-      maxDischargeW: 0,
-    });
+  it("takes each direction's cap from its own field", () => {
+    expect(
+      resolvePowerLimits({ maxChargePowerW: 5000, maxDischargePowerW: 4000 }),
+    ).toEqual({ maxChargeW: 5000, maxDischargeW: 4000 });
   });
 });
 

@@ -39,7 +39,7 @@ const postedBattery = {
   energyEntityId: "sensor.battery_energy_total",
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
-  targetPowerEntityId: "number.battery_target_power",
+  controlKey: "home_battery",
 };
 
 /** The same battery as it should end up on disk, with real numbers. */
@@ -116,37 +116,15 @@ describe("GET /api/entities", () => {
     expect(ids).not.toContain("binary_sensor.grid_connected");
   });
 
-  it("offers the writable domains when a field asks for them", async () => {
-    // What the target power field asks for. An `input_number` is the entity a
-    // plain Modbus setup ends up pointing at — Home Assistant's modbus
-    // integration has no `number` platform — so leaving it out of the
-    // suggestions makes that whole class of installation look unsupported.
-    const { entities } = await loadEntities("?domains=number,input_number");
+  it("offers sensors only, whatever else the house has", async () => {
+    // Every field that picks an entity is picking a reading: a setpoint leaves
+    // as an event rather than as a value set on an entity, so there is no
+    // writable field for these suggestions to serve.
+    const { entities } = await loadEntities("");
 
     const ids = entities.map((entity) => entity.entityId);
-    expect(ids).toContain("number.battery_target_power");
-    expect(ids).toContain("input_number.battery_setpoint");
-    expect(ids).not.toContain("sensor.inverter_power");
-  });
-
-  it("still searches within the domains it was given", async () => {
-    const { entities } = await loadEntities(
-      "?domains=number,input_number&q=setpoint",
-    );
-
-    expect(entities.map((entity) => entity.entityId)).toEqual([
-      "input_number.battery_setpoint",
-    ]);
-  });
-
-  it("falls back to sensors when the domains parameter is empty", async () => {
-    // A blank one is a caller that meant to filter and sent nothing, not a
-    // request for every entity in the house.
-    const { entities } = await loadEntities("?domains=");
-
-    const ids = entities.map((entity) => entity.entityId);
-    expect(ids).toContain("sensor.inverter_power");
     expect(ids).not.toContain("number.battery_target_power");
+    expect(ids).not.toContain("input_number.battery_setpoint");
   });
 
   it("matches the query against both the id and the friendly name", async () => {
@@ -607,11 +585,11 @@ describe("POST /settings", () => {
     }
   });
 
-  it("refuses to enable control when no battery has a target entity", async () => {
-    // A loop that decides correctly and writes nowhere is indistinguishable
+  it("refuses to enable control when no battery has a control key", async () => {
+    // A loop that decides correctly and commands nothing is indistinguishable
     // from a broken one, so this is a rejection rather than a warning.
     const { addBattery } = await import("../../app/lib/batteries.server");
-    await addBattery({ ...storedBattery, targetPowerEntityId: "" });
+    await addBattery({ ...storedBattery, controlKey: "" });
 
     const result = await post({
       intent: "control-save",
@@ -624,7 +602,7 @@ describe("POST /settings", () => {
     expect(status).toBe(400);
     expect(payload).toMatchObject({
       section: "control",
-      errors: { enabled: expect.stringContaining("target power entity") },
+      errors: { enabled: expect.stringContaining("control key") },
     });
 
     const { readControlConfig } = await import(
@@ -633,11 +611,11 @@ describe("POST /settings", () => {
     expect((await readControlConfig()).enabled).toBe(false);
   });
 
-  it("still lets control be switched off with no target entity", async () => {
+  it("still lets control be switched off with no control key", async () => {
     // The way out of the state above: refusing this too would leave a stored
     // `enabled: true` with no way to clear it from the form.
     const { addBattery } = await import("../../app/lib/batteries.server");
-    await addBattery({ ...storedBattery, targetPowerEntityId: "" });
+    await addBattery({ ...storedBattery, controlKey: "" });
 
     const result = await post({
       intent: "control-save",
@@ -650,7 +628,7 @@ describe("POST /settings", () => {
 
   it("enables control when only one of several batteries is steerable", async () => {
     const { addBattery } = await import("../../app/lib/batteries.server");
-    await addBattery({ ...storedBattery, targetPowerEntityId: "" });
+    await addBattery({ ...storedBattery, controlKey: "" });
     await addBattery(storedBattery);
 
     const { loop } = await loadSettings();

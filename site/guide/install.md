@@ -56,9 +56,15 @@ fields between them; existing configuration is normalised forward rather than
 discarded, so an upgrade does not lose what you have entered.
 
 ::: warning An upgrade never starts steering a battery on its own
-Fields added later default to "not set". A battery saved before the target power
-entity existed reads as unsteered after the upgrade, and stays that way until you
+Fields added later default to "not set", so a battery saved before a control
+field existed reads as unsteered after the upgrade and stays that way until you
 fill it in.
+
+That includes the move to setpoint **events**: batteries that used to name a
+"Target power" entity come across as watched, not steered. Give them a [control
+key](/guide/configure#the-control-key-watched-vs-steered) and an
+[automation](/guide/battery-control#connecting-the-event-to-your-battery), then
+switch control back on.
 :::
 
 ## Uninstalling
@@ -66,11 +72,12 @@ fill it in.
 Stop the add-on and click **Uninstall**. Two things worth knowing:
 
 - **Stopping the add-on tells every steered battery to stop.** Switching control
-  off, and shutting the add-on down cleanly, both command 0 W to each battery
-  that has a target entity. What it cannot do is hand the battery back to its
-  own self-consumption logic — on many inverters that means restoring a mode
-  yourself. And nothing runs at all if the container is killed outright or the
-  power goes, so a battery can be left holding the last setpoint it was given.
+  off, and shutting the add-on down cleanly, both publish 0 W for each battery
+  that has a control key, flagged `released: true` so your automation can put an
+  inverter back on self-consumption rather than leaving it forced at 0 W. That
+  last step only happens if your automation does it. And nothing is published at
+  all if the container is killed outright or the power goes, so a battery can be
+  left holding the last setpoint it was given.
 - **Your settings live in the add-on's data directory** and go with it when you
   uninstall. Nothing is written into Home Assistant's own configuration.
 
