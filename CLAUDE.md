@@ -48,7 +48,16 @@ Keeping the test block separate is not tidiness. Playwright's `reuseExistingServ
 `site/` is the second npm project — a VitePress site published to GitHub Pages, with its own `package.json`, lockfile and `node_modules`, and one dependency. Run from `site/`:
 
 - `npm run docs:dev` — the site locally.
-- `npm run docs:build` — what [.github/workflows/docs.yml](.github/workflows/docs.yml) runs, and the site's whole verification gate: there is no lint or test suite, and the build fails on a dead link. Both commands regenerate the gitignored `site/internals/` from `docs/` first.
+- `npm run docs:build` — what [.github/workflows/docs.yml](.github/workflows/docs.yml) runs, and the build fails on a dead link. Both commands regenerate the gitignored `site/internals/` from `docs/` first.
+- `npm run lint` / `npm run lint:fix` — Biome, same as the add-on's.
+- `npm run typecheck` — `tsc` over [.vitepress/config.ts](site/.vitepress/config.ts) and nothing else.
+- `npm test` — node's built-in runner over `site/test/`, covering the link rewriting in [sync-docs.mjs](site/scripts/sync-docs.mjs).
+
+The last three exist because there is **no Biome or TypeScript in `site/node_modules`**, and there should not be: two copies of Biome formatting one repo would fight over the same files, and a second TypeScript is a second thing to keep in step. Each script shells out to the add-on's copy with `npm --prefix ../addon exec --no -- <tool>`. Two details in that line matter — `--prefix` puts `addon/node_modules/.bin` on `PATH` while the working directory stays `site/`, and `--no` makes a missing `addon/node_modules` an error rather than a registry download, which matters because an unrelated package on npm is called `biome`. Biome needs `--config-path ../addon` for the same reason; `tsc` finds [site/tsconfig.json](site/tsconfig.json) on its own.
+
+So `npm install` in `addon/` is a prerequisite for linting or typechecking the site. Only `docs:build` and `npm test` stand alone, which is why CI — which installs `site/` alone — runs the build and nothing else.
+
+`config.ts` is the one file that needs typechecking rather than just linting: VitePress loads it through esbuild, which strips the types without checking them, so before this a config option with the wrong type built green and was only wrong at runtime.
 
 Two things about its dependency are settled decisions, so that neither a dependency bump nor an `npm audit` reading re-opens them:
 
@@ -68,7 +77,7 @@ The app is **React Router 8 in framework mode** (the successor to Remix — Remi
 
 ## Linting and formatting
 
-**Biome** ([addon/biome.json](addon/biome.json)) is both the linter and the formatter. There is no ESLint and no Prettier, and adding them is not a small decision:
+**Biome** ([addon/biome.json](addon/biome.json)) is both the linter and the formatter, for `site/` as well as `addon/` — one copy and one config for the whole repo. It lives in `addon/` only because that is the project with a `node_modules`; the two `!**/.vitepress/*` excludes in the config are there to keep it out of the site's build output. There is no ESLint and no Prettier, and adding them is not a small decision:
 
 - **ESLint is currently blocked.** `typescript-eslint` imports the TypeScript compiler API and throws at import time on TypeScript >= 7 (its peer range is `>=4.8.4 <6.1.0`). This repo is on TypeScript 7, so ESLint would need a TypeScript 6 installed side by side purely to feed the linter. Biome has its own parser and never loads `typescript`, which sidesteps the problem entirely.
 - The tradeoff is that Biome has **no type-aware rules** — nothing like `no-floating-promises`. `npm run typecheck` (`tsc --strict`) is what covers that ground, so keep running it; lint is not a substitute.
@@ -80,6 +89,8 @@ Two suppressions exist on purpose and should not be "fixed": the `role="listbox"
 ## Git hooks
 
 **lefthook** ([lefthook.yml](lefthook.yml)) runs `biome check --write` over staged files on pre-commit and re-stages what it fixed; unfixable lint errors fail the commit. Skip it for one command with `LEFTHOOK=0 git commit ...`.
+
+There are two jobs, one per project, because the invocation differs: the `addon/` job sets `root: "addon/"` and calls `npx biome`, while the `site/` job takes no `root` — so `{staged_files}` stays repo-root-relative — and reaches across with `npm --prefix addon exec --no --`, exactly as the site's own npm scripts do. Neither job typechecks or tests; that is the same split as in `addon/`, where lint is a pre-commit concern and the rest is not.
 
 Hooks install themselves on `npm install` in `addon/`, but the mechanism is worth being precise about: it is the **`lefthook` package's own `postinstall`** running `lefthook install -f`. [addon/package.json](addon/package.json) declares no `postinstall` of its own, so grepping for one and finding nothing does not mean a fresh clone goes unhooked — it doesn't. Two consequences:
 

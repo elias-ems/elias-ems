@@ -18,3 +18,16 @@ pre-commit:
         - "!addon/package-lock.json"
       run: npx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
       stage_fixed: true
+
+    # site/ is the other npm project and has no Biome of its own — one copy has
+    # to format the whole repo or the two versions fight over the same files. So
+    # this job takes no `root:` (paths stay repo-root-relative, which is what
+    # {staged_files} hands it) and reaches into addon/ for the binary and the
+    # config. `npm exec --no` fails rather than falling back to the registry,
+    # where an unrelated package happens to be called `biome`.
+    - name: biome-site
+      glob:
+        - "site/**/*.{js,mjs,ts,json,jsonc,css}"
+        - "!site/package-lock.json"
+      run: npm --prefix addon exec --no -- biome check --write --config-path addon --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true

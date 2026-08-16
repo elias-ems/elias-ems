@@ -15,7 +15,9 @@
       "!**/test/.tmp",
       "!**/test-results",
       "!**/playwright-report",
-      "!**/package-lock.json"
+      "!**/package-lock.json",
+      "!**/.vitepress/dist",
+      "!**/.vitepress/cache"
     ]
   },
   "formatter": {
