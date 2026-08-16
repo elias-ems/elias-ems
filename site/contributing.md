@@ -113,6 +113,16 @@ npm install && npm run docs:dev
 
 `npm run docs:build` is what CI runs, and it fails on dead links.
 
+That `npm install` prints a handful of audit findings, one of them `high`. They
+are known and they are not worth acting on: every one is an `esbuild` or `vite`
+advisory that VitePress pulls in, and every one only affects the **dev server** —
+cross-origin requests to `vitepress dev`, and its own file serving. What gets
+published is static HTML, and CI never starts a dev server. npm reports no fix
+because VitePress 1.6.4 is the latest stable release and pins vite 5; the version
+that moves off it is VitePress 2, still in alpha. So please don't "fix" it with
+`npm audit fix --force` — that installs the pre-release. A finding that is *not*
+dev-server-only would be a different matter; those are worth an issue.
+
 ## The rest
 
 [CLAUDE.md](https://github.com/elias-ems/elias-ems/blob/main/CLAUDE.md) in the
