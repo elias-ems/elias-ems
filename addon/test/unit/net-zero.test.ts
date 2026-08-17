@@ -38,10 +38,10 @@ describe("planNetZero", () => {
     });
 
     expect(plan.netW).toBe(800);
-    expect(plan.targetBatteryW).toBe(-800);
+    expect(plan.combinedTargetW).toBe(-800);
     expect(plan.decisions[0]).toMatchObject({
       action: "discharge",
-      setpointW: -800,
+      targetW: -800,
     });
   });
 
@@ -56,7 +56,7 @@ describe("planNetZero", () => {
     expect(plan.netW).toBe(-1200);
     expect(plan.decisions[0]).toMatchObject({
       action: "charge",
-      setpointW: 1200,
+      targetW: 1200,
     });
   });
 
@@ -72,7 +72,7 @@ describe("planNetZero", () => {
 
     expect(plan.decisions[0]).toMatchObject({
       action: "hold",
-      setpointW: -800,
+      targetW: -800,
     });
   });
 
@@ -83,8 +83,8 @@ describe("planNetZero", () => {
     });
 
     expect(plan.currentBatteryW).toBe(500);
-    expect(plan.targetBatteryW).toBe(1700);
-    expect(plan.decisions[0].setpointW).toBe(1700);
+    expect(plan.combinedTargetW).toBe(1700);
+    expect(plan.decisions[0].targetW).toBe(1700);
   });
 
   it("holds inside the deadband rather than chasing meter noise", () => {
@@ -95,7 +95,7 @@ describe("planNetZero", () => {
 
     expect(plan.decisions[0]).toMatchObject({
       action: "hold",
-      setpointW: -300,
+      targetW: -300,
     });
     expect(plan.summary).toContain("deadband");
   });
@@ -112,7 +112,7 @@ describe("planNetZero", () => {
 
     expect(plan.decisions[0]).toMatchObject({
       action: "hold",
-      setpointW: -300,
+      targetW: -300,
     });
     expect(plan.summary).toContain("deadband");
   });
@@ -123,7 +123,7 @@ describe("planNetZero", () => {
       batteries: [battery({ socPercent: 10, minChargePercent: 10 })],
     });
 
-    expect(plan.decisions[0]).toMatchObject({ action: "hold", setpointW: 0 });
+    expect(plan.decisions[0]).toMatchObject({ action: "hold", targetW: 0 });
     expect(plan.decisions[0].reason).toContain("10% floor");
     expect(plan.summary).toContain("every battery is at its limit");
   });
@@ -134,7 +134,7 @@ describe("planNetZero", () => {
       batteries: [battery({ socPercent: 95, maxChargePercent: 90 })],
     });
 
-    expect(plan.decisions[0]).toMatchObject({ action: "hold", setpointW: 0 });
+    expect(plan.decisions[0]).toMatchObject({ action: "hold", targetW: 0 });
     expect(plan.decisions[0].reason).toContain("90% ceiling");
   });
 
@@ -146,7 +146,7 @@ describe("planNetZero", () => {
       batteries: [battery({ socPercent: null })],
     });
 
-    expect(plan.decisions[0]).toMatchObject({ action: "hold", setpointW: 0 });
+    expect(plan.decisions[0]).toMatchObject({ action: "hold", targetW: 0 });
     expect(plan.decisions[0].reason).toBe("state of charge unknown");
   });
 
@@ -160,7 +160,7 @@ describe("planNetZero", () => {
     });
 
     // 5 kWh and 15 kWh, so a quarter and three quarters — not half each.
-    expect(plan.decisions.map((decision) => decision.setpointW)).toEqual([
+    expect(plan.decisions.map((decision) => decision.targetW)).toEqual([
       -250, -750,
     ]);
   });
@@ -174,8 +174,8 @@ describe("planNetZero", () => {
       ],
     });
 
-    expect(plan.decisions[0].setpointW).toBe(0);
-    expect(plan.decisions[1].setpointW).toBe(-1000);
+    expect(plan.decisions[0].targetW).toBe(0);
+    expect(plan.decisions[1].targetW).toBe(-1000);
   });
 
   it("holds everything when the grid sensor is unreadable", () => {
@@ -185,8 +185,8 @@ describe("planNetZero", () => {
     });
 
     expect(plan.netW).toBeNull();
-    expect(plan.targetBatteryW).toBeNull();
-    expect(plan.decisions[0]).toMatchObject({ action: "hold", setpointW: 400 });
+    expect(plan.combinedTargetW).toBeNull();
+    expect(plan.decisions[0]).toMatchObject({ action: "hold", targetW: 400 });
     expect(plan.summary).toContain("grid power sensor is not readable");
   });
 
@@ -226,9 +226,9 @@ describe("planNetZero", () => {
 
     // Held where it is, not commanded to 0: nothing can be written to it, so
     // nothing is being asked of it either way.
-    expect(plan.decisions[0]).toMatchObject({ action: "hold", setpointW: 0 });
+    expect(plan.decisions[0]).toMatchObject({ action: "hold", targetW: 0 });
     expect(plan.decisions[0].reason).toBe(UNSTEERED_REASON);
-    expect(plan.decisions[1].setpointW).toBe(-1000);
+    expect(plan.decisions[1].targetW).toBe(-1000);
   });
 
   it("does not ask the steerable batteries to cover what an unsteered one already is", () => {
@@ -247,8 +247,8 @@ describe("planNetZero", () => {
     });
 
     expect(plan.currentBatteryW).toBe(0);
-    expect(plan.targetBatteryW).toBe(-200);
-    expect(plan.decisions[1].setpointW).toBe(-200);
+    expect(plan.combinedTargetW).toBe(-200);
+    expect(plan.decisions[1].targetW).toBe(-200);
   });
 
   it("ignores an unreadable power sensor on a battery it cannot steer", () => {
@@ -263,7 +263,7 @@ describe("planNetZero", () => {
     });
 
     expect(plan.warnings).toEqual([]);
-    expect(plan.decisions[1].setpointW).toBe(-800);
+    expect(plan.decisions[1].targetW).toBe(-800);
   });
 
   it("says there is nothing to command when no battery is steered", () => {
@@ -272,7 +272,7 @@ describe("planNetZero", () => {
       batteries: [battery({ steerable: false })],
     });
 
-    expect(plan.targetBatteryW).toBeNull();
+    expect(plan.combinedTargetW).toBeNull();
     expect(plan.summary).toContain("nothing to command");
   });
 
@@ -282,12 +282,12 @@ describe("planNetZero", () => {
       batteries: [battery({ maxDischargeW: 2500 })],
     });
 
-    // The target is still the honest answer to the meter; the setpoint is what
+    // The target is still the honest answer to the meter; the target is what
     // the battery can actually be asked for.
-    expect(plan.targetBatteryW).toBe(-4000);
+    expect(plan.combinedTargetW).toBe(-4000);
     expect(plan.decisions[0]).toMatchObject({
       action: "discharge",
-      setpointW: -2500,
+      targetW: -2500,
       cappedFromW: -4000,
     });
     expect(plan.decisions[0].message).toContain("capped from 4000 W");
@@ -301,19 +301,19 @@ describe("planNetZero", () => {
 
     expect(plan.decisions[0]).toMatchObject({
       action: "charge",
-      setpointW: 3000,
+      targetW: 3000,
       cappedFromW: 6000,
     });
   });
 
-  it("leaves a setpoint inside the limit alone", () => {
+  it("leaves a target inside the limit alone", () => {
     const plan = planNetZero({
       gridPowerW: 800,
       batteries: [battery({ maxDischargeW: 2500 })],
     });
 
     expect(plan.decisions[0]).toMatchObject({
-      setpointW: -800,
+      targetW: -800,
       cappedFromW: null,
     });
     expect(plan.decisions[0].message).not.toContain("capped");
@@ -327,7 +327,7 @@ describe("planNetZero", () => {
       batteries: [battery({ maxChargeW: 3000, maxDischargeW: 5000 })],
     });
 
-    expect(plan.decisions[0].setpointW).toBe(3000);
+    expect(plan.decisions[0].targetW).toBe(3000);
   });
 
   it("takes a battery limited to 0 W out of the plan entirely", () => {
@@ -339,7 +339,7 @@ describe("planNetZero", () => {
       batteries: [battery({ maxDischargeW: 0 })],
     });
 
-    expect(plan.decisions[0]).toMatchObject({ action: "hold", setpointW: 0 });
+    expect(plan.decisions[0]).toMatchObject({ action: "hold", targetW: 0 });
     expect(plan.decisions[0].reason).toBe("discharge power limited to 0 W");
     expect(plan.summary).toContain("every battery is at its limit");
   });
@@ -354,11 +354,11 @@ describe("planNetZero", () => {
     });
 
     // Not 500 each: the capped one is out of the split, not in it with a zero.
-    expect(plan.decisions[0].setpointW).toBe(0);
-    expect(plan.decisions[1].setpointW).toBe(-1000);
+    expect(plan.decisions[0].targetW).toBe(0);
+    expect(plan.decisions[1].targetW).toBe(-1000);
   });
 
-  it("reports the room left, so a setpoint can be sanity-checked next to it", () => {
+  it("reports the room left, so a target can be sanity-checked next to it", () => {
     const plan = planNetZero({
       gridPowerW: 500,
       batteries: [

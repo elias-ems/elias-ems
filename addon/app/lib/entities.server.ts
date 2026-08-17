@@ -20,7 +20,7 @@ const MAX_OPTIONS = 25;
 /**
  * Every entity these forms pick is a reading, so `sensor` is the whole list.
  * A switch or a binary sensor is not a reading, and nothing here is picked to
- * be written to: a setpoint leaves as an event, not as a value set on an
+ * be written to: a target leaves as an event, not as a value set on an
  * entity, so there is no writable field to offer other domains to.
  */
 const OFFERED_DOMAINS = ["sensor"];

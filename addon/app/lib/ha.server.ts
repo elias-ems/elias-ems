@@ -148,21 +148,21 @@ export async function fetchHaState(entityId: string): Promise<HaState | null> {
  * to change.
  *
  * The alternative is calling a service, which writes to one entity and leaves a
- * state change, a logbook line and a recorder row behind it for every setpoint.
+ * state change, a logbook line and a recorder row behind it for every target.
  * A control loop that ticks every few seconds would fill a day's activity feed
  * with its own arithmetic. An event carries the same instruction and none of
  * that residue: nothing stores it, and an automation is what turns it into
  * whichever service the hardware actually wants.
  *
  * Throws on anything but success, and the caller is expected to catch: a
- * setpoint that fails to go out is one battery not hearing what it was told,
+ * target that fails to go out is one battery not hearing what it was told,
  * which is worth a log line and another attempt on the next tick, not the end
  * of the control loop.
  *
  * Fire-and-forget in the way that matters: a 200 means Home Assistant put the
  * event on the bus, not that any automation was listening, let alone that the
  * hardware obeyed. Nothing here can tell those apart — see
- * `setpoints.server.ts` for what is done about it.
+ * `targets.server.ts` for what is done about it.
  */
 export async function fireHaEvent(
   eventType: string,

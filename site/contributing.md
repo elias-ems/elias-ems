@@ -3,7 +3,7 @@
 The repository is [elias-ems/elias-ems](https://github.com/elias-ems/elias-ems).
 Issues and pull requests are welcome — reports from real installations are the
 most useful thing right now, since the failure modes that matter most (an
-inverter that ignores a setpoint, an ingress proxy that buffers a stream) cannot
+inverter that ignores a target power, an ingress proxy that buffers a stream) cannot
 be reproduced outside a real Home Assistant.
 
 If you are here to understand how it works rather than to change it, start with

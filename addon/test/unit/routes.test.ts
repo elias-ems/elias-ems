@@ -119,14 +119,14 @@ describe("GET /api/entities", () => {
   });
 
   it("offers sensors only, whatever else the house has", async () => {
-    // Every field that picks an entity is picking a reading: a setpoint leaves
+    // Every field that picks an entity is picking a reading: a target leaves
     // as an event rather than as a value set on an entity, so there is no
     // writable field for these suggestions to serve.
     const { entities } = await loadEntities("");
 
     const ids = entities.map((entity) => entity.entityId);
     expect(ids).not.toContain("number.battery_target_power");
-    expect(ids).not.toContain("input_number.battery_setpoint");
+    expect(ids).not.toContain("input_number.battery_target");
   });
 
   it("matches the query against both the id and the friendly name", async () => {
@@ -510,7 +510,7 @@ describe("POST /settings", () => {
 
   it("refuses a second battery whose name makes the same event", async () => {
     // "Home battery" and "home-battery" are different titles and one event
-    // type. Both batteries would take each other's setpoints, and nothing
+    // type. Both batteries would take each other's targets, and nothing
     // anywhere would report a problem.
     await post({ intent: "battery-add", ...postedBattery });
 

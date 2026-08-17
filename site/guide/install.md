@@ -60,7 +60,7 @@ Fields added later default to "not set", so a battery saved before a control
 field existed reads as unsteered after the upgrade and stays that way until you
 fill it in.
 
-That includes the move to setpoint **events**: batteries that used to name a
+That includes the move to target **events**: batteries that used to name a
 "Target power" entity come across as watched, not steered. Write the
 [automation](/guide/battery-control#connecting-the-event-to-your-battery) that
 listens for the battery's event, tick [**Steer this
@@ -78,7 +78,7 @@ Stop the add-on and click **Uninstall**. Two things worth knowing:
   inverter back on self-consumption rather than leaving it forced at 0 W. That
   last step only happens if your automation does it. And nothing is published at
   all if the container is killed outright or the power goes, so a battery can be
-  left holding the last setpoint it was given.
+  left holding the last target it was given.
 - **Your settings live in the add-on's data directory** and go with it when you
   uninstall. Nothing is written into Home Assistant's own configuration.
 

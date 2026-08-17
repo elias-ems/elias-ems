@@ -41,7 +41,7 @@ and that is what to point this at.
 One or more. Capacity and the charge window are things the installer knows and
 Home Assistant does not, so they are typed in; the three live values are
 entities, and the **title** does double duty — it names the battery in the log
-and on the dashboard, and it is what the setpoint event type is derived from.
+and on the dashboard, and it is what the target event type is derived from.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ and on the dashboard, and it is what the setpoint event type is derived from.
 | `energyEntityId` | entity | cumulative energy counter, kWh |
 | `powerEntityId` | entity | current power, W — see the sign convention below |
 | `socEntityId` | entity | state of charge, % |
-| `steered` | boolean | whether setpoints are published for this battery at all |
+| `steered` | boolean | whether targets are published for this battery at all |
 | `maxChargePowerW` | number | **optional** — cap on charge power, W |
 | `maxDischargePowerW` | number | **optional** — cap on discharge power, W, as a positive number |
 
@@ -93,7 +93,7 @@ looks exactly like a loop that is broken.
 
 **Upgrades arrive unsteered.** A record written before this field existed has no
 `steered`, which reads as false — including the records from the version that
-wrote setpoints to a target entity. That is the honest reading: nothing is
+wrote to a target entity. That is the honest reading: nothing is
 listening for the event until an automation exists, so carrying a battery across
 as steered would be claiming to command hardware that has stopped hearing us.
 Ticking the box and writing the automation is one deliberate step, in that
@@ -105,8 +105,8 @@ order.
 Unicode-normalised so accents fold away rather than becoming underscores,
 lowercased, and every run of anything else collapsed to a single `_`, with the
 ends trimmed. "Home battery" and "Home  Battery!" both give `home_battery`;
-"Réserve" gives `reserve`. `setpointEventType` wraps it as
-`elias_ems_<slug>_target`.
+"Réserve" gives `reserve`. `targetEventType` wraps it as
+`elias_ems_<slug>_target_power`.
 
 Derived rather than typed, because the two names are the same name. A separate
 field would mean a battery could be called one thing on the settings page and
@@ -124,14 +124,14 @@ would be convenient:
   anything can.
 - **Two titles can collide.** "Home battery" and "home-battery" are different
   names and one event type, which would leave both batteries taking each other's
-  setpoints with nothing reporting a problem. The settings action rejects the
+  targets with nothing reporting a problem. The settings action rejects the
   save; the check lives there rather than in `parseBattery` because it needs
   every other battery, and the model module is pure.
 
 A title with no letters or digits at all — "⚡", say — has nothing to build a
 name from, and the form rejects it. `batterySlug` still has a fallback of
 `battery_<id>` for anything a hand-edited file gets past the form, because an
-ugly event type beats publishing to `elias_ems__target`.
+ugly event type beats publishing to `elias_ems__target_power`.
 
 #### Power limits
 
@@ -140,7 +140,7 @@ battery for, so the proportional split cannot request more than the inverter can
 deliver. Both are **positive magnitudes** — "5000", not "-5000" for discharge —
 and the sign is applied where it is used.
 
-Settings are the **only** source of a limit. While the setpoint was written to
+Settings are the **only** source of a limit. While the target was written to
 an entity there was a second one — the `min`/`max` that `number` and
 `input_number` entities publish about themselves — and an empty field fell back
 to it. An event has no such range, and deriving one from `capacityKwh` would be
@@ -183,7 +183,7 @@ includes* the battery:
 net = load - pv + batteryPower
 ```
 
-so the setpoint that drives `net` to zero is:
+so the target that drives `net` to zero is:
 
 ```
 targetBatteryPower = currentBatteryPower - net
@@ -198,7 +198,7 @@ to the same reading, and the correct one.
 
 A battery that is not steered is left out of the plan: it keeps doing
 whatever it was doing, and gets a decision line saying so rather than a
-setpoint. The less obvious half is that it must also be left out of
+target. The less obvious half is that it must also be left out of
 `currentBatteryPower`. Writing `C` for the steerable batteries' combined power
 and `U` for the unsteerable ones':
 
@@ -206,7 +206,7 @@ and `U` for the unsteerable ones':
 net = load - pv + C + U
 ```
 
-The unsteerable ones stay at `U`, so the setpoint that zeroes the meter comes
+The unsteerable ones stay at `U`, so the target that zeroes the meter comes
 from `load - pv + S + U = 0`, which reduces to:
 
 ```
@@ -245,7 +245,7 @@ nothing, so unlike a steerable battery's missing reading it produces no warning.
    The cap comes last, after the split: it is a fact about the inverter, not
    about how the target should be divided.
 
-Each decision reports the energy headroom next to the setpoint —
+Each decision reports the energy headroom next to the target —
 `capacityKwh × (max - soc) / 100` charging, `× (soc - min) / 100` discharging —
 because "charge at 3 kW" is much easier to sanity-check beside "0.4 kWh of room
 left". A capped decision also says what it was capped from, since a plan quietly
@@ -258,9 +258,9 @@ zero, so the next tick's `currentBatteryPower - net` asks for it again, and the
 batteries with headroom take it up over a few ticks. The feedback term is what
 makes the simpler per-battery cap correct rather than merely cheaper.
 
-## Publishing the setpoint
+## Publishing the target
 
-In [addon/app/lib/setpoints.server.ts](../../addon/app/lib/setpoints.server.ts),
+In [addon/app/lib/targets.server.ts](../../addon/app/lib/targets.server.ts),
 kept apart from the strategy (which stays pure) and from the loop (which is
 about *when* to decide). What arrives is a number in watts with the sign
 convention already applied; what leaves is one Home Assistant event per battery.
@@ -268,7 +268,7 @@ convention already applied; what leaves is one Home Assistant event per battery.
 ### Why an event and not a write
 
 This used to call `number.set_value` or `input_number.set_value` on an entity
-configured per battery. It worked, and it left a trail. Every setpoint was a
+configured per battery. It worked, and it left a trail. Every target was a
 state change, and a state change in Home Assistant is a logbook line, a recorder
 row and an entry in that entity's activity feed. A loop that reconsiders every
 few seconds turns that into thousands of rows a day whose entire content is the
@@ -293,7 +293,7 @@ improvements rather than consolations:
 
 ### The event
 
-`elias_ems_<slug>_target` — `elias_ems_home_battery_target` for a battery called
+`elias_ems_<slug>_target_power` — `elias_ems_home_battery_target_power` for a battery called
 "Home battery" — one event per steered battery per publish, with this payload:
 
 | Field | Type | Meaning |
@@ -301,23 +301,23 @@ improvements rather than consolations:
 | `slug` | string | the same slug the event type carries, for an automation listening to several |
 | `battery_id` | string | the stored record's id, which survives a rename |
 | `title` | string | what the settings page and the log call this battery |
-| `power_w` | number | the setpoint, signed: **positive charging, negative discharging** |
+| `power_w` | number | the target, signed: **positive charging, negative discharging** |
 | `charge_w` | number | `power_w` when charging, else 0 — an unsigned magnitude |
 | `discharge_w` | number | `-power_w` when discharging, else 0 |
 | `released` | boolean | true only when the add-on is [letting go](#letting-go) |
 
 `charge_w` and `discharge_w` are the same number restated, and they are there
 because plenty of inverters have a charge register and a discharge register
-rather than one signed setpoint. Doing the split here keeps that automation free
+rather than one signed value. Doing the split here keeps that automation free
 of Jinja arithmetic whose sign is easy to get wrong in exactly the way that
 drives a battery backwards.
 
 **One event type per battery, rather than one shared type with the battery named
 in the payload.** The trigger then says which battery it is for in the line that
-is hardest to get wrong: `event_type: elias_ems_home_battery_target` reads as
+is hardest to get wrong: `event_type: elias_ems_home_battery_target_power` reads as
 what it is, where a shared type plus an `event_data` filter puts the identity
 somewhere easy to leave off — and an automation missing that filter drives every
-battery in the house from one battery's setpoint.
+battery in the house from one battery's target.
 
 The shape not taken was one event carrying every battery at once. It reads
 tidier and behaves worse: an automation would have to dig its battery out of a
@@ -327,12 +327,12 @@ is per battery — any one battery moving would have to republish the whole set,
 waking every automation in the house each time. Separate events keep that
 filtering where it costs nothing.
 
-### What gets published, which is not the setpoint
+### What gets published, which is not the target
 
-Each decision carries a `commandW` alongside its `setpointW`, and they are
+Each decision carries a `commandW` alongside its `targetW`, and they are
 deliberately different things:
 
-| Decision | `setpointW` | `commandW` |
+| Decision | `targetW` | `commandW` |
 | --- | --- | --- |
 | charge / discharge | the share, capped | the same |
 | at an SoC or power limit | 0 | **0** — an active stop |
@@ -342,9 +342,9 @@ deliberately different things:
 
 The deadband row is the one worth explaining. A hold reports the battery's
 measured power, which is the right thing to *display* and the wrong thing to
-*command*: publishing a measurement back as a setpoint would let sensor noise
+*command*: publishing a measurement back as a target would let sensor noise
 walk the commanded value around tick after tick, on a house that is already
-balanced. So a deadband hold says nothing and the previous setpoint stands.
+balanced. So a deadband hold says nothing and the previous target stands.
 
 The unreadable-grid row goes the other way. That is the blind case, and a
 battery left forcing kilowatts because the meter it was following broke is the
@@ -354,11 +354,11 @@ sensor.
 
 ### The publish deadband, and why it needs a refresh
 
-A setpoint goes out when it differs from **the last one we published** for that
+A target goes out when it differs from **the last one we published** for that
 battery by at least 50 W. The loop can tick every second and a house is never
 still, so a strategy recalculating a few watts lower each time would otherwise
 fire an event every tick — and on the other end of each one is an automation
-doing real work against hardware that on some brands commits setpoints to flash.
+doing real work against hardware that on some brands commits every change to flash.
 
 The comparison used to be against what the target entity read *now*, which made
 it self-correcting and stateless: something else moving the entity showed up as
@@ -369,7 +369,7 @@ hardware obeyed — so the comparison is now against a value this process
 remembers, which is an assumption rather than an observation.
 
 **`REPUBLISH_MS` is what stops that assumption becoming an indefinite one.** A
-setpoint older than 30 seconds is restated even when nothing has moved, so an
+target older than 30 seconds is restated even when nothing has moved, so an
 automation that was reloaded, an inverter that was power-cycled, or a Home
 Assistant that restarted mid-tick all converge again within a tick or two
 instead of waiting for the house to swing by 50 W. It is half the idle tick, so
@@ -391,7 +391,7 @@ to end the loop.
 true`, and runs when control is switched off and on `SIGTERM`/`SIGINT`. A
 battery left forcing kilowatts because the thing that told it to is gone is the
 worst failure this feature has — from the battery's side there is no difference
-between a setpoint that is still wanted and one whose author died ten minutes
+between a target that is still wanted and one whose author died ten minutes
 ago.
 
 Zero is the **safe** value, not necessarily the *correct* one: it stops the
@@ -416,10 +416,10 @@ enough to be stopping.
 The event is half the feature; the automation is the other half, and it is the
 half that knows what your inverter is. Everything below assumes a battery titled
 "Home battery", which the Settings page shows as
-`elias_ems_home_battery_target`.
+`elias_ems_home_battery_target_power`.
 
 **Watch it first.** Developer Tools → Events → listen to
-`elias_ems_home_battery_target`, then enable control. Every payload above shows
+`elias_ems_home_battery_target_power`, then enable control. Every payload above shows
 up there, which is how to check the sign and the magnitude before anything is
 wired to hardware.
 
@@ -429,12 +429,12 @@ The case the `input_number` helper existed to serve, now with nothing in the
 middle:
 
 ```yaml
-alias: Battery setpoint → inverter
+alias: Battery target → inverter
 mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_home_battery_target
+    event_type: elias_ems_home_battery_target_power
 actions:
   - action: modbus.write_register
     data:
@@ -446,7 +446,7 @@ actions:
 
 `mode: queued` matters. The default, `single`, drops an event that arrives while
 the previous run is still going and writes a warning to the log — which on a
-house that has just swung hard is precisely the setpoint you wanted. A small
+house that has just swung hard is precisely the target you wanted. A small
 `max` bounds the queue so a stalled Modbus write cannot grow one without limit.
 
 A register that wants an unsigned magnitude per direction takes `charge_w` and
@@ -474,12 +474,12 @@ An inverter integration that publishes a writable `number` needs one action, and
 this is the shape that reproduces exactly what the add-on used to do by itself:
 
 ```yaml
-alias: Battery setpoint → inverter
+alias: Battery target → inverter
 mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_home_battery_target
+    event_type: elias_ems_home_battery_target_power
 actions:
   - action: number.set_value
     target:
@@ -489,7 +489,7 @@ actions:
 ```
 
 Worth knowing what you are choosing here: setting an entity is a state change,
-so this automation puts the setpoint back into the logbook and the recorder. If
+so this automation puts the target back into the logbook and the recorder. If
 that is the noise you were trying to get rid of, write the register directly
 instead, or exclude the entity in `recorder:`/`logbook:` — but an inverter's own
 `number` entity is a real reading of the device, and hiding it is a different
@@ -497,17 +497,17 @@ decision from not writing to it several times a minute.
 
 ### The mode entity, and putting it back
 
-The one that used to be listed as missing. An inverter that ignores a setpoint
+The one that used to be listed as missing. An inverter that ignores a target
 until it is in a forced mode wants two actions on the way in and a different one
 on the way out, and `released` is what separates them:
 
 ```yaml
-alias: Battery setpoint → inverter
+alias: Battery target → inverter
 mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_home_battery_target
+    event_type: elias_ems_home_battery_target_power
 actions:
   - choose:
       - conditions:
@@ -544,14 +544,14 @@ arrived — Home Assistant has no wildcard for event types, so the list is
 explicit:
 
 ```yaml
-alias: Battery setpoints → inverters
+alias: Battery targets → inverters
 mode: queued
 max: 10
 triggers:
   - trigger: event
     event_type:
-      - elias_ems_home_battery_target
-      - elias_ems_garage_battery_target
+      - elias_ems_home_battery_target_power
+      - elias_ems_garage_battery_target_power
 actions:
   - action: number.set_value
     target:
@@ -571,7 +571,7 @@ nothing for the batteries that did not.
 
 An automation that runs leaves its own trace: `last_triggered` moves and the
 logbook shows it being triggered. That is far less than a state change per
-setpoint, and it is per automation rather than per battery entity, but it is not
+target, and it is per automation rather than per battery entity, but it is not
 nothing. `logbook:`/`recorder:` exclusions take an `automation.*` entity id the
 same way they take any other, which is the place to say so.
 
@@ -690,10 +690,10 @@ concatenation.
 | `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split, and the power caps — each direction independently, and a battery limited to 0 W leaving the split to the others. Also the unsteerable cases: dropping out of the plan, and not being counted into the feedback term |
 | `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config, including `resolvePowerLimits`, a battery record saved before the control fields existed, one from the version that named a target entity, and the slug rules — collapsing, folded accents, a title with nothing to build a name from, and the id fallback |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
-| `test/unit/setpoints.test.ts` | the publish itself: the event type named after the battery and the payload an automation acts on, one type per battery, both directions of the charge/discharge split, rounding, the deadband holding a setpoint back and a move clearing it — per battery, so a quiet neighbour stays quiet — a stale setpoint being restated, a release going out past the deadband and saying so, and a failed publish not being remembered so the retry survives |
+| `test/unit/targets.test.ts` | the publish itself: the event type named after the battery and the payload an automation acts on, one type per battery, both directions of the charge/discharge split, rounding, the deadband holding a target back and a move clearing it — per battery, so a quiet neighbour stays quiet — a stale target being restated, a release going out past the deadband and saying so, and a failed publish not being remembered so the retry survives |
 | `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, and files its lines under the right origin. Also that a configured cap reaches the strategy, and that an entity an automation moved on our behalf provokes no tick. Also the publish from the loop's side: that a tick publishes what it decided under the battery's key, that a second tick doesn't repeat it, that a deadband hold publishes nothing, that an unreadable grid cancels a standing command, and that switching control off releases the batteries |
 | `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/entities` offering readings only, that two batteries may not have names that make the same event while a battery keeps its own name across an edit, and that control refuses to switch on with no steerable battery but can always be switched off |
-| `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy — including the setpoint event leaving that process over the Supervisor proxy, and the release landing, flagged as one, when control is switched off |
+| `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy — including the target event leaving that process over the Supervisor proxy, and the release landing, flagged as one, when control is switched off |
 | `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves. What it reads is the diagnostics entry `syncControlLoop()` writes when it starts an interval: nothing in that process has posted the settings form, so only the boot-time call can have produced it |
 | `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the diagnostics box fill |
 
@@ -711,7 +711,7 @@ tick currently in flight, since advancing a clock only *starts* one.
   battery's old name, a `mode: single` automation dropping events under load:
   all three look identical from here, and all three look like a loop that is
   working. Comparing the battery's measured
-  power against the setpoint over a few ticks is what would catch every one of
+  power against the target over a few ticks is what would catch every one of
   them, and it is the biggest remaining gap now that the mode entity is the
   automation's business rather than a missing field.
 - **A worked example per inverter family.** The recipes above are the shapes,

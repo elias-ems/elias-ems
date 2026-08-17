@@ -8,10 +8,10 @@ decisions Home Assistant has no opinion about.
 The first of those decisions is **battery control**: keep the grid meter at
 zero. If the house is importing, discharge the battery by that much; if it is
 exporting, charge. Home Assistant can already show you both numbers. Turning
-them into a setpoint, several times a minute, within your charge limits and your
+them into a target, several times a minute, within your charge limits and your
 inverter's power limits, is the part this fills in.
 
-Each battery's setpoint leaves as its own Home Assistant **event**, and an
+Each battery's target leaves as its own Home Assistant **event**, and an
 automation you write turns it into whatever your inverter speaks. That one step is what keeps the
 add-on out of the business of knowing every brand's registers and modes.
 
@@ -30,8 +30,8 @@ configured entirely from its own pages — no YAML.
 ## What works today
 
 - **Battery control** with a net-zero-energy strategy. It reads, decides,
-  publishes each battery's setpoint as its own event —
-  `elias_ems_home_battery_target` for a battery called "Home battery" — and logs
+  publishes each battery's target as its own event —
+  `elias_ems_home_battery_target_power` for a battery called "Home battery" — and logs
   both halves. See [Battery control](/guide/battery-control).
 - **Live readings** on the home page for your PV arrays, the grid and each
   battery, pushed rather than polled, with a health chip that tells you when the
@@ -41,11 +41,11 @@ configured entirely from its own pages — no YAML.
 
 ## What it cannot do yet
 
-- **Reach your battery on its own.** The setpoint stops at the event; the
+- **Reach your battery on its own.** The target stops at the event; the
   automation that carries it the rest of the way is yours to write, including
   anything your inverter needs first — a forced mode, most often. There are
   worked examples for each shape, but no per-brand catalogue.
-- **Notice that nothing acted on a setpoint.** A missing automation, one still
+- **Notice that nothing acted on a target.** A missing automation, one still
   listening for a battery's old name, and an inverter quietly ignoring the value
   all look identical from the add-on's side. This is the single most likely reason a correct-looking
   setup appears to do nothing.

@@ -11,8 +11,8 @@ import {
   normalizeBattery,
   parseBattery,
   resolvePowerLimits,
-  setpointEventType,
   slugifyTitle,
+  targetEventType,
 } from "../../app/lib/batteries";
 import {
   DEFAULT_CONTROL_CONFIG,
@@ -253,7 +253,7 @@ describe("normalizeBattery", () => {
   });
 
   it("reads a record that still names a target entity as unsteered too", () => {
-    // A batteries.json from the version that wrote setpoints to an entity.
+    // A batteries.json from the version that wrote targets to an entity.
     // Nothing is written to entities any more, so the honest reading is that
     // this battery is not being steered until the automation that listens for
     // its event exists — claiming otherwise would mean claiming to command
@@ -267,7 +267,7 @@ describe("normalizeBattery", () => {
       energyEntityId: "sensor.e",
       powerEntityId: "sensor.p",
       socEntityId: "sensor.s",
-      targetPowerEntityId: "input_number.battery_setpoint",
+      targetPowerEntityId: "input_number.battery_target",
     } as Battery & { targetPowerEntityId: string });
 
     expect(battery.steered).toBe(false);
@@ -297,7 +297,7 @@ describe("normalizeBattery", () => {
 
 describe("resolvePowerLimits", () => {
   it("leaves a direction the settings don't cap unbounded", () => {
-    // Settings are the only source now. A setpoint that goes out as an event
+    // Settings are the only source now. A target that goes out as an event
     // has no min/max to fall back on, and inventing one from the battery's
     // capacity would be a guess about hardware — so an empty field means
     // uncapped, and it is the SoC window that keeps the battery safe.
@@ -417,7 +417,7 @@ describe("naming a battery on the event bus", () => {
 
   it("falls back to the record id when a stored title slugifies to nothing", () => {
     // Only reachable through a hand-edited file, and an ugly event name beats
-    // publishing to `elias_ems__target` or not publishing at all.
+    // publishing to `elias_ems__target_power` or not publishing at all.
     expect(batterySlug({ id: "b1", title: "⚡" })).toBe("battery_b1");
     expect(batterySlug({ id: "b1", title: "Home battery" })).toBe(
       "home_battery",
@@ -425,8 +425,8 @@ describe("naming a battery on the event bus", () => {
   });
 
   it("names one event type per battery", () => {
-    expect(setpointEventType("home_battery")).toBe(
-      "elias_ems_home_battery_target",
+    expect(targetEventType("home_battery")).toBe(
+      "elias_ems_home_battery_target_power",
     );
   });
 });
