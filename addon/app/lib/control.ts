@@ -89,7 +89,7 @@ export type ControlErrors = { intervalSeconds?: string; enabled?: string };
  * cannot drift apart.
  */
 export const NO_STEERABLE_BATTERY_ERROR =
-  "At least one battery needs a control key before control can be enabled — without one there is nothing to steer.";
+  "At least one battery needs to be steered before control can be enabled — without one there is nothing to steer.";
 
 export function parseControlConfig(
   formData: FormData,

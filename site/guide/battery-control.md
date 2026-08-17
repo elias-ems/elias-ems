@@ -8,8 +8,10 @@ Every few seconds the add-on reads the grid meter and each battery, decides what
 each one should be doing, publishes that as a Home Assistant event, and records
 both halves in the [diagnostics log](/guide/diagnostics).
 
-**It does not touch your battery itself.** An automation you write listens for
-that event and turns it into whatever your inverter wants — see [Connecting the
+**It does not touch your battery itself.** Each steered battery gets its own
+event, named after its title — `elias_ems_home_battery_target` — and an
+automation you write listens for it and turns it into whatever your inverter
+wants — see [Connecting the
 event to your battery](#connecting-the-event-to-your-battery), which is the step
 that makes any of this do something.
 
@@ -38,11 +40,11 @@ asks for the remainder.
 1. The grid sensor is read as-is.
 2. **If the meter is within 25 W of zero, everything holds where it is.** Chasing
    meter noise would only cycle the battery for nothing.
-3. Otherwise the target is calculated as above, over the **steerable** batteries
-   only — the ones with a control key.
+3. Otherwise the target is calculated as above, over the **steered** batteries
+   only.
 4. A battery **drops out of this tick** when it cannot help in that direction:
-   - it has no control key, so there is nothing to say to it. It holds at
-     whatever it is currently doing, rather than being told to stop;
+   - it is not steered, so there is nothing to say to it. It holds at whatever
+     it is currently doing, rather than being told to stop;
    - it is at or above its maximum charge and the plan is to charge;
    - it is at or below its minimum charge and the plan is to discharge;
    - its power limit in that direction is 0 — see
@@ -60,9 +62,9 @@ It does not need to be — whatever goes undelivered keeps the meter off zero, s
 the next tick asks for it again and the batteries with headroom take it up over a
 few seconds.
 
-### Batteries you haven't given a control key
+### Batteries you haven't ticked "Steer this battery" for
 
-A battery with no control key is left out of the plan *and* out of the
+A battery that is not steered is left out of the plan *and* out of the
 arithmetic. That second part is less obvious and matters: it is already covering
 some of the load, so counting it in would ask the steerable batteries to cover
 the same watts a second time, and the meter would overshoot by exactly that
@@ -79,7 +81,7 @@ A decision and a command are not the same thing, and the log shows both:
 | At a charge or power limit | 0 | **0** — an active stop |
 | Meter inside the 25 W deadband | the battery's measured power | **nothing** |
 | Grid sensor unreadable | measured power | **0** for steerable batteries |
-| No control key | measured power | nothing |
+| Not steered | measured power | nothing |
 
 The deadband row is the interesting one. A hold reports what the battery is
 measured to be doing, which is the right thing to *show* and the wrong thing to
@@ -101,11 +103,15 @@ swing by 50 W.
 
 ## The event
 
-`elias_ems_setpoint`, one per steerable battery, carrying:
+Each steered battery has **its own event type, named after its title** —
+`elias_ems_home_battery_target` for a battery called "Home battery". The
+Settings page shows the exact string under the Title field.
+
+Every event carries:
 
 | Field | Meaning |
 | --- | --- |
-| `key` | the battery's **control key** — what your automation matches on |
+| `slug` | the same name the event type carries, for an automation listening to several |
 | `battery_id` | the stored record's id, which survives renaming the battery |
 | `title` | what the settings page and the log call this battery |
 | `power_w` | the setpoint, signed: **positive charging, negative discharging** |
@@ -119,16 +125,22 @@ signed setpoint. Use whichever pair your hardware speaks; the sign arithmetic is
 already done.
 
 ::: tip See it before you wire anything to it
-Developer Tools → **Events** → listen to `elias_ems_setpoint`, then enable
-control. Every payload shows up there, which is how to check the key, the sign
-and the magnitude before an inverter is involved.
+Developer Tools → **Events** → listen to your battery's event name, then enable
+control. Every payload shows up there, which is how to check the sign and the
+magnitude before an inverter is involved.
+:::
+
+::: danger Renaming the battery renames the event
+An automation listening for the old name simply stops hearing that battery —
+Home Assistant has no idea the two were related, so nothing anywhere reports a
+problem. The edit form names both while you type; update the trigger to match.
 :::
 
 ## Connecting the event to your battery
 
 This is the part Elias ems cannot do for you, because it is the part that knows
-what your inverter is. All of the examples use a battery whose control key is
-`home_battery`.
+what your inverter is. All of the examples use a battery titled "Home battery",
+whose event the Settings page shows as `elias_ems_home_battery_target`.
 
 ::: warning mode: queued, not the default
 Home Assistant's default automation mode is `single`, which **drops** an event
@@ -148,9 +160,7 @@ mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_setpoint
-    event_data:
-      key: home_battery
+    event_type: elias_ems_home_battery_target
 actions:
   - action: modbus.write_register
     data:
@@ -190,9 +200,7 @@ mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_setpoint
-    event_data:
-      key: home_battery
+    event_type: elias_ems_home_battery_target
 actions:
   - action: number.set_value
     target:
@@ -218,9 +226,7 @@ mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_setpoint
-    event_data:
-      key: home_battery
+    event_type: elias_ems_home_battery_target
 actions:
   - choose:
       - conditions:
@@ -252,8 +258,14 @@ guard.
 
 ### Several batteries
 
-Leave `event_data` off and one automation hears them all; `key` says which
-battery each event is about:
+**One automation per battery is usually the right answer** — that is the point
+of each battery having its own event. Each one then runs only when *its* battery
+moved, and a battery sitting at its charge limit while the other takes the whole
+swing wakes nothing at all.
+
+If you would rather have one, an event trigger takes a list of types and `slug`
+says which arrived (Home Assistant has no wildcard for event types, so the list
+is explicit):
 
 ```yaml
 alias: Battery setpoints → inverters
@@ -261,13 +273,15 @@ mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_setpoint
+    event_type:
+      - elias_ems_home_battery_target
+      - elias_ems_garage_battery_target
 actions:
   - action: number.set_value
     target:
       entity_id: >-
         {{ {'home_battery': 'number.home_battery_target_power',
-            'garage_battery': 'number.garage_battery_target_power'}[trigger.event.data.key] }}
+            'garage_battery': 'number.garage_battery_target_power'}[trigger.event.data.slug] }}
     data:
       value: "{{ trigger.event.data.power_w }}"
 ```
@@ -303,8 +317,9 @@ Two honest limits:
 ## What it cannot do yet
 
 ::: danger It does not know whether anything is listening
-An event goes on the bus and nothing comes back. No automation, a mistyped
-control key, an automation dropping events because it is still `mode: single`,
+An event goes on the bus and nothing comes back. No automation, one still
+listening for a battery's old name, an automation dropping events because it is
+still `mode: single`,
 or an inverter that quietly ignores a setpoint all look **exactly the same**
 from Elias ems' side: a log full of correct-looking decisions and a battery that
 does nothing.

@@ -26,7 +26,7 @@
  *
  * ## Batteries that cannot be steered
  *
- * A battery with no control key keeps doing whatever it was doing, so it gets
+ * A battery that is not steered keeps doing whatever it was doing, so it gets
  * no share of the target — but it must also be left out of the
  * `currentBatteryPower` above, which is less obvious. Writing `C` for the
  * steerable batteries' current power and `U` for the unsteerable ones':
@@ -45,9 +45,8 @@
  * ## Power limits
  *
  * Each battery's share is capped by what its inverter can deliver, as typed
- * into settings. The
- * feedback term above is also what makes a cap safe to apply per battery and
- * leave there: whatever the cap holds back keeps the meter off zero, so the
+ * into settings. The feedback term above is what makes a cap safe to apply per
+ * battery and leave there: whatever the cap holds back keeps the meter off zero, so the
  * next tick asks for it again and the batteries with headroom take it up over a
  * few ticks rather than in one redistributing pass.
  */
@@ -55,8 +54,8 @@
 /** Below this the meter counts as balanced; chasing noise would only cycle the battery. */
 export const DEADBAND_W = 25;
 
-/** Why a battery with no control key sits out every plan. */
-export const UNSTEERED_REASON = "no control key — not steered";
+/** Why a battery nobody asked to be steered sits out every plan. */
+export const UNSTEERED_REASON = "not steered";
 
 export type BatterySnapshot = {
   id: string;
@@ -73,9 +72,9 @@ export type BatterySnapshot = {
   /** The same for discharging, as a positive magnitude. Null when unconstrained. */
   maxDischargeW: number | null;
   /**
-   * Whether a setpoint can be published for this battery at all — false when
-   * it has no control key. An unsteered battery is still part of the house, but
-   * it is not part of the plan; see `planNetZero`.
+   * Whether a setpoint can be published for this battery at all. An unsteered
+   * battery is still part of the house, but it is not part of the plan; see
+   * `planNetZero`.
    */
   steerable: boolean;
 };
@@ -263,7 +262,7 @@ export function planNetZero(input: {
   }
 
   // Reachable even though the settings form refuses to enable control without
-  // one: the key can be cleared from a battery afterwards.
+  // one: a battery can stop being steered afterwards.
   if (steerable.length === 0) {
     return {
       netW: gridPowerW,
@@ -272,7 +271,7 @@ export function planNetZero(input: {
       decisions: batteries.map((battery) =>
         hold(battery, UNSTEERED_REASON, battery.powerW ?? 0),
       ),
-      summary: "No battery has a control key — nothing to steer.",
+      summary: "No battery is steered — nothing to command.",
       warnings,
     };
   }

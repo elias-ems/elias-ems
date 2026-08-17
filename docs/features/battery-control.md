@@ -40,7 +40,8 @@ and that is what to point this at.
 
 One or more. Capacity and the charge window are things the installer knows and
 Home Assistant does not, so they are typed in; the three live values are
-entities, and the control key is what names the battery in the setpoint event.
+entities, and the **title** does double duty — it names the battery in the log
+and on the dashboard, and it is what the setpoint event type is derived from.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -51,7 +52,7 @@ entities, and the control key is what names the battery in the setpoint event.
 | `energyEntityId` | entity | cumulative energy counter, kWh |
 | `powerEntityId` | entity | current power, W — see the sign convention below |
 | `socEntityId` | entity | state of charge, % |
-| `controlKey` | text | **optional** — the name this battery's setpoints go out under |
+| `steered` | boolean | whether setpoints are published for this battery at all |
 | `maxChargePowerW` | number | **optional** — cap on charge power, W |
 | `maxDischargePowerW` | number | **optional** — cap on discharge power, W, as a positive number |
 
@@ -66,41 +67,71 @@ it.
 the battery is capable of. Control never discharges below the floor or charges
 above the ceiling.
 
-#### The control key
+#### Steered, and the event named after the title
 
-`controlKey` is the name this battery's setpoints go out under, and it is what
-turns a battery from something watched into something steered. Leaving it empty
-is a supported state, not an unfinished one — but it has consequences, described
-under [Batteries that cannot be steered](#batteries-that-cannot-be-steered)
-below.
+`steered` is what turns a battery from something watched into something
+commanded. False is a supported state, not an unfinished one — see [Batteries
+that cannot be steered](#batteries-that-cannot-be-steered) below.
 
-It is free text rather than an entity, because there is no entity involved any
-more: the setpoint leaves as an event and the thing that matches on this key is
-an automation's `event_data` filter. Which means the key has to be **chosen by
-whoever writes that automation**. The two things it could have been derived from
-are both worse — the record's generated id is unreadable in YAML, and the title
-is renamed the moment somebody tidies up the settings page, silently detaching
-the automation from the battery it was written for.
+A checkbox rather than the presence of some other field, so that "watched, not
+steered" is chosen rather than arrived at by leaving something empty. It used to
+be implied by whether a target entity had been filled in; with the event name
+now derived from the title there is no such field left to overload, and
+overloading one was never the clearer half of that design anyway.
 
-**Battery control cannot be enabled until at least one battery has one.** The
+**Battery control cannot be enabled until at least one battery is steered.** The
 checkbox on the Settings page is disabled until then, and the action rejects the
-save even if the form is posted directly — a key can be cleared after control
-was switched on, so the server cannot trust the form to have been rendered in
-the current state. Switching control *off* is always allowed, which is the way
-out of that state.
+save even if the form is posted directly — a battery can stop being steered
+after control was switched on, so the server cannot trust the form to have been
+rendered in the current state. Switching control *off* is always allowed, which
+is the way out of that state.
 
 The rule is "at least one", not "all": a house can reasonably have one steerable
 battery and one that only reports. What it cannot have is control enabled with
 nothing to command, because a loop that decides correctly and changes nothing
 looks exactly like a loop that is broken.
 
-**Upgrades from the version that wrote to an entity arrive unsteered.** Those
-records carry a `targetPowerEntityId` and no `controlKey`, and
-`normalizeBattery` reads them as "not steered" rather than migrating the entity
-id into a key. That is the honest reading: nothing is listening for the event
-until an automation exists, so carrying the battery across as steered would be
-claiming to command hardware that has stopped hearing us. Filling in a key and
-writing the automation is one deliberate step, in that order.
+**Upgrades arrive unsteered.** A record written before this field existed has no
+`steered`, which reads as false — including the records from the version that
+wrote setpoints to a target entity. That is the honest reading: nothing is
+listening for the event until an automation exists, so carrying a battery across
+as steered would be claiming to command hardware that has stopped hearing us.
+Ticking the box and writing the automation is one deliberate step, in that
+order.
+
+#### The slug, and what renaming costs
+
+`slugifyTitle` reduces the title to something that can be part of an event type:
+Unicode-normalised so accents fold away rather than becoming underscores,
+lowercased, and every run of anything else collapsed to a single `_`, with the
+ends trimmed. "Home battery" and "Home  Battery!" both give `home_battery`;
+"Réserve" gives `reserve`. `setpointEventType` wraps it as
+`elias_ems_<slug>_target`.
+
+Derived rather than typed, because the two names are the same name. A separate
+field would mean a battery could be called one thing on the settings page and
+another in YAML, and keeping them in step is work nobody signed up for. It is
+shown, read-only, under the title as it is typed, so the name an automation has
+to be written against never requires saving the form to discover.
+
+Two consequences, and both are handled where they happen rather than where they
+would be convenient:
+
+- **Renaming a battery renames its event.** Home Assistant has no idea the two
+  types were ever related, so an automation listening for the old one silently
+  stops hearing this battery. The edit form says so — while the new title is
+  being typed, naming both event types — because that is the only moment
+  anything can.
+- **Two titles can collide.** "Home battery" and "home-battery" are different
+  names and one event type, which would leave both batteries taking each other's
+  setpoints with nothing reporting a problem. The settings action rejects the
+  save; the check lives there rather than in `parseBattery` because it needs
+  every other battery, and the model module is pure.
+
+A title with no letters or digits at all — "⚡", say — has nothing to build a
+name from, and the form rejects it. `batterySlug` still has a fallback of
+`battery_<id>` for anything a hand-edited file gets past the form, because an
+ugly event type beats publishing to `elias_ems__target`.
 
 #### Power limits
 
@@ -165,7 +196,7 @@ to the same reading, and the correct one.
 
 ### Batteries that cannot be steered
 
-A battery with no control key is left out of the plan: it keeps doing
+A battery that is not steered is left out of the plan: it keeps doing
 whatever it was doing, and gets a decision line saying so rather than a
 setpoint. The less obvious half is that it must also be left out of
 `currentBatteryPower`. Writing `C` for the steerable batteries' combined power
@@ -198,7 +229,7 @@ nothing, so unlike a steerable battery's missing reading it produces no warning.
 3. Otherwise `target = currentBatteryPower - net`, over the **steerable**
    batteries only; positive means charge, negative means discharge.
 4. A battery drops out of the plan when it cannot help in that direction:
-   - it has no control key, so nothing can be said to it. Unlike the cases
+   - it is not steered, so nothing can be said to it. Unlike the cases
      below it holds at its *current* power rather than at 0 — those are a
      decision to stop, this is the absence of any decision at all;
    - at or above `maxChargePercent` and the target is to charge;
@@ -262,12 +293,13 @@ improvements rather than consolations:
 
 ### The event
 
-`elias_ems_setpoint`, one per steerable battery per publish, with this payload:
+`elias_ems_<slug>_target` — `elias_ems_home_battery_target` for a battery called
+"Home battery" — one event per steered battery per publish, with this payload:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `key` | string | the battery's `controlKey` — what an automation matches on |
-| `battery_id` | string | the stored record's id, stable across renames |
+| `slug` | string | the same slug the event type carries, for an automation listening to several |
+| `battery_id` | string | the stored record's id, which survives a rename |
 | `title` | string | what the settings page and the log call this battery |
 | `power_w` | number | the setpoint, signed: **positive charging, negative discharging** |
 | `charge_w` | number | `power_w` when charging, else 0 — an unsigned magnitude |
@@ -280,10 +312,20 @@ rather than one signed setpoint. Doing the split here keeps that automation free
 of Jinja arithmetic whose sign is easy to get wrong in exactly the way that
 drives a battery backwards.
 
-One event type for every battery, rather than one type per key, so that a house
-with three batteries can be served by one automation that reads
-`trigger.event.data.key` — while an automation that only cares about one battery
-can still say so by matching `event_data`.
+**One event type per battery, rather than one shared type with the battery named
+in the payload.** The trigger then says which battery it is for in the line that
+is hardest to get wrong: `event_type: elias_ems_home_battery_target` reads as
+what it is, where a shared type plus an `event_data` filter puts the identity
+somewhere easy to leave off — and an automation missing that filter drives every
+battery in the house from one battery's setpoint.
+
+The shape not taken was one event carrying every battery at once. It reads
+tidier and behaves worse: an automation would have to dig its battery out of a
+list, which is exactly the template that silently yields nothing when a name
+drifts, and — since the [deadband](#the-publish-deadband-and-why-it-needs-a-refresh)
+is per battery — any one battery moving would have to republish the whole set,
+waking every automation in the house each time. Separate events keep that
+filtering where it costs nothing.
 
 ### What gets published, which is not the setpoint
 
@@ -296,7 +338,7 @@ deliberately different things:
 | at an SoC or power limit | 0 | **0** — an active stop |
 | inside the grid deadband | the battery's *measured* power | **null** — publish nothing |
 | grid sensor unreadable | measured power | **0** for steerable batteries |
-| no control key | measured power | null |
+| not steered | measured power | null |
 
 The deadband row is the one worth explaining. A hold reports the battery's
 measured power, which is the right thing to *display* and the wrong thing to
@@ -372,12 +414,14 @@ enough to be stopping.
 ## Connecting the event to a battery
 
 The event is half the feature; the automation is the other half, and it is the
-half that knows what your inverter is. Everything below assumes a battery whose
-`controlKey` is `home_battery`.
+half that knows what your inverter is. Everything below assumes a battery titled
+"Home battery", which the Settings page shows as
+`elias_ems_home_battery_target`.
 
-**Watch it first.** Developer Tools → Events → listen to `elias_ems_setpoint`,
-then enable control. Every payload above shows up there, which is how to check
-the key, the sign and the magnitude before anything is wired to hardware.
+**Watch it first.** Developer Tools → Events → listen to
+`elias_ems_home_battery_target`, then enable control. Every payload above shows
+up there, which is how to check the sign and the magnitude before anything is
+wired to hardware.
 
 ### Writing a Modbus register
 
@@ -390,9 +434,7 @@ mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_setpoint
-    event_data:
-      key: home_battery
+    event_type: elias_ems_home_battery_target
 actions:
   - action: modbus.write_register
     data:
@@ -437,9 +479,7 @@ mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_setpoint
-    event_data:
-      key: home_battery
+    event_type: elias_ems_home_battery_target
 actions:
   - action: number.set_value
     target:
@@ -467,9 +507,7 @@ mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_setpoint
-    event_data:
-      key: home_battery
+    event_type: elias_ems_home_battery_target
 actions:
   - choose:
       - conditions:
@@ -501,8 +539,9 @@ worth using, so there is no need to guard the `select` with a condition.
 
 ### Several batteries, one automation
 
-Drop the `event_data` filter and the automation hears every battery; `key` says
-which one each event is about:
+An event trigger takes a list of types, and `slug` in the payload says which one
+arrived — Home Assistant has no wildcard for event types, so the list is
+explicit:
 
 ```yaml
 alias: Battery setpoints → inverters
@@ -510,16 +549,23 @@ mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_setpoint
+    event_type:
+      - elias_ems_home_battery_target
+      - elias_ems_garage_battery_target
 actions:
   - action: number.set_value
     target:
       entity_id: >-
         {{ {'home_battery': 'number.home_battery_target_power',
-            'garage_battery': 'number.garage_battery_target_power'}[trigger.event.data.key] }}
+            'garage_battery': 'number.garage_battery_target_power'}[trigger.event.data.slug] }}
     data:
       value: "{{ trigger.event.data.power_w }}"
 ```
+
+Worth knowing that one automation per battery is usually the better trade here,
+precisely because the events are separate: each one then runs only when *its*
+battery moved, where the combined version above runs on every event and does
+nothing for the batteries that did not.
 
 ### If the automation itself is the noise
 
@@ -642,11 +688,11 @@ concatenation.
 | Suite | What it covers |
 | --- | --- |
 | `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split, and the power caps — each direction independently, and a battery limited to 0 W leaving the split to the others. Also the unsteerable cases: dropping out of the plan, and not being counted into the feedback term |
-| `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config, including `resolvePowerLimits`, a battery record saved before the control fields existed, and one from the version that named a target entity |
+| `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config, including `resolvePowerLimits`, a battery record saved before the control fields existed, one from the version that named a target entity, and the slug rules — collapsing, folded accents, a title with nothing to build a name from, and the id fallback |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
-| `test/unit/setpoints.test.ts` | the publish itself: the payload an automation acts on, both directions of the charge/discharge split, rounding, the deadband holding a setpoint back and a move clearing it, a stale setpoint being restated, a release going out past the deadband and saying so, and a failed publish not being remembered so the retry survives |
+| `test/unit/setpoints.test.ts` | the publish itself: the event type named after the battery and the payload an automation acts on, one type per battery, both directions of the charge/discharge split, rounding, the deadband holding a setpoint back and a move clearing it — per battery, so a quiet neighbour stays quiet — a stale setpoint being restated, a release going out past the deadband and saying so, and a failed publish not being remembered so the retry survives |
 | `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, and files its lines under the right origin. Also that a configured cap reaches the strategy, and that an entity an automation moved on our behalf provokes no tick. Also the publish from the loop's side: that a tick publishes what it decided under the battery's key, that a second tick doesn't repeat it, that a deadband hold publishes nothing, that an unreadable grid cancels a standing command, and that switching control off releases the batteries |
-| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/entities` offering readings only, and that control refuses to switch on with no steerable battery but can always be switched off |
+| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/entities` offering readings only, that two batteries may not have names that make the same event while a battery keeps its own name across an edit, and that control refuses to switch on with no steerable battery but can always be switched off |
 | `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy — including the setpoint event leaving that process over the Supervisor proxy, and the release landing, flagged as one, when control is switched off |
 | `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves. What it reads is the diagnostics entry `syncControlLoop()` writes when it starts an interval: nothing in that process has posted the settings form, so only the boot-time call can have produced it |
 | `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the diagnostics box fill |
@@ -661,9 +707,10 @@ tick currently in flight, since advancing a clock only *starts* one.
 ## Not done yet
 
 - **Knowing whether anything is listening.** The event goes on the bus and the
-  add-on hears nothing back. No automation, a typo in the key, a `mode: single`
-  automation dropping events under load: all three look identical from here, and
-  all three look like a loop that is working. Comparing the battery's measured
+  add-on hears nothing back. No automation, an automation still listening for a
+  battery's old name, a `mode: single` automation dropping events under load:
+  all three look identical from here, and all three look like a loop that is
+  working. Comparing the battery's measured
   power against the setpoint over a few ticks is what would catch every one of
   them, and it is the biggest remaining gap now that the mode entity is the
   automation's business rather than a missing field.

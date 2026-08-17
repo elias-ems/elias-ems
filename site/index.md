@@ -23,8 +23,8 @@ features:
   - title: Battery control
     details: >-
       A net-zero-energy strategy reads the grid meter, works out what every
-      battery should be doing, and publishes the setpoint as a Home Assistant
-      event for your automation to act on. It respects your charge limits,
+      battery should be doing, and publishes each setpoint as its own Home
+      Assistant event for your automation to act on. It respects your charge limits,
       splits the target across batteries by capacity, and caps each share at
       what the inverter can deliver.
     link: /guide/battery-control

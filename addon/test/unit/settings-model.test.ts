@@ -7,9 +7,12 @@ import { describe, expect, it } from "vitest";
 import type { Battery } from "../../app/lib/batteries";
 import {
   BATTERY_DEFAULTS,
+  batterySlug,
   normalizeBattery,
   parseBattery,
   resolvePowerLimits,
+  setpointEventType,
+  slugifyTitle,
 } from "../../app/lib/batteries";
 import {
   DEFAULT_CONTROL_CONFIG,
@@ -125,21 +128,22 @@ describe("parseBattery", () => {
     expect(Object.keys(result.errors)).toEqual(["socEntityId"]);
   });
 
-  it("accepts a battery with no control key, which is watched but not steered", () => {
+  it("reads an unticked steering box as watched but not steered", () => {
+    // An unchecked checkbox posts nothing at all, so "absent" has to mean off.
     const result = parseBattery(form(validBattery));
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.fields.controlKey).toBe("");
+    expect(result.fields.steered).toBe(false);
     expect(result.fields.maxChargePowerW).toBeNull();
     expect(result.fields.maxDischargePowerW).toBeNull();
   });
 
-  it("takes the control key and the power caps when they are given", () => {
+  it("takes the steering box and the power caps when they are given", () => {
     const result = parseBattery(
       form({
         ...validBattery,
-        controlKey: " home_battery ",
+        steered: "on",
         maxChargePowerW: "5000",
         maxDischargePowerW: "3500",
       }),
@@ -147,11 +151,21 @@ describe("parseBattery", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Trimmed, because it is matched against verbatim in an automation's event
-    // trigger and a trailing space there is invisible and fatal.
-    expect(result.fields.controlKey).toBe("home_battery");
+    expect(result.fields.steered).toBe(true);
     expect(result.fields.maxChargePowerW).toBe(5000);
     expect(result.fields.maxDischargePowerW).toBe(3500);
+  });
+
+  it("refuses a title with nothing to build an event name out of", () => {
+    // The event type is derived from the title, so a name of pure punctuation
+    // leaves nothing to derive. Rejected rather than papered over, since the
+    // settings page would otherwise show one name and the automation need
+    // another.
+    const result = parseBattery(form({ ...validBattery, title: "!!! ⚡" }));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.title).toBeTruthy();
   });
 
   it("rejects a mistyped power cap instead of reading it as no cap", () => {
@@ -183,7 +197,7 @@ describe("normalizeBattery", () => {
       energyEntityId: "sensor.e",
       powerEntityId: "sensor.p",
       socEntityId: "sensor.s",
-      controlKey: "home_battery",
+      steered: true,
       maxChargePowerW: "5000" as unknown as number,
       maxDischargePowerW: "3000" as unknown as number,
     });
@@ -205,7 +219,7 @@ describe("normalizeBattery", () => {
       energyEntityId: "sensor.e",
       powerEntityId: "sensor.battery_power",
       socEntityId: "sensor.s",
-      controlKey: "",
+      steered: false,
       maxChargePowerW: null,
       maxDischargePowerW: null,
     });
@@ -233,7 +247,7 @@ describe("normalizeBattery", () => {
       socEntityId: "sensor.s",
     } as Battery);
 
-    expect(battery.controlKey).toBe("");
+    expect(battery.steered).toBe(false);
     expect(battery.maxChargePowerW).toBeNull();
     expect(battery.maxDischargePowerW).toBeNull();
   });
@@ -241,9 +255,9 @@ describe("normalizeBattery", () => {
   it("reads a record that still names a target entity as unsteered too", () => {
     // A batteries.json from the version that wrote setpoints to an entity.
     // Nothing is written to entities any more, so the honest reading is that
-    // this battery is not being steered until a control key and the automation
-    // that listens for it both exist — claiming otherwise would mean claiming
-    // to command hardware that has stopped hearing us.
+    // this battery is not being steered until the automation that listens for
+    // its event exists — claiming otherwise would mean claiming to command
+    // hardware that has stopped hearing us.
     const battery = normalizeBattery({
       id: "b1",
       title: "Home battery",
@@ -256,7 +270,7 @@ describe("normalizeBattery", () => {
       targetPowerEntityId: "input_number.battery_setpoint",
     } as Battery & { targetPowerEntityId: string });
 
-    expect(battery.controlKey).toBe("");
+    expect(battery.steered).toBe(false);
   });
 
   it("drops a power cap of zero rather than freezing the battery at 0 W", () => {
@@ -271,7 +285,7 @@ describe("normalizeBattery", () => {
       energyEntityId: "sensor.e",
       powerEntityId: "sensor.p",
       socEntityId: "sensor.s",
-      controlKey: "home_battery",
+      steered: true,
       maxChargePowerW: 0,
       maxDischargePowerW: -5000,
     });
@@ -377,5 +391,42 @@ describe("normalizeControlConfig", () => {
 
     expect(config.strategy).toBe(DEFAULT_CONTROL_CONFIG.strategy);
     expect(config.enabled).toBe(true);
+  });
+});
+
+describe("naming a battery on the event bus", () => {
+  it("builds a slug a person would have written by hand", () => {
+    expect(slugifyTitle("Home battery")).toBe("home_battery");
+    // Runs of anything unusable collapse into one underscore, and the ends are
+    // trimmed, so the name in an automation is predictable from the one on the
+    // settings page rather than merely derived from it.
+    expect(slugifyTitle("  Home   Battery! ")).toBe("home_battery");
+    expect(slugifyTitle("Garage #2")).toBe("garage_2");
+  });
+
+  it("folds accents rather than dropping them", () => {
+    // "R_serve" would be a worse name than "reserve", and unrecognisable to
+    // whoever typed the title.
+    expect(slugifyTitle("Réserve")).toBe("reserve");
+  });
+
+  it("has nothing to say about a title with no letters or digits", () => {
+    // The form rejects this; the empty string is how it finds out.
+    expect(slugifyTitle("⚡ !!! ⚡")).toBe("");
+  });
+
+  it("falls back to the record id when a stored title slugifies to nothing", () => {
+    // Only reachable through a hand-edited file, and an ugly event name beats
+    // publishing to `elias_ems__target` or not publishing at all.
+    expect(batterySlug({ id: "b1", title: "⚡" })).toBe("battery_b1");
+    expect(batterySlug({ id: "b1", title: "Home battery" })).toBe(
+      "home_battery",
+    );
+  });
+
+  it("names one event type per battery", () => {
+    expect(setpointEventType("home_battery")).toBe(
+      "elias_ems_home_battery_target",
+    );
   });
 });

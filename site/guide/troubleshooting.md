@@ -50,10 +50,11 @@ Home Assistant.
 
 ## Battery control won't switch on
 
-The checkbox is disabled until **at least one battery has a control key**. A
-loop that decides correctly and can command nothing looks exactly like a loop
-that is broken, so it is not allowed to start in that state. See [The control
-key](/guide/configure#the-control-key-watched-vs-steered).
+The checkbox is disabled until **at least one battery is steered** — the
+per-battery **Steer this battery** box. A loop that decides correctly and can
+command nothing looks exactly like a loop that is broken, so it is not allowed
+to start in that state. See [Watched vs.
+steered](/guide/configure#watched-vs-steered-and-the-event-named-after-the-title).
 
 Switching control *off* is always allowed, whatever the configuration looks
 like.
@@ -63,13 +64,15 @@ like.
 The log only proves Elias ems decided and published. Everything after that is
 your automation, so work outwards in this order:
 
-1. **Is the event being fired?** Developer Tools → **Events** → listen to
-   `elias_ems_setpoint`. Nothing arriving means control is off, the battery has
-   no control key, or every setpoint is inside the 50 W deadband — wait 30
-   seconds and one will be restated anyway.
-2. **Does the key match?** The `key` in the payload has to be exactly what the
-   automation's `event_data` says. A stray space or a rename on either side
-   detaches them silently.
+1. **Is the event being fired?** Developer Tools → **Events** → listen to the
+   battery's event name, which the Settings page shows under its Title. Nothing
+   arriving means control is off, the battery is not steered, or every setpoint
+   is inside the 50 W deadband — wait 30 seconds and one will be restated
+   anyway.
+2. **Is the automation listening for the right name?** The event is named after
+   the battery's title, so **renaming a battery renames its event** and any
+   automation still on the old name hears nothing, with no error anywhere.
+   Compare the trigger against the name on the Settings page.
 3. **Did the automation run?** Its trace shows each run and what it called. An
    automation still on Home Assistant's default `mode: single` **drops** events
    that arrive while it is busy — use `mode: queued`.

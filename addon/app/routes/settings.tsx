@@ -3,7 +3,12 @@ import BatteriesSection from "../components/settings/BatteriesSection";
 import ControlSection from "../components/settings/ControlSection";
 import GridSection from "../components/settings/GridSection";
 import PvSection from "../components/settings/PvSection";
-import { isSteerable, parseBattery } from "../lib/batteries";
+import {
+  DUPLICATE_SLUG_ERROR,
+  isSteerable,
+  parseBattery,
+  slugifyTitle,
+} from "../lib/batteries";
 import {
   addBattery,
   listBatteries,
@@ -89,6 +94,24 @@ export async function action({ request }: Route.ActionArgs) {
       if (!parsed.ok) {
         return failed({ section: "battery", recordId, errors: parsed.errors });
       }
+
+      // Two batteries whose titles slugify the same way would publish to the
+      // same event type and take each other's setpoints, with nothing anywhere
+      // reporting a problem. Here rather than in `parseBattery` because it
+      // needs every other battery, which a pure model module cannot read.
+      const slug = slugifyTitle(parsed.fields.title);
+      const clash = (await listBatteries()).some(
+        (battery) =>
+          battery.id !== recordId && slugifyTitle(battery.title) === slug,
+      );
+      if (clash) {
+        return failed({
+          section: "battery",
+          recordId,
+          errors: { title: DUPLICATE_SLUG_ERROR },
+        });
+      }
+
       if (recordId) await updateBattery(recordId, parsed.fields);
       else await addBattery(parsed.fields);
       return { section: "battery" as const, ok: true as const };
@@ -110,8 +133,8 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       // The form disables the checkbox in this state, but the check has to be
-      // here too: a control key can be cleared from a battery after control was
-      // switched on, and nothing stops a form being posted directly.
+      // here too: a battery can stop being steered after control was switched
+      // on, and nothing stops a form being posted directly.
       if (parsed.config.enabled) {
         const batteries = await listBatteries();
         if (!batteries.some(isSteerable)) {

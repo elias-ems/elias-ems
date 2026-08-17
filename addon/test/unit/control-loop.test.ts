@@ -45,7 +45,6 @@ import {
   startHaLive,
   stopHaLive,
 } from "../../app/lib/ha-live.server";
-import { SETPOINT_EVENT } from "../../app/lib/setpoints.server";
 import { defaultStates, startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
@@ -72,9 +71,9 @@ const BATTERY = {
   energyEntityId: "sensor.battery_energy_total",
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
-  // Steerable, since an unsteered battery sits out of every plan and these
+  // Steered, since an unsteered battery sits out of every plan and these
   // cases are about scheduling.
-  controlKey: "home_battery",
+  steered: true,
   maxChargePowerW: null,
   maxDischargePowerW: null,
 };
@@ -90,14 +89,12 @@ function logged(fragment: string): boolean {
   return messages().some((message) => message.includes(fragment));
 }
 
-/** Every setpoint published so far, as [key, watts] pairs, in order. */
+/** Every setpoint published so far, as [event type, watts] pairs, in order. */
 function setpointEvents(): Array<[string, unknown]> {
-  return ha.events
-    .filter((event) => event.eventType === SETPOINT_EVENT)
-    .map((event) => [
-      String((event.data as { key?: string }).key),
-      (event.data as { power_w?: unknown }).power_w,
-    ]);
+  return ha.events.map((event) => [
+    event.eventType,
+    (event.data as { power_w?: unknown }).power_w,
+  ]);
 }
 
 /**
@@ -186,14 +183,14 @@ describe("runControlTick", () => {
     expect(logged("state of charge unknown")).toBe(true);
   });
 
-  it("publishes the setpoint it decided on under the battery's control key", async () => {
+  it("publishes the setpoint it decided on, under the battery's own event", async () => {
     await addBattery(BATTERY);
 
     await runControlTick();
 
     // The fixture imports 842 W with the battery idle, so the decision is to
     // discharge 842 W.
-    expect(setpointEvents()).toEqual([["home_battery", -842]]);
+    expect(setpointEvents()).toEqual([["elias_ems_home_battery_target", -842]]);
     expect(logged("Published: Home battery → -842 W")).toBe(true);
   });
 
@@ -233,7 +230,7 @@ describe("runControlTick", () => {
     await runControlTick();
 
     expect(logged("grid power sensor is not readable")).toBe(true);
-    expect(setpointEvents()).toEqual([["home_battery", 0]]);
+    expect(setpointEvents()).toEqual([["elias_ems_home_battery_target", 0]]);
   });
 
   it("caps the setpoint at the configured discharge limit", async () => {
@@ -452,7 +449,7 @@ describe("syncControlLoop", () => {
     await syncControlLoop();
     await pendingControlTick();
 
-    expect(setpointEvents()).toEqual([["home_battery", -842]]);
+    expect(setpointEvents()).toEqual([["elias_ems_home_battery_target", -842]]);
 
     await saveControlConfig({
       enabled: false,
@@ -462,8 +459,8 @@ describe("syncControlLoop", () => {
     await syncControlLoop();
 
     expect(setpointEvents()).toEqual([
-      ["home_battery", -842],
-      ["home_battery", 0],
+      ["elias_ems_home_battery_target", -842],
+      ["elias_ems_home_battery_target", 0],
     ]);
     expect(logged("Released the battery to 0 W")).toBe(true);
   });
@@ -494,7 +491,7 @@ describe("syncControlLoop", () => {
     });
     await syncControlLoop();
 
-    expect(setpointEvents()).toEqual([["home_battery", 0]]);
+    expect(setpointEvents()).toEqual([["elias_ems_home_battery_target", 0]]);
     expect(ha.events.at(-1)?.data).toMatchObject({ released: true });
   });
 

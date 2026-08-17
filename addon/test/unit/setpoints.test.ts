@@ -19,13 +19,13 @@ import {
   it,
   vi,
 } from "vitest";
+import { setpointEventType } from "../../app/lib/batteries";
 import {
   describePublishes,
   forgetPublishedSetpoints,
   PUBLISH_DEADBAND_W,
   publishSetpoints,
   REPUBLISH_MS,
-  SETPOINT_EVENT,
   type SetpointTarget,
 } from "../../app/lib/setpoints.server";
 import { startHaMock } from "../ha-mock.js";
@@ -39,7 +39,7 @@ function target(overrides: Partial<SetpointTarget> = {}): SetpointTarget {
   return {
     batteryId: "b1",
     title: "Home battery",
-    key: "home_battery",
+    slug: "home_battery",
     commandW: -800,
     ...overrides,
   };
@@ -48,7 +48,7 @@ function target(overrides: Partial<SetpointTarget> = {}): SetpointTarget {
 /** Every setpoint event fired so far, as the payloads an automation would see. */
 function fired(): Array<Record<string, unknown>> {
   return ha.events
-    .filter((event) => event.eventType === SETPOINT_EVENT)
+    .filter((event) => event.eventType.startsWith("elias_ems_"))
     .map((event) => event.data as Record<string, unknown>);
 }
 
@@ -77,13 +77,18 @@ afterEach(() => {
 });
 
 describe("publishSetpoints", () => {
-  it("fires one event per battery, carrying everything an automation needs", async () => {
+  it("fires an event named after the battery, carrying what an automation needs", async () => {
     const [publish] = await publishSetpoints([target()]);
 
     expect(publish).toMatchObject({ status: "published", valueW: -800 });
+    // The battery is named by the event type, so an automation's trigger says
+    // which battery it is for in the line hardest to get wrong.
+    expect(ha.events.map((event) => event.eventType)).toEqual([
+      "elias_ems_home_battery_target",
+    ]);
     expect(fired()).toEqual([
       {
-        key: "home_battery",
+        slug: "home_battery",
         battery_id: "b1",
         title: "Home battery",
         power_w: -800,
@@ -178,12 +183,50 @@ describe("publishSetpoints", () => {
     expect(fired()[1]).toMatchObject({ released: true });
   });
 
+  it("gives each battery its own event type", async () => {
+    await publishSetpoints([
+      target(),
+      target({
+        batteryId: "b2",
+        title: "Garage battery",
+        slug: "garage_battery",
+      }),
+    ]);
+
+    expect(ha.events.map((event) => event.eventType)).toEqual([
+      setpointEventType("home_battery"),
+      setpointEventType("garage_battery"),
+    ]);
+  });
+
+  it("holds each battery's deadband on its own", async () => {
+    // Two batteries rarely move together — one at its SoC ceiling or pinned at
+    // its power cap sits still while its neighbour takes the whole swing — and
+    // a shared event would wake every automation in the house for that.
+    const garage = { batteryId: "b2", title: "Garage battery", slug: "garage" };
+    await publishSetpoints([target(), target(garage)]);
+    ha.events.length = 0;
+
+    const publishes = await publishSetpoints([
+      target({ commandW: -2000 }),
+      target(garage),
+    ]);
+
+    expect(publishes.map((publish) => publish.status)).toEqual([
+      "published",
+      "unchanged",
+    ]);
+    expect(ha.events.map((event) => event.eventType)).toEqual([
+      setpointEventType("home_battery"),
+    ]);
+  });
+
   it("reports an unreachable Home Assistant instead of throwing", async () => {
     process.env.SUPERVISOR_API = UNREACHABLE_API;
 
     const publishes = await publishSetpoints([
       target({ batteryId: "b1" }),
-      target({ batteryId: "b2", title: "Garage battery" }),
+      target({ batteryId: "b2", title: "Garage battery", slug: "garage" }),
     ]);
 
     // Nothing rejects: one battery's event failing must not stop its
@@ -231,7 +274,7 @@ describe("describePublishes", () => {
     process.env.SUPERVISOR_API = UNREACHABLE_API;
     const publishes = await publishSetpoints([
       target({ batteryId: "quiet", commandW: null }),
-      target({ batteryId: "bad", title: "Garage battery" }),
+      target({ batteryId: "bad", title: "Garage battery", slug: "garage" }),
     ]);
 
     const described = describePublishes(publishes);
