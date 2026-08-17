@@ -25,13 +25,18 @@ holds the routine to one PR; a dated branch per run is what stacked them up.
 
 ```bash
 git fetch origin
-gh pr list --state open --head chore/architecture-review --json number,url,title
+gh pr list --state open --json number,url,title,headRefName \
+  --jq '[.[] | select(.headRefName | startswith("chore/architecture-review"))]'
 ```
+
+Match on the **prefix**, not the exact name: the dated branches this rule replaced
+(`chore/architecture-review-2026-08-17`) are review PRs too, and a lookup that misses them opens
+exactly the duplicate this step exists to prevent.
 
 `gh` is pinned in [mise.toml](../../../mise.toml) but is **not installed everywhere this runs** — a
 cloud routine has the GitHub MCP tools instead (`list_pull_requests`, `create_pull_request`,
 `update_pull_request`, `add_issue_comment`). Use whichever is available; every `gh` command below
-has an MCP equivalent.
+has an MCP equivalent, and the filtering above is then yours to do over the returned list.
 
 ### A PR is open — rebase it and build on it
 
@@ -65,11 +70,20 @@ git checkout -B chore/architecture-review origin/main
 reusing its commits would resurrect a diff that has already been dealt with. If the remote branch
 still exists, the push in step 5 needs `--force-with-lease`.
 
-### More than one review PR is open
+### The open PR is on a dated branch, or several PRs are open
 
-Possible from the dated branches that predate this rule. Adopt the newest as the long-lived one and
-close the rest, each with a comment pointing at the survivor. Don't hand-merge their contents —
-anything in them that is still true will come back out of this run's own review.
+Left over from before this rule. A pull request's head branch can't be moved, so adopting one means
+re-creating it on the fixed branch:
+
+```bash
+git checkout -B chore/architecture-review origin/chore/architecture-review-<newest-date>
+git rebase origin/main
+```
+
+Carry on from there as above, push, and open **one** new PR from `chore/architecture-review`. Then
+close every dated PR — including the one you just adopted — each with a comment pointing at the
+replacement, and delete their branches. Don't hand-merge the others' contents: anything in them that
+is still true comes back out of this run's own review, and anything that doesn't was stale.
 
 ## Step 1 — Read the architecture documentation
 
