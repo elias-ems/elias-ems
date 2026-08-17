@@ -266,14 +266,14 @@ describe("planNetZero", () => {
     expect(plan.decisions[1].setpointW).toBe(-800);
   });
 
-  it("says there is nothing to steer when no battery has a target", () => {
+  it("says there is nothing to command when no battery is steered", () => {
     const plan = planNetZero({
       gridPowerW: 800,
       batteries: [battery({ steerable: false })],
     });
 
     expect(plan.targetBatteryW).toBeNull();
-    expect(plan.summary).toContain("nothing to steer");
+    expect(plan.summary).toContain("nothing to command");
   });
 
   it("caps a discharge at what the inverter can deliver", () => {

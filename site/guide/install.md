@@ -61,10 +61,11 @@ field existed reads as unsteered after the upgrade and stays that way until you
 fill it in.
 
 That includes the move to setpoint **events**: batteries that used to name a
-"Target power" entity come across as watched, not steered. Give them a [control
-key](/guide/configure#the-control-key-watched-vs-steered) and an
-[automation](/guide/battery-control#connecting-the-event-to-your-battery), then
-switch control back on.
+"Target power" entity come across as watched, not steered. Write the
+[automation](/guide/battery-control#connecting-the-event-to-your-battery) that
+listens for the battery's event, tick [**Steer this
+battery**](/guide/configure#watched-vs-steered-and-the-event-named-after-the-title),
+then switch control back on.
 :::
 
 ## Uninstalling
@@ -72,8 +73,8 @@ switch control back on.
 Stop the add-on and click **Uninstall**. Two things worth knowing:
 
 - **Stopping the add-on tells every steered battery to stop.** Switching control
-  off, and shutting the add-on down cleanly, both publish 0 W for each battery
-  that has a control key, flagged `released: true` so your automation can put an
+  off, and shutting the add-on down cleanly, both publish 0 W for each steered
+  battery, flagged `released: true` so your automation can put an
   inverter back on self-consumption rather than leaving it forced at 0 W. That
   last step only happens if your automation does it. And nothing is published at
   all if the container is killed outright or the power goes, so a battery can be

@@ -43,7 +43,7 @@ beforeAll(async () => {
         energyEntityId: "sensor.battery_energy_total",
         powerEntityId: "sensor.battery_power",
         socEntityId: "sensor.battery_state_of_charge",
-        controlKey: "home_battery",
+        steered: true,
       },
     ]),
     // One second, so the assertions below don't have to wait on a real clock.

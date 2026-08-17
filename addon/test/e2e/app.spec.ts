@@ -146,10 +146,11 @@ test("battery control can be configured, enabled, and watched deciding", async (
   await suggestion("sensor\\.battery_power\\b").click();
   await page.getByLabel(/^Charge/).fill("state_of_charge");
   await suggestion("sensor\\.battery_state_of_charge\\b").click();
-  // Control cannot be switched on without one: it is the name this battery's
-  // setpoints go out under, and an automation listening for that name is what
-  // turns them into something the hardware hears.
-  await page.getByLabel(/^Control key/).fill("home_battery");
+  // Control cannot be switched on unless something is steered. The event this
+  // battery's setpoints go out on is named after the title typed above, and
+  // the form says so while it is being typed.
+  await expect(page.getByText("elias_ems_home_battery_target")).toBeVisible();
+  await page.getByLabel("Steer this battery").check();
   await page.getByRole("button", { name: "Add", exact: true }).click();
 
   await expect(

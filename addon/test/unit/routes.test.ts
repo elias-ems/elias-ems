@@ -39,7 +39,8 @@ const postedBattery = {
   energyEntityId: "sensor.battery_energy_total",
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
-  controlKey: "home_battery",
+  // What a ticked checkbox posts, rather than the boolean it becomes.
+  steered: "on",
 };
 
 /** The same battery as it should end up on disk, with real numbers. */
@@ -48,6 +49,7 @@ const storedBattery = {
   capacityKwh: 10,
   minChargePercent: 10,
   maxChargePercent: 90,
+  steered: true,
   maxChargePowerW: null,
   maxDischargePowerW: null,
 };
@@ -506,6 +508,45 @@ describe("POST /settings", () => {
     ]);
   });
 
+  it("refuses a second battery whose name makes the same event", async () => {
+    // "Home battery" and "home-battery" are different titles and one event
+    // type. Both batteries would take each other's setpoints, and nothing
+    // anywhere would report a problem.
+    await post({ intent: "battery-add", ...postedBattery });
+
+    const result = await post({
+      intent: "battery-add",
+      ...postedBattery,
+      title: "home-battery",
+    });
+
+    const { payload, status } = failure(result);
+    expect(status).toBe(400);
+    expect(payload).toMatchObject({
+      section: "battery",
+      errors: { title: expect.stringContaining("same event") },
+    });
+
+    const { listBatteries } = await import("../../app/lib/batteries.server");
+    expect(await listBatteries()).toHaveLength(1);
+  });
+
+  it("lets a battery keep its own name across an edit", async () => {
+    // The clash check has to skip the record being edited, or changing a
+    // battery's capacity would fail on its own title.
+    const { addBattery } = await import("../../app/lib/batteries.server");
+    const battery = await addBattery(storedBattery);
+
+    const result = await post({
+      intent: "battery-update",
+      id: battery.id,
+      ...postedBattery,
+      capacityKwh: "15",
+    });
+
+    expect(result).toEqual({ section: "battery", ok: true });
+  });
+
   it("points a rejected edit at the row being edited, not at the add form", async () => {
     const { addBattery } = await import("../../app/lib/batteries.server");
     const battery = await addBattery(storedBattery);
@@ -585,11 +626,11 @@ describe("POST /settings", () => {
     }
   });
 
-  it("refuses to enable control when no battery has a control key", async () => {
+  it("refuses to enable control when no battery is steered", async () => {
     // A loop that decides correctly and commands nothing is indistinguishable
     // from a broken one, so this is a rejection rather than a warning.
     const { addBattery } = await import("../../app/lib/batteries.server");
-    await addBattery({ ...storedBattery, controlKey: "" });
+    await addBattery({ ...storedBattery, steered: false });
 
     const result = await post({
       intent: "control-save",
@@ -602,7 +643,7 @@ describe("POST /settings", () => {
     expect(status).toBe(400);
     expect(payload).toMatchObject({
       section: "control",
-      errors: { enabled: expect.stringContaining("control key") },
+      errors: { enabled: expect.stringContaining("steered") },
     });
 
     const { readControlConfig } = await import(
@@ -611,11 +652,11 @@ describe("POST /settings", () => {
     expect((await readControlConfig()).enabled).toBe(false);
   });
 
-  it("still lets control be switched off with no control key", async () => {
+  it("still lets control be switched off with nothing steered", async () => {
     // The way out of the state above: refusing this too would leave a stored
     // `enabled: true` with no way to clear it from the form.
     const { addBattery } = await import("../../app/lib/batteries.server");
-    await addBattery({ ...storedBattery, controlKey: "" });
+    await addBattery({ ...storedBattery, steered: false });
 
     const result = await post({
       intent: "control-save",
@@ -628,7 +669,7 @@ describe("POST /settings", () => {
 
   it("enables control when only one of several batteries is steerable", async () => {
     const { addBattery } = await import("../../app/lib/batteries.server");
-    await addBattery({ ...storedBattery, controlKey: "" });
+    await addBattery({ ...storedBattery, steered: false });
     await addBattery(storedBattery);
 
     const { loop } = await loadSettings();

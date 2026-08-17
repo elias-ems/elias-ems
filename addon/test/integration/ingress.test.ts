@@ -19,7 +19,7 @@ let html: string;
 /** Every setpoint the add-on has published, as an automation would see it. */
 function setpointEvents(): Array<Record<string, unknown>> {
   return stack.ha.events
-    .filter((event) => event.eventType === "elias_ems_setpoint")
+    .filter((event) => event.eventType === "elias_ems_home_battery_target")
     .map((event) => event.data as Record<string, unknown>);
 }
 
@@ -185,9 +185,9 @@ describe("battery control", () => {
       energyEntityId: "sensor.battery_energy_total",
       powerEntityId: "sensor.battery_power",
       socEntityId: "sensor.battery_state_of_charge",
-      // Control refuses to switch on without one, and it is the name the
-      // setpoint event goes out under.
-      controlKey: "home_battery",
+      // Control refuses to switch on without one, and the title is what the
+      // setpoint event is named after.
+      steered: "on",
     });
 
     expect(await messages()).toEqual([]);
@@ -215,7 +215,7 @@ describe("battery control", () => {
       .toBeGreaterThan(0);
 
     expect(setpointEvents()[0]).toMatchObject({
-      key: "home_battery",
+      slug: "home_battery",
       title: "Home battery",
       power_w: -842,
       discharge_w: 842,

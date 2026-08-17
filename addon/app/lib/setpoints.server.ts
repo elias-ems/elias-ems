@@ -26,16 +26,8 @@
  * The cost is that the loop can no longer read back what it wrote, which is
  * what `PUBLISH_DEADBAND_W` and `REPUBLISH_MS` below are about.
  */
+import { setpointEventType } from "./batteries";
 import { fireHaEvent } from "./ha.server";
-
-/**
- * The event every setpoint goes out on.
- *
- * One type for all batteries, with the battery named in the payload, so a
- * single automation can serve a house with several — and so that an automation
- * that only cares about one can still say which by matching on `key`.
- */
-export const SETPOINT_EVENT = "elias_ems_setpoint";
 
 /**
  * How far the setpoint may move before it is worth saying again.
@@ -79,8 +71,8 @@ export type PublishStatus =
 export type SetpointPublish = {
   batteryId: string;
   title: string;
-  /** What the automation matches on. */
-  key: string;
+  /** The battery's slug — the event type is built from it. */
+  slug: string;
   /** What was asked for, in whole watts. Null when nothing was. */
   valueW: number | null;
   status: PublishStatus;
@@ -92,8 +84,8 @@ export type SetpointPublish = {
 export type SetpointTarget = {
   batteryId: string;
   title: string;
-  /** The battery's control key — the name it goes out under. */
-  key: string;
+  /** The battery's slug, from its title: `elias_ems_<slug>_target`. */
+  slug: string;
   /** What the strategy wants commanded, or null to say nothing at all. */
   commandW: number | null;
   /**
@@ -105,9 +97,9 @@ export type SetpointTarget = {
 };
 
 /**
- * What we last put on the bus for each battery, keyed by battery id rather
- * than by control key so that renaming the key doesn't silently inherit the
- * previous battery's history.
+ * What we last put on the bus for each battery, keyed by battery id rather than
+ * by slug so that renaming a battery doesn't inherit whatever the new name's
+ * history happened to be.
  *
  * Module-level state for the same reason the loop is: the server build is
  * loaded once per process. It is deliberately not persisted — a restart is
@@ -157,7 +149,7 @@ async function publishOne(target: SetpointTarget): Promise<SetpointPublish> {
   const base = {
     batteryId: target.batteryId,
     title: target.title,
-    key: target.key,
+    slug: target.slug,
   };
 
   if (target.commandW === null) {
@@ -175,8 +167,13 @@ async function publishOne(target: SetpointTarget): Promise<SetpointPublish> {
   }
 
   try {
-    await fireHaEvent(SETPOINT_EVENT, {
-      key: target.key,
+    // The battery is named by the event type rather than only inside the
+    // payload, so an automation's trigger says which battery it is for in the
+    // one line that is hardest to get wrong. `slug` is repeated in the data
+    // for the automation that listens to several types at once and has to
+    // branch on which arrived.
+    await fireHaEvent(setpointEventType(target.slug), {
+      slug: target.slug,
       battery_id: target.batteryId,
       title: target.title,
       // Signed, in the add-on's own convention: positive charging, negative

@@ -44,14 +44,14 @@ and Home Assistant does not, so they are typed in; the rest are entities.
 
 | Field | What it wants |
 | --- | --- |
-| **Title** | A name, e.g. "Home battery". It is what the diagnostics log calls it. |
+| **Title** | A name, e.g. "Home battery". It is what the diagnostics log calls it — **and what its event is named after**, see below. |
 | **Capacity (kWh)** | Usable capacity. Must be above 0. |
 | **Minimum charge (%)** | Control will not discharge below this. |
 | **Maximum charge (%)** | Control will not charge above this. |
 | **Energy (kWh)** | Cumulative energy counter. |
 | **Power (W)** | Current power — **positive charging, negative discharging**. |
 | **Charge — state of charge (%)** | The battery's SoC. |
-| **Control key** — optional | The name this battery's setpoints go out under, for your automation to match on. |
+| **Steer this battery** | Whether Elias ems publishes setpoints for it at all. |
 | **Maximum charge power (W)** — optional | Cap on charge power. |
 | **Maximum discharge power (W)** — optional | Cap on discharge power, as a **positive** number. |
 
@@ -67,35 +67,54 @@ The minimum and maximum bound what *control* may use, not what the battery is
 capable of. Setting 20 and 90 does not stop the battery's own logic charging to
 100 — it stops Elias ems asking it to.
 
-### The control key: watched vs. steered
-
-**Control key** is what turns a battery from something watched into something
-steered. Leave it empty and the battery still appears on the dashboard, still
-counts as part of the house, and simply never gets told what to do — a supported
-state, not an unfinished one.
+### Watched vs. steered, and the event named after the title
 
 Elias ems does not write to your battery. Every setpoint goes out as a Home
-Assistant event called `elias_ems_setpoint`, and **an automation you write turns
-that into whatever your inverter wants**. The control key is the name this
-battery goes out under, so that automation can say which battery it is for.
+Assistant **event**, and an automation you write turns that into whatever your
+inverter wants.
 
-Anything you can type works — `home_battery`, `garage`, `victron` — as long as
-the automation matches it exactly. Pick it before you write the automation and
-leave it alone afterwards: renaming it detaches the two silently.
+Each battery gets **its own event type, named after its title**:
+
+| Title | Event your automation listens for |
+| --- | --- |
+| Home battery | `elias_ems_home_battery_target` |
+| Garage | `elias_ems_garage_target` |
+| Réserve #2 | `elias_ems_reserve_2_target` |
+
+The name is lowercased, accents are folded, and anything that isn't a letter or
+digit becomes a single `_`. You don't type it — the Settings page shows it under
+the Title field as you type, and that is the string to paste into your
+automation.
 
 [Writing that automation is its own page →](/guide/battery-control#connecting-the-event-to-your-battery)
 
-**Battery control cannot be switched on until at least one battery has a control
-key.** The checkbox stays disabled until then. The rule is "at least one", not
-"all" — a house can reasonably have one steerable battery and one that only
-reports.
+**Steer this battery** is what decides whether any of that happens. Leave it
+unticked and the battery still appears on the dashboard, still counts as part of
+the house, and simply never gets told what to do — a supported state, not an
+unfinished one. **Control cannot be switched on until at least one battery is
+steered**, and the checkbox stays disabled until then. The rule is "at least
+one", not "all" — a house can reasonably have one steered battery and one that
+only reports.
+
+::: danger Renaming a battery renames its event
+Home Assistant has no idea the two event types were related, so an automation
+listening for the old name **silently stops hearing that battery** — no error,
+no warning, just a battery that quietly stops being steered.
+
+The edit form spells out both names while you type the new title. Update the
+automation's trigger to match, or rename the battery back.
+
+Two batteries whose titles produce the same name are refused for the same
+reason: "Home battery" and "home-battery" would share one event and take each
+other's setpoints.
+:::
 
 ::: warning Upgrading from a version with a "Target power" field
 Earlier versions wrote the setpoint straight to an entity. Batteries configured
 that way come across as **watched, not steered**, and the target entity is
 forgotten — nothing is listening for the new event until you write the
 automation, so carrying them across as steered would be a claim that isn't true.
-Fill in a control key, write the automation, then switch control back on.
+Write the automation, tick **Steer this battery**, then switch control back on.
 :::
 
 ### Power limits
@@ -128,7 +147,7 @@ yet.
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| **Enabled** | off | Disabled until a battery has a control key. |
+| **Enabled** | off | Disabled until at least one battery is steered. |
 | **Strategy** | Net-zero energy | The only one so far. |
 | **Loop interval (seconds)** | 5 | 1–3600. |
 
@@ -149,9 +168,10 @@ number and its direction match reality, each battery's decision makes sense for
 its state of charge, and each tick that decided something ends in a `Published:`
 line.
 
-Then check the other end. Developer Tools → **Events** → listen to
-`elias_ems_setpoint` shows exactly what your automation is being handed, and the
-automation's own trace shows what it did with it.
+Then check the other end. Developer Tools → **Events** → listen to the
+battery's event name (`elias_ems_home_battery_target`, as shown on the Settings
+page) to see exactly what your automation is being handed, and the automation's
+own trace for what it did with it.
 
 If the log looks right but nothing physically happens, read
 [Battery control](/guide/battery-control#connecting-the-event-to-your-battery) —

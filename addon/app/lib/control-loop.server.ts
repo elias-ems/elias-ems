@@ -17,7 +17,12 @@
  * statement. (Under Vite's dev server a hot reload can drop the module and with
  * it the log; `npm run start:ingress` is the stack to watch it on.)
  */
-import { type Battery, isSteerable, resolvePowerLimits } from "./batteries";
+import {
+  type Battery,
+  batterySlug,
+  isSteerable,
+  resolvePowerLimits,
+} from "./batteries";
 import { listBatteries } from "./batteries.server";
 import type { ControlConfig, ControlLoopStatus } from "./control";
 import { readControlConfig } from "./control-config.server";
@@ -130,8 +135,8 @@ async function readSnapshots(): Promise<{
   batteries: BatterySnapshot[];
   gridConfigured: boolean;
   provenance: string;
-  /** Each steerable battery's control key, by battery id, ready to publish under. */
-  keys: Map<string, string>;
+  /** Each steerable battery's slug, by battery id, ready to publish under. */
+  slugs: Map<string, string>;
 }> {
   const config = await readTickConfig();
   const { grid, batteries } = config;
@@ -170,10 +175,10 @@ async function readSnapshots(): Promise<{
       ...resolvePowerLimits(battery),
     })),
     provenance: describeSource(readings),
-    keys: new Map(
+    slugs: new Map(
       batteries
         .filter(isSteerable)
-        .map((battery) => [battery.id, battery.controlKey]),
+        .map((battery) => [battery.id, batterySlug(battery)]),
     ),
   };
 }
@@ -225,13 +230,13 @@ export async function runControlTick(): Promise<void> {
   // decided and a line saying what was done cannot end up in the other order.
   const publishes = await publishSetpoints(
     plan.decisions.flatMap((decision) => {
-      const key = inputs.keys.get(decision.batteryId);
-      if (!key) return [];
+      const slug = inputs.slugs.get(decision.batteryId);
+      if (!slug) return [];
       return [
         {
           batteryId: decision.batteryId,
           title: decision.title,
-          key,
+          slug,
           commandW: decision.commandW,
         },
       ];
@@ -287,7 +292,7 @@ export async function releaseBatteries(): Promise<void> {
     batteries.map((battery) => ({
       batteryId: battery.id,
       title: battery.title,
-      key: battery.controlKey,
+      slug: batterySlug(battery),
       commandW: 0,
       // Past the deadband: letting go is worth one event even when we think
       // the battery is already at 0, because what we think is the very thing

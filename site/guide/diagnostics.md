@@ -74,8 +74,8 @@ odd and want to report it — **download it before restarting anything.**
 - the downloaded diagnostics file, covering the stretch where the problem
   happened;
 - what you expected the battery to do and what it did instead;
-- the entity ids you configured, and each battery's control key;
-- the automation that listens for `elias_ems_setpoint`, and one of its traces;
+- the entity ids you configured, and each battery's title and event name;
+- the automation that listens for that event, and one of its traces;
 - your inverter or battery make and model, since whether a setpoint is honoured
   at all is brand-specific.
 

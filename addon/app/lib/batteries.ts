@@ -1,8 +1,8 @@
 /**
  * The configured batteries. Capacity and the charge window are things the
  * installer knows and Home Assistant does not, so they are typed in; the three
- * live values come from HA entities, and `controlKey` names the battery in the
- * setpoint event an automation listens for.
+ * live values come from HA entities, and the title is what names the battery on
+ * Home Assistant's event bus — see `setpointEventType`.
  *
  * Both power entities are read with the sign convention **positive = charging,
  * negative = discharging**. That is a decision rather than an observation —
@@ -28,20 +28,17 @@ export type BatteryFields = {
   /** State of charge, in percent. */
   socEntityId: string;
   /**
-   * How this battery is named in the setpoint event, and by that the one thing
-   * that decides whether it is steered at all.
+   * Whether the add-on may command this battery.
    *
-   * The add-on does not write to the battery itself: it fires one Home
-   * Assistant event per setpoint and an automation turns that into whatever
-   * the hardware wants. This key is what the automation's event trigger
-   * matches on, so it is chosen by whoever writes the automation rather than
-   * derived from anything — a generated record id would be unreadable in YAML,
-   * and the title is renamed the moment somebody tidies up the settings page.
+   * False means watched but not steered: it still appears on the dashboard and
+   * still counts as part of the house, and no setpoint is ever published for
+   * it. A supported state rather than an unfinished one — a house can
+   * reasonably have one battery under control and one that only reports.
    *
-   * Optional. Empty means this battery is watched but not steered, which is
-   * what every record saved before this field existed becomes.
+   * Defaults to false for anything already on disk, so no existing
+   * installation starts being steered by an upgrade.
    */
-  controlKey: string;
+  steered: boolean;
   /**
    * Most this battery may be asked to charge at, in W, or null for no limit.
    *
@@ -103,12 +100,12 @@ function toOptionalPowerW(value: unknown): number | null {
  * when they are missing, so an installation that predates them keeps behaving
  * exactly as it did.
  *
- * A record from the version that wrote setpoints to an entity lands here too,
- * carrying a `targetPowerEntityId` and no `controlKey`, and comes out
- * unsteered. That is the honest reading rather than a lossy one: the setpoint
- * now goes out as an event that nothing is listening for until an automation
- * exists, so keeping the battery "steered" through the upgrade would mean
- * claiming to command hardware that has stopped hearing us.
+ * A record from the version that wrote setpoints to a target entity lands here
+ * too, and comes out unsteered — `steered` is absent, so it reads as false.
+ * That is the honest reading rather than a lossy one: the setpoint now goes out
+ * as an event that nothing is listening for until an automation exists, so
+ * keeping the battery steered through the upgrade would mean claiming to
+ * command hardware that has stopped hearing us.
  */
 export function normalizeBattery(battery: Battery): Battery {
   return {
@@ -123,7 +120,7 @@ export function normalizeBattery(battery: Battery): Battery {
       battery.maxChargePercent,
       BATTERY_DEFAULTS.maxChargePercent,
     ),
-    controlKey: battery.controlKey?.trim() ?? "",
+    steered: battery.steered === true,
     maxChargePowerW: toOptionalPowerW(battery.maxChargePowerW),
     maxDischargePowerW: toOptionalPowerW(battery.maxDischargePowerW),
   };
@@ -136,11 +133,68 @@ export function normalizeBattery(battery: Battery): Battery {
  * can only watch, so it is a named function rather than a truthiness check
  * spelled out at each of the three call sites that need it.
  */
-export function isSteerable(
-  battery: Pick<BatteryFields, "controlKey">,
-): boolean {
-  return Boolean(battery.controlKey?.trim());
+export function isSteerable(battery: Pick<BatteryFields, "steered">): boolean {
+  return battery.steered === true;
 }
+
+/**
+ * The battery's title reduced to something that can be part of a Home
+ * Assistant event type: lowercase, accents folded away, and every run of
+ * anything else turned into a single underscore.
+ *
+ * "Home battery" becomes `home_battery`, and so does "Home  Battery!" — the
+ * point is that the name in an automation is predictable from the name on the
+ * settings page, not that every distinct title survives intact. Accents are
+ * folded rather than dropped so that "Réserve" is `reserve` instead of `r_serve`.
+ *
+ * Empty when the title has no letters or digits at all. Callers decide what to
+ * do about that: the form rejects such a title, and `batterySlug` falls back to
+ * the record id for anything a hand-edited file gets past it.
+ */
+export function slugifyTitle(title: string): string {
+  return title
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/** The battery's slug, with a last-resort fallback so it is never empty. */
+export function batterySlug(battery: Pick<Battery, "id" | "title">): string {
+  return slugifyTitle(battery.title) || `battery_${slugifyTitle(battery.id)}`;
+}
+
+/**
+ * The Home Assistant event type this battery's setpoints go out on.
+ *
+ * One type per battery rather than one shared type with the battery named in
+ * the payload: an automation's event trigger then says which battery it is for
+ * in the line that matters most — `event_type: elias_ems_home_battery_target`
+ * reads as what it is, where a shared type plus an `event_data` filter puts the
+ * identity somewhere easy to leave off by mistake, in which case the automation
+ * quietly drives every battery in the house from one battery's setpoint.
+ *
+ * The cost is that renaming a battery renames its event. The settings page says
+ * so while the rename is being typed, because nothing downstream can: Home
+ * Assistant does not know that two event types were ever related, and an
+ * automation listening for the old one simply stops hearing anything.
+ */
+export function setpointEventType(slug: string): string {
+  return `elias_ems_${slug}_target`;
+}
+
+/**
+ * Why two batteries may not have names that slugify the same way.
+ *
+ * "Home battery" and "home-battery" are different titles and the same event
+ * type, which would leave both batteries taking each other's setpoints with
+ * nothing anywhere reporting a problem. Checked in the settings action rather
+ * than in `parseBattery`, because it needs the other batteries and this module
+ * is pure; the constant lives here so the message cannot drift from the rule.
+ */
+export const DUPLICATE_SLUG_ERROR =
+  "Another battery already has this name — both would publish to the same event.";
 
 /** What a battery may be asked for. */
 export type PowerLimits = {
@@ -207,8 +261,9 @@ export function parseBattery(
     formData.get("energyEntityId")?.toString().trim() ?? "";
   const powerEntityId = formData.get("powerEntityId")?.toString().trim() ?? "";
   const socEntityId = formData.get("socEntityId")?.toString().trim() ?? "";
-  // Optional: a battery with no control key is watched but not steered.
-  const controlKey = formData.get("controlKey")?.toString().trim() ?? "";
+  // An unchecked checkbox sends nothing at all, which is what makes the absent
+  // case mean "watched, not steered".
+  const steered = formData.get("steered") === "on";
   const capacityKwh = readNumber(formData, "capacityKwh");
   const minChargePercent = readNumber(formData, "minChargePercent");
   const maxChargePercent = readNumber(formData, "maxChargePercent");
@@ -216,7 +271,16 @@ export function parseBattery(
   const maxDischargePowerW = readOptionalPowerW(formData, "maxDischargePowerW");
 
   const errors: BatteryErrors = {};
-  if (!title) errors.title = "Give this battery a name.";
+  if (!title) {
+    errors.title = "Give this battery a name.";
+  } else if (slugifyTitle(title) === "") {
+    // The title is what the event type is built from, so a name made entirely
+    // of punctuation or emoji has nothing to build one out of. Rejected here
+    // rather than papered over with the record id, which would leave the
+    // settings page showing a name and the automation needing another.
+    errors.title =
+      "Give this battery a name with at least one letter or digit.";
+  }
   if (!energyEntityId) errors.energyEntityId = "Pick the energy entity.";
   if (!powerEntityId) errors.powerEntityId = "Pick the power entity.";
   if (!socEntityId) errors.socEntityId = "Pick the state-of-charge entity.";
@@ -270,7 +334,7 @@ export function parseBattery(
       energyEntityId,
       powerEntityId,
       socEntityId,
-      controlKey,
+      steered,
       // Both are known good here: an unparseable one is an error above.
       maxChargePowerW: maxChargePowerW.ok ? maxChargePowerW.value : null,
       maxDischargePowerW: maxDischargePowerW.ok

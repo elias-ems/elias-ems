@@ -49,7 +49,7 @@ beforeAll(async () => {
     energyEntityId: "sensor.battery_energy_total",
     powerEntityId: "sensor.battery_power",
     socEntityId: "sensor.battery_state_of_charge",
-    controlKey: "",
+    steered: false,
     maxChargePowerW: null,
     maxDischargePowerW: null,
   });

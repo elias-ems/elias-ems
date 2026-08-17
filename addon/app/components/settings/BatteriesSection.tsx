@@ -1,9 +1,17 @@
+import { useId } from "react";
 import type { Battery, BatteryErrors } from "../../lib/batteries";
-import { BATTERY_DEFAULTS } from "../../lib/batteries";
+import {
+  BATTERY_DEFAULTS,
+  batterySlug,
+  isSteerable,
+  setpointEventType,
+} from "../../lib/batteries";
 import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
 import EntityAutocomplete from "../EntityAutocomplete";
 import Field from "../Field";
+import { hintStyle, labelStyle } from "../form";
+import BatteryNameField from "./BatteryNameField";
 import EditableList from "./EditableList";
 import Section from "./Section";
 import { useSectionEditor } from "./useSectionEditor";
@@ -24,7 +32,7 @@ export default function BatteriesSection({
   return (
     <Section
       title="Batteries"
-      description="Capacity, the charge window and the control key are typed in; the readings come from Home Assistant."
+      description="Capacity and the charge window are typed in; the readings come from Home Assistant. A steered battery's setpoints go out as an event named after its title."
       add={{
         label: "Add battery",
         open: editor.showAdd,
@@ -56,12 +64,13 @@ export default function BatteriesSection({
               Charge: <code>{battery.socEntityId}</code>
             </div>
             <div style={{ fontSize: "0.875rem" }}>
-              {battery.controlKey ? (
+              {isSteerable(battery) ? (
                 <>
-                  Control key: <code>{battery.controlKey}</code>
+                  Steered —{" "}
+                  <code>{setpointEventType(batterySlug(battery))}</code>
                 </>
               ) : (
-                "Control key: not set — watched, not steered"
+                "Not steered — watched only"
               )}
             </div>
           </>
@@ -70,11 +79,9 @@ export default function BatteriesSection({
           const errors = errorsFor(battery);
           return (
             <>
-              <Field
-                name="title"
-                label="Title"
-                placeholder="e.g. Home battery"
+              <BatteryNameField
                 defaultValue={battery?.title}
+                savedTitle={battery?.title}
                 error={errors.title}
               />
               <Field
@@ -134,14 +141,7 @@ export default function BatteriesSection({
                 defaultValue={battery?.socEntityId}
                 error={errors.socEntityId}
               />
-              <Field
-                name="controlKey"
-                label="Control key — optional"
-                placeholder="e.g. home_battery"
-                defaultValue={battery?.controlKey}
-                error={errors.controlKey}
-                hint="The name this battery goes out under in the elias_ems_setpoint event, for your automation to match on. Leave empty to watch this battery without steering it."
-              />
+              <SteeredField defaultChecked={battery?.steered ?? true} />
               <Field
                 name="maxChargePowerW"
                 label="Maximum charge power (W) — optional"
@@ -169,5 +169,40 @@ export default function BatteriesSection({
         }}
       />
     </Section>
+  );
+}
+
+/**
+ * Whether this battery is steered at all — the one thing that decides if a
+ * setpoint is ever published for it. A checkbox rather than the presence of
+ * some other field, so that "watched, not steered" is something chosen rather
+ * than something arrived at by leaving a box empty.
+ *
+ * Its own component only because a checkbox is the one control the shared
+ * `Field` does not render: the label goes beside the input rather than above
+ * it, and it has no value to carry.
+ */
+function SteeredField({ defaultChecked }: { defaultChecked: boolean }) {
+  const inputId = useId();
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <input
+          id={inputId}
+          type="checkbox"
+          name="steered"
+          defaultChecked={defaultChecked}
+        />
+        <label htmlFor={inputId} style={labelStyle}>
+          Steer this battery
+        </label>
+      </div>
+      <p style={hintStyle}>
+        Publishes a setpoint event for it whenever control decides something.
+        Leave this off to watch the battery without steering it — it still
+        appears on the dashboard and is simply left alone.
+      </p>
+    </div>
   );
 }
