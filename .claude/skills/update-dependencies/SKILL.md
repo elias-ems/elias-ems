@@ -19,16 +19,67 @@ from one directory or the other:
 Do both in one pass and one PR — `site/` has a single dependency and skipping it
 is how it drifts.
 
-## 1. Start clean
+**At most one dependency PR is open at a time**, on the long-lived branch
+`chore/update-dependencies` — no date in the name. A dated branch per run opens a
+second PR beside the first, and two open PRs both rewriting `package-lock.json`
+conflict with each other by construction: whichever merges first leaves the other
+un-mergeable.
 
-Confirm the working tree is clean and branch from an up-to-date `main`:
+## 1. Start clean, or pick up the open PR
+
+Confirm the working tree is clean — if it is dirty, stop and report it rather than
+sweeping unrelated changes into the PR. Then fetch and look for an open
+dependency PR:
 
 ```bash
-git switch main && git pull && git switch -c chore/update-dependencies-$(date +%Y-%m-%d)
+git fetch origin
+gh pr list --state open --json number,url,title,headRefName \
+  --jq '[.[] | select(.headRefName | startswith("chore/update-dependencies"))]'
 ```
 
-If the tree is dirty, stop and report it rather than sweeping unrelated changes
-into the PR.
+Match on the **prefix** so the dated branches that predate this rule are found
+too. `gh` is pinned in [mise.toml](../../../mise.toml) but is not installed
+everywhere this runs — a cloud routine has the GitHub MCP tools instead
+(`list_pull_requests`, `create_pull_request`, `update_pull_request`). Use
+whichever is available.
+
+**No PR open** — branch from current `main`:
+
+```bash
+git checkout -B chore/update-dependencies origin/main
+```
+
+`-B` is deliberate: a branch of that name can outlive a merged or closed PR, and
+reusing its commits would resurrect an update that has already been dealt with.
+If the remote branch still exists, the push in step 6 needs `--force-with-lease`.
+
+**A PR open** — rebase it onto `main` and re-derive the update on top:
+
+```bash
+git checkout -B chore/update-dependencies origin/chore/update-dependencies
+git rebase origin/main
+```
+
+A lockfile has no meaningful three-way merge, so if `main` has touched one, expect
+the conflict and do **not** hand-resolve it. Take main's copies and let the rest of
+this skill regenerate the bump:
+
+```bash
+git checkout origin/main -- addon/package.json addon/package-lock.json
+git checkout origin/main -- site/package.json site/package-lock.json
+git add -A && git rebase --continue   # --skip if the commit is now empty
+```
+
+That leaves the branch at main's dependency state, which is the right base: steps
+2–5 then produce one update against *current* `main` rather than a stack of bumps
+computed against a base that moved. Whatever the earlier run held back is
+re-decided this run, not inherited.
+
+If the open PR is on a **dated branch** (or several are open), re-create it on the
+fixed name — a PR's head branch can't be moved:
+`git checkout -B chore/update-dependencies origin/chore/update-dependencies-<newest-date>`,
+carry on as above, open one new PR, then close the dated ones with a comment
+pointing at it and delete their branches.
 
 ## 2. See what is outdated
 
@@ -158,7 +209,7 @@ new finding that is **not** dev-server-only — one that reaches the built outpu
 the build itself, or CI — is not covered by this exception and needs to be
 raised.
 
-## 6. Open the PR
+## 6. Create or update the PR
 
 Commit as a single Conventional Commit. Scope it to whichever projects actually
 moved:
@@ -167,9 +218,25 @@ moved:
 git commit -am "chore: update dependencies"
 ```
 
-Use `chore(addon):` or `chore(site):` when only one of them changed.
+Use `chore(addon):` or `chore(site):` when only one of them changed. On a rebased
+branch this run's work is a **new commit** — don't amend an earlier run's.
 
-Push and open the PR. The body should carry:
+Push:
+
+```bash
+git push -u origin chore/update-dependencies                     # fresh branch
+git push --force-with-lease -u origin chore/update-dependencies  # after a rebase
+```
+
+`--force-with-lease`, never a bare `--force`: it aborts rather than overwriting if
+someone pushed to the branch since the fetch. The force-push does mark existing
+review comments as outdated, so if the PR has feedback, address it in this run's
+commit and reply to the thread instead of rewriting silently underneath it.
+
+Then create the PR if none is open, or edit the open one's title and body in place
+(`gh pr edit`, or `update_pull_request`) — don't post a per-run comment. Either way
+the body describes the branch as it now stands against current `main`, rewritten
+rather than appended to:
 
 - The table of what moved, `name  old → new`, grouped by project.
 - **Majors held back**, if any, with their version jumps.
@@ -177,10 +244,16 @@ Push and open the PR. The body should carry:
 - Which verification commands passed, per project. Say plainly if any were
   skipped.
 
-If `gh` is unavailable, push the branch and hand back the compare URL:
-`https://github.com/elias-ems/elias-ems/compare/<branch>?expand=1`.
+If neither `gh` nor the MCP tools are available, push the branch and hand back the
+compare URL:
+`https://github.com/elias-ems/elias-ems/compare/chore/update-dependencies?expand=1`.
 
 ## Nothing to do
 
-If `npm outdated` is empty in both projects, do not open an empty PR. Delete the
-branch and report that everything is current.
+If `npm outdated` is empty in both projects, do not open an empty PR.
+
+- **No PR open** — delete the branch and report that everything is current.
+- **A PR open** — everything current usually means the branch's own bumps are
+  already in it; leave the PR alone. Push the rebase only if it changed something
+  the reviewer cares about: the PR conflicted with `main` and now doesn't, or the
+  regenerated lockfile differs. A weekly force-push that says nothing is noise.
