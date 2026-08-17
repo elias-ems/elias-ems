@@ -76,10 +76,10 @@ odd and want to report it — **download it before restarting anything.**
 - what you expected the battery to do and what it did instead;
 - the entity ids you configured, and each battery's title and event name;
 - the automation that listens for that event, and one of its traces;
-- your inverter or battery make and model, since whether a setpoint is honoured
+- your inverter or battery make and model, since whether a target is honoured
   at all is brand-specific.
 
-If the log shows a correct-looking setpoint and the battery ignores it, walk
+If the log shows a correct-looking target and the battery ignores it, walk
 [the log looks right but the battery does
 nothing](/guide/troubleshooting#the-log-looks-right-but-the-battery-does-nothing)
 first — it separates "never published" from "never acted on" in four steps.

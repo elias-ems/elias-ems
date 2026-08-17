@@ -89,8 +89,8 @@ function logged(fragment: string): boolean {
   return messages().some((message) => message.includes(fragment));
 }
 
-/** Every setpoint published so far, as [event type, watts] pairs, in order. */
-function setpointEvents(): Array<[string, unknown]> {
+/** Every target published so far, as [event type, watts] pairs, in order. */
+function targetEvents(): Array<[string, unknown]> {
   return ha.events.map((event) => [
     event.eventType,
     (event.data as { power_w?: unknown }).power_w,
@@ -183,18 +183,20 @@ describe("runControlTick", () => {
     expect(logged("state of charge unknown")).toBe(true);
   });
 
-  it("publishes the setpoint it decided on, under the battery's own event", async () => {
+  it("publishes the target it decided on, under the battery's own event", async () => {
     await addBattery(BATTERY);
 
     await runControlTick();
 
     // The fixture imports 842 W with the battery idle, so the decision is to
     // discharge 842 W.
-    expect(setpointEvents()).toEqual([["elias_ems_home_battery_target", -842]]);
+    expect(targetEvents()).toEqual([
+      ["elias_ems_home_battery_target_power", -842],
+    ]);
     expect(logged("Published: Home battery → -842 W")).toBe(true);
   });
 
-  it("does not publish again while the setpoint has not moved", async () => {
+  it("does not publish again while the target has not moved", async () => {
     await addBattery(BATTERY);
 
     await runControlTick();
@@ -203,11 +205,11 @@ describe("runControlTick", () => {
     // The second tick decides the same thing and finds nothing worth saying.
     // Without this the loop would fire an event every tick, and on the other
     // end of each one is an automation writing to real hardware.
-    expect(setpointEvents()).toHaveLength(1);
+    expect(targetEvents()).toHaveLength(1);
   });
 
   it("says nothing at all when the grid is inside the deadband", async () => {
-    // A hold reports the battery's *measured* power as its setpoint, which is
+    // A hold reports the battery's *measured* power as its target, which is
     // the right thing to show and the wrong thing to command: publishing a
     // measurement back would let sensor noise walk the commanded value around.
     ha.setState("sensor.grid_power", "4", { unit_of_measurement: "W" });
@@ -216,7 +218,7 @@ describe("runControlTick", () => {
     await runControlTick();
 
     expect(logged("deadband")).toBe(true);
-    expect(setpointEvents()).toEqual([]);
+    expect(targetEvents()).toEqual([]);
   });
 
   it("cancels a standing command when the grid sensor cannot be read", async () => {
@@ -230,10 +232,12 @@ describe("runControlTick", () => {
     await runControlTick();
 
     expect(logged("grid power sensor is not readable")).toBe(true);
-    expect(setpointEvents()).toEqual([["elias_ems_home_battery_target", 0]]);
+    expect(targetEvents()).toEqual([
+      ["elias_ems_home_battery_target_power", 0],
+    ]);
   });
 
-  it("caps the setpoint at the configured discharge limit", async () => {
+  it("caps the target at the configured discharge limit", async () => {
     // Settings are the only source of a limit now that nothing is written to
     // an entity, so a cap that never reached the strategy would be visible
     // here: the meter is asking for 842 W and the inverter can do 500 W.
@@ -331,8 +335,8 @@ describe("syncControlLoop", () => {
   });
 
   it("does not tick on an entity an automation moved on our behalf", async () => {
-    // Whatever the automation does with a setpoint on the way to the hardware
-    // is an output, not a reading. Watching it would mean every setpoint came
+    // Whatever the automation does with a target on the way to the hardware
+    // is an output, not a reading. Watching it would mean every target came
     // back as a change, provoked another tick and was published again — a
     // feedback loop with nothing damping it.
     await subscribe();
@@ -346,7 +350,7 @@ describe("syncControlLoop", () => {
     await pendingControlTick();
 
     const before = decisionTicks();
-    ha.setState("input_number.battery_setpoint", "-1200", {
+    ha.setState("input_number.battery_target", "-1200", {
       min: -5000,
       max: 5000,
     });
@@ -436,7 +440,7 @@ describe("syncControlLoop", () => {
 
   it("releases the batteries when control is switched off", async () => {
     // Switching control off has to leave the battery under its own control
-    // again. Stopping the loop while a forced setpoint stands would leave it
+    // again. Stopping the loop while a forced target stands would leave it
     // discharging at whatever it was last told, with nothing left running that
     // would ever change its mind.
     vi.useFakeTimers();
@@ -449,7 +453,9 @@ describe("syncControlLoop", () => {
     await syncControlLoop();
     await pendingControlTick();
 
-    expect(setpointEvents()).toEqual([["elias_ems_home_battery_target", -842]]);
+    expect(targetEvents()).toEqual([
+      ["elias_ems_home_battery_target_power", -842],
+    ]);
 
     await saveControlConfig({
       enabled: false,
@@ -458,9 +464,9 @@ describe("syncControlLoop", () => {
     });
     await syncControlLoop();
 
-    expect(setpointEvents()).toEqual([
-      ["elias_ems_home_battery_target", -842],
-      ["elias_ems_home_battery_target", 0],
+    expect(targetEvents()).toEqual([
+      ["elias_ems_home_battery_target_power", -842],
+      ["elias_ems_home_battery_target_power", 0],
     ]);
     expect(logged("Released the battery to 0 W")).toBe(true);
   });
@@ -482,7 +488,7 @@ describe("syncControlLoop", () => {
     await syncControlLoop();
     await pendingControlTick();
     // A balanced house, so the tick above published nothing at all.
-    expect(setpointEvents()).toEqual([]);
+    expect(targetEvents()).toEqual([]);
 
     await saveControlConfig({
       enabled: false,
@@ -491,7 +497,9 @@ describe("syncControlLoop", () => {
     });
     await syncControlLoop();
 
-    expect(setpointEvents()).toEqual([["elias_ems_home_battery_target", 0]]);
+    expect(targetEvents()).toEqual([
+      ["elias_ems_home_battery_target_power", 0],
+    ]);
     expect(ha.events.at(-1)?.data).toMatchObject({ released: true });
   });
 
@@ -581,7 +589,7 @@ describe("where a tick's numbers came from", () => {
     await subscribe();
     await addBattery(BATTERY);
 
-    // Reads only. The tick also *publishes* a setpoint, which is a round trip
+    // Reads only. The tick also *publishes* a target, which is a round trip
     // by definition and the one this exercise was never about avoiding.
     const stateReads = () =>
       ha.requests.filter((request) =>

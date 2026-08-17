@@ -2,13 +2,13 @@
  * The configured batteries. Capacity and the charge window are things the
  * installer knows and Home Assistant does not, so they are typed in; the three
  * live values come from HA entities, and the title is what names the battery on
- * Home Assistant's event bus — see `setpointEventType`.
+ * Home Assistant's event bus — see `targetEventType`.
  *
  * Both power entities are read with the sign convention **positive = charging,
  * negative = discharging**. That is a decision rather than an observation —
  * inverters disagree, and plenty publish the opposite — and it is the convention
  * the strategy's arithmetic and the log lines are written against, so it is also
- * the one the setpoint event carries.
+ * the one the target event carries.
  *
  * Pure; persistence lives in `batteries.server.ts`.
  */
@@ -31,7 +31,7 @@ export type BatteryFields = {
    * Whether the add-on may command this battery.
    *
    * False means watched but not steered: it still appears on the dashboard and
-   * still counts as part of the house, and no setpoint is ever published for
+   * still counts as part of the house, and no target is ever published for
    * it. A supported state rather than an unfinished one — a house can
    * reasonably have one battery under control and one that only reports.
    *
@@ -100,10 +100,10 @@ function toOptionalPowerW(value: unknown): number | null {
  * when they are missing, so an installation that predates them keeps behaving
  * exactly as it did.
  *
- * A record from the version that wrote setpoints to a target entity lands here
- * too, and comes out unsteered — `steered` is absent, so it reads as false.
- * That is the honest reading rather than a lossy one: the setpoint now goes out
- * as an event that nothing is listening for until an automation exists, so
+ * A record from the version that wrote to a target entity lands here too, and
+ * comes out unsteered — `steered` is absent, so it reads as false.
+ * That is the honest reading rather than a lossy one: the target power now goes
+ * out as an event that nothing is listening for until an automation exists, so
  * keeping the battery steered through the upgrade would mean claiming to
  * command hardware that has stopped hearing us.
  */
@@ -127,7 +127,7 @@ export function normalizeBattery(battery: Battery): Battery {
 }
 
 /**
- * Whether a setpoint can be published for this battery at all.
+ * Whether a target can be published for this battery at all.
  *
  * The one thing that separates a battery the strategy may command from one it
  * can only watch, so it is a named function rather than a truthiness check
@@ -166,29 +166,33 @@ export function batterySlug(battery: Pick<Battery, "id" | "title">): string {
 }
 
 /**
- * The Home Assistant event type this battery's setpoints go out on.
+ * The Home Assistant event type this battery's target power goes out on.
+ *
+ * `target_power` rather than a bare `target`, so that a battery growing a
+ * second kind of target later — a state of charge to aim for, once the
+ * price-aware strategies land — has somewhere to go that does not collide.
  *
  * One type per battery rather than one shared type with the battery named in
  * the payload: an automation's event trigger then says which battery it is for
- * in the line that matters most — `event_type: elias_ems_home_battery_target`
+ * in the line that matters most — `event_type: elias_ems_home_battery_target_power`
  * reads as what it is, where a shared type plus an `event_data` filter puts the
  * identity somewhere easy to leave off by mistake, in which case the automation
- * quietly drives every battery in the house from one battery's setpoint.
+ * quietly drives every battery in the house from one battery's target.
  *
  * The cost is that renaming a battery renames its event. The settings page says
  * so while the rename is being typed, because nothing downstream can: Home
  * Assistant does not know that two event types were ever related, and an
  * automation listening for the old one simply stops hearing anything.
  */
-export function setpointEventType(slug: string): string {
-  return `elias_ems_${slug}_target`;
+export function targetEventType(slug: string): string {
+  return `elias_ems_${slug}_target_power`;
 }
 
 /**
  * Why two batteries may not have names that slugify the same way.
  *
  * "Home battery" and "home-battery" are different titles and the same event
- * type, which would leave both batteries taking each other's setpoints with
+ * type, which would leave both batteries taking each other's targets with
  * nothing anywhere reporting a problem. Checked in the settings action rather
  * than in `parseBattery`, because it needs the other batteries and this module
  * is pure; the constant lives here so the message cannot drift from the rule.
@@ -207,7 +211,7 @@ export type PowerLimits = {
 /**
  * What the battery may actually be asked for.
  *
- * Settings are the only source. While the setpoint was written to an entity
+ * Settings are the only source. While the target was written to an entity
  * there was a second one — the `min`/`max` a `number` or `input_number`
  * publishes about itself — and an empty field fell back to it. An event has no
  * such range, and inventing one from the battery's capacity would be a guess

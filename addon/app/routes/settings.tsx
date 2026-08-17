@@ -96,7 +96,7 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       // Two batteries whose titles slugify the same way would publish to the
-      // same event type and take each other's setpoints, with nothing anywhere
+      // same event type and take each other's targets, with nothing anywhere
       // reporting a problem. Here rather than in `parseBattery` because it
       // needs every other battery, which a pure model module cannot read.
       const slug = slugifyTitle(parsed.fields.title);

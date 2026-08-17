@@ -16,10 +16,12 @@ import { startStack } from "../stack.js";
 let stack: Awaited<ReturnType<typeof startStack>>;
 let html: string;
 
-/** Every setpoint the add-on has published, as an automation would see it. */
-function setpointEvents(): Array<Record<string, unknown>> {
+/** Every target the add-on has published, as an automation would see it. */
+function targetEvents(): Array<Record<string, unknown>> {
   return stack.ha.events
-    .filter((event) => event.eventType === "elias_ems_home_battery_target")
+    .filter(
+      (event) => event.eventType === "elias_ems_home_battery_target_power",
+    )
     .map((event) => event.data as Record<string, unknown>);
 }
 
@@ -186,7 +188,7 @@ describe("battery control", () => {
       powerEntityId: "sensor.battery_power",
       socEntityId: "sensor.battery_state_of_charge",
       // Control refuses to switch on without one, and the title is what the
-      // setpoint event is named after.
+      // target event is named after.
       steered: "on",
     });
 
@@ -206,15 +208,15 @@ describe("battery control", () => {
       .toContainEqual(expect.stringContaining("Home battery: discharge at"));
   });
 
-  it("publishes the setpoint from inside the real server process", async () => {
+  it("publishes the target from inside the real server process", async () => {
     // The unit tests import the loop and call it. This is the one place the
-    // setpoint leaves the process that actually serves the add-on, over the
+    // target leaves the process that actually serves the add-on, over the
     // same Supervisor proxy it would use inside Home Assistant.
     await expect
-      .poll(() => setpointEvents().length, { timeout: 5_000 })
+      .poll(() => targetEvents().length, { timeout: 5_000 })
       .toBeGreaterThan(0);
 
-    expect(setpointEvents()[0]).toMatchObject({
+    expect(targetEvents()[0]).toMatchObject({
       slug: "home_battery",
       title: "Home battery",
       power_w: -842,
@@ -234,7 +236,7 @@ describe("battery control", () => {
     // letting go has to be 0 — a stopped loop must not leave a battery being
     // driven — and it has to say that it was letting go rather than merely
     // commanding a stop.
-    expect(setpointEvents().at(-1)).toMatchObject({
+    expect(targetEvents().at(-1)).toMatchObject({
       power_w: 0,
       released: true,
     });

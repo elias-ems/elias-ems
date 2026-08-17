@@ -119,7 +119,7 @@ export async function startHaMock({
    * add-on asked for rather than only what the house ended up doing. The
    * difference matters, and an event is the only trace there is: unlike a
    * service call it changes no entity, so a loop that publishes the same
-   * setpoint forty times a minute and one that publishes it once are
+   * target forty times a minute and one that publishes it once are
    * indistinguishable from the states alone.
    * @type {Array<{ eventType: string, data: object }>}
    */
@@ -191,7 +191,7 @@ export async function startHaMock({
     // Firing an event is how the add-on asks for anything to happen. Home
     // Assistant accepts any type with any JSON body, puts it on the bus and
     // answers with a message — it changes no state and leaves no history,
-    // which is the whole reason the setpoint goes out this way. Recorded here
+    // which is the whole reason the target goes out this way. Recorded here
     // because the bus is otherwise unobservable from a test.
     const eventMatch = pathname.match(/^\/core\/api\/events\/(.+)$/);
     if (eventMatch && req.method === "POST") {

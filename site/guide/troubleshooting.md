@@ -66,7 +66,7 @@ your automation, so work outwards in this order:
 
 1. **Is the event being fired?** Developer Tools → **Events** → listen to the
    battery's event name, which the Settings page shows under its Title. Nothing
-   arriving means control is off, the battery is not steered, or every setpoint
+   arriving means control is off, the battery is not steered, or every target
    is inside the 50 W deadband — wait 30 seconds and one will be restated
    anyway.
 2. **Is the automation listening for the right name?** The event is named after
@@ -76,10 +76,10 @@ your automation, so work outwards in this order:
 3. **Did the automation run?** Its trace shows each run and what it called. An
    automation still on Home Assistant's default `mode: single` **drops** events
    that arrive while it is busy — use `mode: queued`.
-4. **Did the inverter honour it?** Many ignore a setpoint until a `select`
+4. **Did the inverter honour it?** Many ignore a target until a `select`
    entity is in a forced or manual mode. That is [an automation
    step](/guide/battery-control#an-inverter-that-needs-its-mode-set), and on
-   those brands it is the difference between a setpoint that lands and one that
+   those brands it is the difference between a target that lands and one that
    changes nothing.
 
 Elias ems cannot tell these apart from where it stands — see [what it cannot do

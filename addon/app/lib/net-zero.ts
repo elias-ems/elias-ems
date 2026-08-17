@@ -15,7 +15,7 @@
  *
  *     net = load - pv + batteryPower
  *
- * so the setpoint that drives `net` to zero is
+ * so the target power that drives `net` to zero is
  *
  *     targetBatteryPower = currentBatteryPower - net
  *
@@ -33,7 +33,7 @@
  *
  *     net = load - pv + C + U
  *
- * and the unsteerable ones stay at `U`, so the setpoint that zeroes the meter
+ * and the unsteerable ones stay at `U`, so the target power that zeroes the meter
  * is found from `load - pv + S + U = 0`, which reduces to
  *
  *     S = C - net
@@ -72,7 +72,7 @@ export type BatterySnapshot = {
   /** The same for discharging, as a positive magnitude. Null when unconstrained. */
   maxDischargeW: number | null;
   /**
-   * Whether a setpoint can be published for this battery at all. An unsteered
+   * Whether a target can be published for this battery at all. An unsteered
    * battery is still part of the house, but it is not part of the plan; see
    * `planNetZero`.
    */
@@ -86,15 +86,15 @@ export type BatteryDecision = {
   title: string;
   action: BatteryAction;
   /** Where the battery should be, in W: positive charging, negative discharging. */
-  setpointW: number;
+  targetW: number;
   /**
-   * What to command, or **null to say nothing and leave the last setpoint
+   * What to command, or **null to say nothing and leave the last target
    * standing**.
    *
-   * Not the same as `setpointW`, and the difference is the whole reason this
-   * field exists. A hold inside the deadband reports `setpointW` as the
+   * Not the same as `targetW`, and the difference is the whole reason this
+   * field exists. A hold inside the deadband reports `targetW` as the
    * battery's *measured* power, which is the right thing to display and the
-   * wrong thing to command: publishing a measurement back as a setpoint would
+   * wrong thing to command: publishing a measurement back as a target would
    * let sensor noise walk the commanded value around, tick after tick, for a house
    * that is already balanced. A hold forced by a limit is the opposite — it is
    * an active decision to stop, so it commands 0.
@@ -102,7 +102,7 @@ export type BatteryDecision = {
   commandW: number | null;
   /**
    * What the split asked for before a power limit cut it down, or null when
-   * nothing was cut. Kept separate from `setpointW` so the log can show both:
+   * nothing was cut. Kept separate from `targetW` so the log can show both:
    * a plan that is quietly delivering less than the meter needs looks identical
    * to one that is on target unless the shortfall is stated.
    */
@@ -126,8 +126,8 @@ export type NetZeroPlan = {
    * others to cover what it is already doing.
    */
   currentBatteryW: number;
-  /** The combined setpoint that would zero the meter, or null when it can't be worked out. */
-  targetBatteryW: number | null;
+  /** The combined target that would zero the meter, or null when it can't be worked out. */
+  combinedTargetW: number | null;
   decisions: BatteryDecision[];
   summary: string;
   /** Things that made the answer less trustworthy but didn't prevent one. */
@@ -208,14 +208,14 @@ function blockedReason(
 function hold(
   battery: BatterySnapshot,
   reason: string,
-  setpointW: number,
+  targetW: number,
   commandW: number | null = null,
 ): BatteryDecision {
   return {
     batteryId: battery.id,
     title: battery.title,
     action: "hold",
-    setpointW,
+    targetW,
     // Nothing written unless a caller says otherwise: most holds are "leave it
     // alone", and the ones that mean "stop" pass an explicit 0.
     commandW,
@@ -254,7 +254,7 @@ export function planNetZero(input: {
     return {
       netW: gridPowerW,
       currentBatteryW: 0,
-      targetBatteryW: null,
+      combinedTargetW: null,
       decisions: [],
       summary: "No batteries configured — nothing to control.",
       warnings,
@@ -267,7 +267,7 @@ export function planNetZero(input: {
     return {
       netW: gridPowerW,
       currentBatteryW: 0,
-      targetBatteryW: null,
+      combinedTargetW: null,
       decisions: batteries.map((battery) =>
         hold(battery, UNSTEERED_REASON, battery.powerW ?? 0),
       ),
@@ -280,7 +280,7 @@ export function planNetZero(input: {
     return {
       netW: null,
       currentBatteryW,
-      targetBatteryW: null,
+      combinedTargetW: null,
       decisions: batteries.map((battery) =>
         hold(
           battery,
@@ -307,7 +307,7 @@ export function planNetZero(input: {
     return {
       netW,
       currentBatteryW,
-      targetBatteryW: currentBatteryW,
+      combinedTargetW: currentBatteryW,
       decisions: batteries.map((battery) =>
         hold(
           battery,
@@ -320,9 +320,9 @@ export function planNetZero(input: {
     };
   }
 
-  const targetBatteryW = currentBatteryW - netW;
+  const combinedTargetW = currentBatteryW - netW;
   const direction: "charge" | "discharge" =
-    targetBatteryW > 0 ? "charge" : "discharge";
+    combinedTargetW > 0 ? "charge" : "discharge";
 
   // Only the batteries that can be commanded *and* still have somewhere to go
   // share the target. The split is proportional to capacity, so a 5 kWh unit
@@ -354,7 +354,7 @@ export function planNetZero(input: {
       eligibleCapacity > 0
         ? battery.capacityKwh / eligibleCapacity
         : 1 / eligible.length;
-    const requestedW = targetBatteryW * share;
+    const requestedW = combinedTargetW * share;
 
     // The inverter's rating, applied last: the split above divides the target
     // by capacity, and a small battery's share can easily exceed what its
@@ -362,11 +362,11 @@ export function planNetZero(input: {
     // handed to the others here — the loop's feedback term picks it up on the
     // next tick, since the meter will still be off by the shortfall.
     const powerLimitW = limitFor(battery, direction);
-    const setpointW =
+    const targetW =
       powerLimitW === null
         ? requestedW
         : Math.sign(requestedW) * Math.min(Math.abs(requestedW), powerLimitW);
-    const cappedFromW = setpointW === requestedW ? null : requestedW;
+    const cappedFromW = targetW === requestedW ? null : requestedW;
 
     const room = headroomKwh(battery, direction);
     const limit =
@@ -376,14 +376,14 @@ export function planNetZero(input: {
     const soc = `SoC ${battery.socPercent}%`;
     const capped =
       cappedFromW === null ? "" : `, capped from ${magnitude(cappedFromW)}`;
-    const reason = `${direction} at ${magnitude(setpointW)}${capped} (${soc}, ${kwh(room)} to ${limit})`;
+    const reason = `${direction} at ${magnitude(targetW)}${capped} (${soc}, ${kwh(room)} to ${limit})`;
 
     return {
       batteryId: battery.id,
       title: battery.title,
       action: direction,
-      setpointW,
-      commandW: setpointW,
+      targetW,
+      commandW: targetW,
       cappedFromW,
       currentW: battery.powerW,
       socPercent: battery.socPercent,
@@ -395,13 +395,13 @@ export function planNetZero(input: {
   const flow = netW > 0 ? "importing" : "exporting";
   const summary =
     eligible.length === 0
-      ? `Grid net ${signed(netW)} (${flow}) wants ${direction} ${magnitude(targetBatteryW)}, but every battery is at its limit — holding.`
-      : `Grid net ${signed(netW)} (${flow}), batteries at ${signed(currentBatteryW)} → ${direction} ${magnitude(targetBatteryW)} total.`;
+      ? `Grid net ${signed(netW)} (${flow}) wants ${direction} ${magnitude(combinedTargetW)}, but every battery is at its limit — holding.`
+      : `Grid net ${signed(netW)} (${flow}), batteries at ${signed(currentBatteryW)} → ${direction} ${magnitude(combinedTargetW)} total.`;
 
   return {
     netW,
     currentBatteryW,
-    targetBatteryW,
+    combinedTargetW,
     decisions,
     summary,
     warnings,

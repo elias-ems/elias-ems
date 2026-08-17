@@ -1,5 +1,5 @@
 /**
- * Publishing a setpoint for a battery — the half that makes this control rather
+ * Publishing a target for a battery — the half that makes this control rather
  * than observation.
  *
  * Kept apart from the strategy, which stays pure, and from the loop, which is
@@ -10,7 +10,7 @@
  * ## Why an event rather than a write
  *
  * This used to call `number.set_value` or `input_number.set_value` on an entity
- * configured per battery. It worked, and it left a trail: every setpoint was a
+ * configured per battery. It worked, and it left a trail: every target was a
  * state change, and so a logbook line, a recorder row and an entry in the
  * entity's activity feed. A loop that reconsiders every few seconds turns that
  * into thousands of rows a day whose only content is the add-on talking to
@@ -26,23 +26,23 @@
  * The cost is that the loop can no longer read back what it wrote, which is
  * what `PUBLISH_DEADBAND_W` and `REPUBLISH_MS` below are about.
  */
-import { setpointEventType } from "./batteries";
+import { targetEventType } from "./batteries";
 import { fireHaEvent } from "./ha.server";
 
 /**
- * How far the setpoint may move before it is worth saying again.
+ * How far the target may move before it is worth saying again.
  *
  * The loop can tick every second, and a house is never still, so a strategy
  * that recalculates 4 W lower each time would otherwise fire an event every
  * tick. The event itself is cheap; what is on the other end of it is not — an
  * automation writing a Modbus register does real work, against hardware that on
- * some brands commits setpoints to flash. Wide enough to swallow that noise,
+ * some brands commits every change to flash. Wide enough to swallow that noise,
  * narrow enough that it is a rounding error against a battery worth steering.
  */
 export const PUBLISH_DEADBAND_W = 50;
 
 /**
- * How long a battery may go without hearing the setpoint restated.
+ * How long a battery may go without hearing the target restated.
  *
  * The deadband above compares against what we last published rather than
  * against what the battery is actually set to, because an event has no
@@ -53,7 +53,7 @@ export const PUBLISH_DEADBAND_W = 50;
  * Assistant that restarted mid-tick all recover on their own within a minute
  * or so instead of waiting for the house to move by 50 W.
  *
- * Half the loop's idle tick, so a quiet house restates every setpoint on the
+ * Half the loop's idle tick, so a quiet house restates every target on the
  * next idle tick rather than every other one.
  */
 export const REPUBLISH_MS = 30_000;
@@ -68,7 +68,7 @@ export type PublishStatus =
   /** Home Assistant refused it, or could not be reached. */
   | "failed";
 
-export type SetpointPublish = {
+export type TargetPublish = {
   batteryId: string;
   title: string;
   /** The battery's slug — the event type is built from it. */
@@ -81,10 +81,10 @@ export type SetpointPublish = {
 };
 
 /** What the loop knows about one battery when it comes to publish. */
-export type SetpointTarget = {
+export type BatteryTarget = {
   batteryId: string;
   title: string;
-  /** The battery's slug, from its title: `elias_ems_<slug>_target`. */
+  /** The battery's slug, from its title: `elias_ems_<slug>_target_power`. */
   slug: string;
   /** What the strategy wants commanded, or null to say nothing at all. */
   commandW: number | null;
@@ -110,7 +110,7 @@ export type SetpointTarget = {
 const published = new Map<string, { valueW: number; at: number }>();
 
 /** Test-only, and used by a release: forget what every battery was last told. */
-export function forgetPublishedSetpoints(): void {
+export function forgetPublishedTargets(): void {
   published.clear();
 }
 
@@ -118,7 +118,7 @@ export function forgetPublishedSetpoints(): void {
  * Whether this value is worth an event, and what to record if it goes out.
  *
  * Three ways through: nothing remembered (a fresh process, or the first
- * setpoint after a release), a move that clears the deadband, and a value old
+ * target after a release), a move that clears the deadband, and a value old
  * enough to be worth restating. The last two are the pair that replaces the
  * read-back the entity write used to give us.
  */
@@ -138,14 +138,14 @@ function shouldPublish(
 }
 
 /**
- * Publishes one battery's setpoint, reporting what happened rather than
+ * Publishes one battery's target, reporting what happened rather than
  * throwing.
  *
  * Every outcome is a value, because every outcome is something the log should
  * be able to say out loud: a caller that only learned about failures could not
- * tell a quiet loop from one whose setpoints are all being held back.
+ * tell a quiet loop from one whose targets are all being held back.
  */
-async function publishOne(target: SetpointTarget): Promise<SetpointPublish> {
+async function publishOne(target: BatteryTarget): Promise<TargetPublish> {
   const base = {
     batteryId: target.batteryId,
     title: target.title,
@@ -156,7 +156,7 @@ async function publishOne(target: SetpointTarget): Promise<SetpointPublish> {
     return { ...base, valueW: null, status: "skipped" };
   }
 
-  // Whole watts: there is no entity `step` to snap to any more, and a setpoint
+  // Whole watts: there is no entity `step` to snap to any more, and a target
   // carried to fifteen decimal places would only make the payload harder to
   // read in an automation's trace.
   const valueW = Math.round(target.commandW);
@@ -172,7 +172,7 @@ async function publishOne(target: SetpointTarget): Promise<SetpointPublish> {
     // one line that is hardest to get wrong. `slug` is repeated in the data
     // for the automation that listens to several types at once and has to
     // branch on which arrived.
-    await fireHaEvent(setpointEventType(target.slug), {
+    await fireHaEvent(targetEventType(target.slug), {
       slug: target.slug,
       battery_id: target.batteryId,
       title: target.title,
@@ -181,7 +181,7 @@ async function publishOne(target: SetpointTarget): Promise<SetpointPublish> {
       power_w: valueW,
       // The same number split by direction, as unsigned magnitudes. Plenty of
       // inverters have a charge register and a discharge register rather than
-      // one signed setpoint, and doing the split here keeps that automation
+      // one signed value, and doing the split here keeps that automation
       // free of Jinja arithmetic that is easy to get the sign of wrong.
       charge_w: Math.max(0, valueW),
       discharge_w: Math.max(0, -valueW),
@@ -208,27 +208,27 @@ async function publishOne(target: SetpointTarget): Promise<SetpointPublish> {
 }
 
 /**
- * Publishes every battery's setpoint, in parallel and independently.
+ * Publishes every battery's target, in parallel and independently.
  *
  * One battery's event failing must not stop its neighbour being told what to
  * do, so nothing here rejects: each publish resolves to its own outcome and the
  * caller decides what is worth logging.
  */
-export async function publishSetpoints(
-  targets: SetpointTarget[],
-): Promise<SetpointPublish[]> {
+export async function publishTargets(
+  targets: BatteryTarget[],
+): Promise<TargetPublish[]> {
   return Promise.all(targets.map(publishOne));
 }
 
 /**
- * The one line a tick's setpoints are worth in the log, or null when there is
+ * The one line a tick's targets are worth in the log, or null when there is
  * nothing to say.
  *
- * Skipped and unchanged setpoints are counted rather than named: on a balanced
+ * Skipped and unchanged targets are counted rather than named: on a balanced
  * house every tick produces a full set of them, and spelling each one out would
- * bury the setpoints that did go out under lines saying nothing happened.
+ * bury the targets that did go out under lines saying nothing happened.
  */
-export function describePublishes(publishes: SetpointPublish[]): string | null {
+export function describePublishes(publishes: TargetPublish[]): string | null {
   const sent = publishes.filter((publish) => publish.status === "published");
   const trouble = publishes.filter((publish) => publish.status === "failed");
 

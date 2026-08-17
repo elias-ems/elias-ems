@@ -9,7 +9,7 @@ each one should be doing, publishes that as a Home Assistant event, and records
 both halves in the [diagnostics log](/guide/diagnostics).
 
 **It does not touch your battery itself.** Each steered battery gets its own
-event, named after its title — `elias_ems_home_battery_target` — and an
+event, named after its title — `elias_ems_home_battery_target_power` — and an
 automation you write listens for it and turns it into whatever your inverter
 wants — see [Connecting the
 event to your battery](#connecting-the-event-to-your-battery), which is the step
@@ -85,18 +85,18 @@ A decision and a command are not the same thing, and the log shows both:
 
 The deadband row is the interesting one. A hold reports what the battery is
 measured to be doing, which is the right thing to *show* and the wrong thing to
-*command* — publishing a measurement back as a setpoint would let sensor noise
+*command* — publishing a measurement back as a target would let sensor noise
 walk the commanded value around on a house that is already balanced. So a hold
-says nothing and the previous setpoint stands.
+says nothing and the previous target stands.
 
 The unreadable-grid row goes the other way, deliberately. A battery left forcing
 kilowatts because the meter it was following broke is the one hold that must not
 persist, so that case stops the battery rather than holding it.
 
-**Setpoints are deduplicated.** One only goes out when it differs from the last
+**Targets are deduplicated.** One only goes out when it differs from the last
 one published for that battery by at least 50 W — otherwise a loop ticking every
 second would fire thousands of events an hour, and on the other end of each one
-is your automation doing real work. A setpoint older than 30 seconds is restated
+is your automation doing real work. A target older than 30 seconds is restated
 anyway, so an automation you reloaded or an inverter you power-cycled picks the
 current value back up within a tick or two instead of waiting for the house to
 swing by 50 W.
@@ -104,7 +104,7 @@ swing by 50 W.
 ## The event
 
 Each steered battery has **its own event type, named after its title** —
-`elias_ems_home_battery_target` for a battery called "Home battery". The
+`elias_ems_home_battery_target_power` for a battery called "Home battery". The
 Settings page shows the exact string under the Title field.
 
 Every event carries:
@@ -114,14 +114,14 @@ Every event carries:
 | `slug` | the same name the event type carries, for an automation listening to several |
 | `battery_id` | the stored record's id, which survives renaming the battery |
 | `title` | what the settings page and the log call this battery |
-| `power_w` | the setpoint, signed: **positive charging, negative discharging** |
+| `power_w` | the target, signed: **positive charging, negative discharging** |
 | `charge_w` | `power_w` when charging, otherwise 0 — an unsigned magnitude |
 | `discharge_w` | the same for discharging |
 | `released` | `true` only when Elias ems is [letting go](#switching-it-off) |
 
 `charge_w` and `discharge_w` are the same number restated, for the many
 inverters that have a charge register and a discharge register instead of one
-signed setpoint. Use whichever pair your hardware speaks; the sign arithmetic is
+signed value. Use whichever pair your hardware speaks; the sign arithmetic is
 already done.
 
 ::: tip See it before you wire anything to it
@@ -140,12 +140,12 @@ problem. The edit form names both while you type; update the trigger to match.
 
 This is the part Elias ems cannot do for you, because it is the part that knows
 what your inverter is. All of the examples use a battery titled "Home battery",
-whose event the Settings page shows as `elias_ems_home_battery_target`.
+whose event the Settings page shows as `elias_ems_home_battery_target_power`.
 
 ::: warning mode: queued, not the default
 Home Assistant's default automation mode is `single`, which **drops** an event
 that arrives while the previous run is still going. On a house that has just
-swung hard, the dropped one is the setpoint you most wanted. Use `mode: queued`
+swung hard, the dropped one is the target you most wanted. Use `mode: queued`
 with a small `max`, as below.
 :::
 
@@ -155,12 +155,12 @@ The common case for a plain Modbus setup — and note there is no `input_number`
 helper in it any more:
 
 ```yaml
-alias: Battery setpoint → inverter
+alias: Battery target → inverter
 mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_home_battery_target
+    event_type: elias_ems_home_battery_target_power
 actions:
   - action: modbus.write_register
     data:
@@ -195,12 +195,12 @@ actions:
 `number`. One action:
 
 ```yaml
-alias: Battery setpoint → inverter
+alias: Battery target → inverter
 mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_home_battery_target
+    event_type: elias_ems_home_battery_target_power
 actions:
   - action: number.set_value
     target:
@@ -210,23 +210,23 @@ actions:
 ```
 
 Setting an entity is a state change, so this puts a row in your logbook and
-recorder every time the setpoint moves. That is a real cost and it is now your
+recorder every time the target moves. That is a real cost and it is now your
 choice rather than the add-on's: write the register directly if you would rather
 not have it, or exclude the entity under `recorder:`/`logbook:`.
 
 ### An inverter that needs its mode set
 
-Many inverters ignore a setpoint until a `select` entity is put into a forced or
+Many inverters ignore a target until a `select` entity is put into a forced or
 manual mode — and want it back on self-consumption when Elias ems stands down.
 `released` is what tells the two apart:
 
 ```yaml
-alias: Battery setpoint → inverter
+alias: Battery target → inverter
 mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_home_battery_target
+    event_type: elias_ems_home_battery_target_power
 actions:
   - choose:
       - conditions:
@@ -268,14 +268,14 @@ says which arrived (Home Assistant has no wildcard for event types, so the list
 is explicit):
 
 ```yaml
-alias: Battery setpoints → inverters
+alias: Battery targets → inverters
 mode: queued
 max: 10
 triggers:
   - trigger: event
     event_type:
-      - elias_ems_home_battery_target
-      - elias_ems_garage_battery_target
+      - elias_ems_home_battery_target_power
+      - elias_ems_garage_battery_target_power
 actions:
   - action: number.set_value
     target:
@@ -299,7 +299,7 @@ strategy all agreeing with each other.
 Switching control off, and shutting the add-on down cleanly, both publish **0 W**
 for every steerable battery, with `released: true`. A battery left forcing
 kilowatts because the thing that told it to is gone is the worst failure this
-feature has — from the battery's side there is no difference between a setpoint
+feature has — from the battery's side there is no difference between a target
 that is still wanted and one whose author died ten minutes ago.
 
 Two honest limits:
@@ -320,7 +320,7 @@ Two honest limits:
 An event goes on the bus and nothing comes back. No automation, one still
 listening for a battery's old name, an automation dropping events because it is
 still `mode: single`,
-or an inverter that quietly ignores a setpoint all look **exactly the same**
+or an inverter that quietly ignores a target all look **exactly the same**
 from Elias ems' side: a log full of correct-looking decisions and a battery that
 does nothing.
 

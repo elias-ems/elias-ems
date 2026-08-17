@@ -4,9 +4,9 @@
  * asks the configured strategy what the batteries should be doing, and writes
  * the answer to diagnostics.
  *
- * Each tick then publishes what it decided as a setpoint event per battery and
+ * Each tick then publishes what it decided as a target event per battery and
  * records both halves. The decision and the actuation stay separable —
- * `net-zero.ts` works out what should happen and `setpoints.server.ts` puts it
+ * `net-zero.ts` works out what should happen and `targets.server.ts` puts it
  * on Home Assistant's bus for an automation to carry out — which is what lets
  * the strategy stay a pure function with no idea that Home Assistant exists.
  *
@@ -33,12 +33,12 @@ import { readGrid } from "./grid.server";
 import { onHaChange } from "./ha-live.server";
 import { type BatterySnapshot, planNetZero } from "./net-zero";
 import { toNumber } from "./readings.server";
+import { readingAge, readStates } from "./states.server";
 import {
   describePublishes,
-  forgetPublishedSetpoints,
-  publishSetpoints,
-} from "./setpoints.server";
-import { readingAge, readStates } from "./states.server";
+  forgetPublishedTargets,
+  publishTargets,
+} from "./targets.server";
 
 /**
  * How often a tick happens when nothing at all is moving.
@@ -105,12 +105,12 @@ async function readTickConfig(): Promise<TickConfig> {
  * battery's readings.
  *
  * This is also the set whose changes provoke a tick, which is why it is only
- * ever inputs. Nothing the loop *commands* belongs here: when a setpoint used
- * to be written to an entity, watching that entity meant every setpoint came
+ * ever inputs. Nothing the loop *commands* belongs here: when a target power
+ * used to be written to an entity, watching that entity meant every write came
  * back as a change, provoked another tick and was written again, with nothing
  * damping the loop. Publishing an event instead removes the entity but not the
- * rule — whatever an automation does with a setpoint on the way to the
- * hardware must not become the reason for the next one.
+ * rule — whatever an automation does with a target on the way to the hardware
+ * must not become the reason for the next one.
  */
 function controlReadingIds({ grid, batteries }: TickConfig): string[] {
   return [
@@ -228,7 +228,7 @@ export async function runControlTick(): Promise<void> {
   // buffer fills with near-duplicates instead of holding useful history.
   // Published before the decision is logged, so that a line saying what was
   // decided and a line saying what was done cannot end up in the other order.
-  const publishes = await publishSetpoints(
+  const publishes = await publishTargets(
     plan.decisions.flatMap((decision) => {
       const slug = inputs.slugs.get(decision.batteryId);
       if (!slug) return [];
@@ -267,7 +267,7 @@ export async function runControlTick(): Promise<void> {
  * Called when control is switched off and when the process is asked to stop. A
  * battery left forcing kilowatts because the thing that told it to is gone is
  * the worst failure this feature has: from the battery's side there is no
- * difference between a setpoint that is still wanted and one whose author died
+ * difference between a target that is still wanted and one whose author died
  * ten minutes ago.
  *
  * Zero is the safe value rather than the *correct* one, and the distinction is
@@ -288,7 +288,7 @@ export async function releaseBatteries(): Promise<void> {
   const batteries = (await listBatteries()).filter(isSteerable);
   if (batteries.length === 0) return;
 
-  const publishes = await publishSetpoints(
+  const publishes = await publishTargets(
     batteries.map((battery) => ({
       batteryId: battery.id,
       title: battery.title,
@@ -304,7 +304,7 @@ export async function releaseBatteries(): Promise<void> {
   // Nothing is steering these batteries any more, so nothing should be
   // remembered about them either — the next tick after control comes back on
   // publishes from scratch rather than deciding it already said this.
-  forgetPublishedSetpoints();
+  forgetPublishedTargets();
 
   const trouble = publishes.filter((publish) => publish.status !== "published");
   logControl(
@@ -521,9 +521,9 @@ export function controlLoopStatus(): ControlLoopStatus {
 export function resetControlLoop(): void {
   stopControlLoop();
   // Including what was published: a case that starts with a battery already
-  // "told" what the previous case told it would see its first setpoint held
+  // "told" what the previous case told it would see its first target held
   // back by the deadband.
-  forgetPublishedSetpoints();
+  forgetPublishedTargets();
   state.config = null;
   state.inFlight = null;
   state.lastTickAt = null;

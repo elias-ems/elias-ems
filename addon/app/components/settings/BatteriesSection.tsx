@@ -4,7 +4,7 @@ import {
   BATTERY_DEFAULTS,
   batterySlug,
   isSteerable,
-  setpointEventType,
+  targetEventType,
 } from "../../lib/batteries";
 import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
@@ -32,7 +32,7 @@ export default function BatteriesSection({
   return (
     <Section
       title="Batteries"
-      description="Capacity and the charge window are typed in; the readings come from Home Assistant. A steered battery's setpoints go out as an event named after its title."
+      description="Capacity and the charge window are typed in; the readings come from Home Assistant. A steered battery's target power goes out as an event named after its title."
       add={{
         label: "Add battery",
         open: editor.showAdd,
@@ -66,8 +66,7 @@ export default function BatteriesSection({
             <div style={{ fontSize: "0.875rem" }}>
               {isSteerable(battery) ? (
                 <>
-                  Steered —{" "}
-                  <code>{setpointEventType(batterySlug(battery))}</code>
+                  Steered — <code>{targetEventType(batterySlug(battery))}</code>
                 </>
               ) : (
                 "Not steered — watched only"
@@ -174,7 +173,7 @@ export default function BatteriesSection({
 
 /**
  * Whether this battery is steered at all — the one thing that decides if a
- * setpoint is ever published for it. A checkbox rather than the presence of
+ * target is ever published for it. A checkbox rather than the presence of
  * some other field, so that "watched, not steered" is something chosen rather
  * than something arrived at by leaving a box empty.
  *
@@ -199,9 +198,9 @@ function SteeredField({ defaultChecked }: { defaultChecked: boolean }) {
         </label>
       </div>
       <p style={hintStyle}>
-        Publishes a setpoint event for it whenever control decides something.
-        Leave this off to watch the battery without steering it — it still
-        appears on the dashboard and is simply left alone.
+        Publishes its target power as an event whenever control decides
+        something. Leave this off to watch the battery without steering it — it
+        still appears on the dashboard and is simply left alone.
       </p>
     </div>
   );

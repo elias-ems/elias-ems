@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { setpointEventType, slugifyTitle } from "../../lib/batteries";
+import { slugifyTitle, targetEventType } from "../../lib/batteries";
 import {
   errorStyle,
   fieldStyle,
@@ -61,8 +61,8 @@ export default function BatteryNameField({
         <p style={hintStyle}>
           {slug ? (
             <>
-              Setpoints for this battery go out as{" "}
-              <code>{setpointEventType(slug)}</code>, which is what your
+              This battery's target power goes out as{" "}
+              <code>{targetEventType(slug)}</code>, which is what your
               automation listens for.
             </>
           ) : (
@@ -74,9 +74,9 @@ export default function BatteryNameField({
       {renamed && (
         <p style={errorStyle}>
           Renaming changes the event from{" "}
-          <code>{setpointEventType(savedSlug)}</code> to{" "}
-          <code>{setpointEventType(slug)}</code>. Any automation listening for
-          the old one stops hearing this battery — update its trigger too.
+          <code>{targetEventType(savedSlug)}</code> to{" "}
+          <code>{targetEventType(slug)}</code>. Any automation listening for the
+          old one stops hearing this battery — update its trigger too.
         </p>
       )}
     </div>
