@@ -143,7 +143,7 @@ To develop against real-looking data, start [addon/test/ha-mock.js](addon/test/h
 
 Two deadlines are overridable, both so a test can reach them in milliseconds rather than in half a minute: `HA_TIMEOUT_MS` for the REST request deadline, and `HA_HEARTBEAT_MS` for the WebSocket's liveness clock — the ping period, with the pong deadline (a third of it) and the handshake deadline (half of it) derived from that one number so they cannot drift into a combination that makes no sense.
 
-`addon/test/` holds the harness (`ha-mock.js`, `ingress-proxy.js`, `stack.js`, `dev.js`) alongside the suites in `unit/`, `integration/`, and `e2e/`. The harness files are plain JavaScript for the same reason `server.js` is: node runs them directly, with no build step in front.
+`addon/test/` holds the harness (`ha-mock.js`, `ingress-proxy.js`, `stack.js`, `dev.js`, `listen.js`) alongside the suites in `unit/`, `integration/`, and `e2e/`. The harness files are plain JavaScript for the same reason `server.js` is: node runs them directly, with no build step in front.
 
 To exercise the app inside Home Assistant itself, add this repo as a custom repository in the Add-on Store and install/rebuild "Elias ems" (see README.md for the exact steps).
 
