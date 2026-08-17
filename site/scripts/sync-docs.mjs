@@ -15,6 +15,12 @@
 //
 // Runs as part of `docs:dev` and `docs:build`. It does not watch: editing a file
 // under `docs/` while the dev server is up needs a re-run.
+//
+// The rewriting half is exported and unit-tested; only the file copying at the
+// bottom is guarded behind `import.meta.main`, so importing this module has no
+// side effects and does not wipe `site/internals/`. The dead-link check cannot
+// stand in for those tests — it only sees links that stay on the site, and a
+// rule that produces a plausible but wrong GitHub URL passes it.
 
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -29,7 +35,7 @@ const BLOB = "https://github.com/elias-ems/elias-ems/blob/main";
 // Repo-relative source -> page name under site/internals/. An explicit list
 // rather than a glob: which internal docs are public is an editorial decision,
 // and `project.md` and `routines.md` deliberately are not.
-const PAGES = new Map([
+export const PAGES = new Map([
   ["docs/architecture.md", "architecture"],
   ["docs/features/battery-control.md", "battery-control"],
   ["docs/features/live-readings.md", "live-readings"],
@@ -42,12 +48,10 @@ const encodePath = (p) => p.replaceAll("[", "%5B").replaceAll("]", "%5D");
 
 function splitHash(target) {
   const at = target.indexOf("#");
-  return at === -1
-    ? [target, ""]
-    : [target.slice(0, at), target.slice(at)];
+  return at === -1 ? [target, ""] : [target.slice(0, at), target.slice(at)];
 }
 
-function rewriteLinks(markdown, source) {
+export function rewriteLinks(markdown, source) {
   const fromDir = path.posix.dirname(source);
 
   return markdown.replace(/\]\(([^)\s]+)\)/g, (whole, target) => {
@@ -72,7 +76,7 @@ function rewriteLinks(markdown, source) {
 
 /** Sits under the page's own `# Heading`, so VitePress still takes the title
  *  from the first h1 and the sidebar entry doesn't become the banner. */
-function withBanner(markdown, source) {
+export function withBanner(markdown, source) {
   const banner = [
     "",
     "::: info Generated page",
@@ -85,19 +89,21 @@ function withBanner(markdown, source) {
   if (!firstHeading) return `${banner}\n\n${markdown}`;
 
   const end = firstHeading.index + firstHeading[0].length;
-  return markdown.slice(0, end) + `\n${banner}` + markdown.slice(end);
+  return `${markdown.slice(0, end)}\n${banner}${markdown.slice(end)}`;
 }
 
-await rm(outDir, { recursive: true, force: true });
-await mkdir(outDir, { recursive: true });
+if (import.meta.main) {
+  await rm(outDir, { recursive: true, force: true });
+  await mkdir(outDir, { recursive: true });
 
-for (const [source, page] of PAGES) {
-  const markdown = await readFile(path.join(repoRoot, source), "utf8");
-  const generated =
-    "---\neditLink: false\n---\n\n" +
-    withBanner(rewriteLinks(markdown, source), source);
+  for (const [source, page] of PAGES) {
+    const markdown = await readFile(path.join(repoRoot, source), "utf8");
+    const generated =
+      "---\neditLink: false\n---\n\n" +
+      withBanner(rewriteLinks(markdown, source), source);
 
-  await writeFile(path.join(outDir, `${page}.md`), generated);
+    await writeFile(path.join(outDir, `${page}.md`), generated);
+  }
+
+  console.log(`synced ${PAGES.size} docs into site/internals/`);
 }
-
-console.log(`synced ${PAGES.size} docs into site/internals/`);

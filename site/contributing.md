@@ -113,6 +113,27 @@ npm install && npm run docs:dev
 
 `npm run docs:build` is what CI runs, and it fails on dead links.
 
+There are three more commands, and they need `npm install` to have been run in
+`addon/` as well — the site has no linter or TypeScript of its own, and borrows
+the add-on's rather than installing a second copy of each to disagree with the
+first:
+
+| Command | What it does |
+| --- | --- |
+| `npm run lint` / `lint:fix` | Biome over `.vitepress/config.ts` and the scripts. |
+| `npm run typecheck` | `tsc` over `.vitepress/config.ts`. VitePress loads it through esbuild, which strips the types without checking them, so nothing else catches a config option of the wrong type. |
+| `npm test` | Node's built-in test runner over the link rewriting in `scripts/sync-docs.mjs`. The dead-link check only sees links that stay on the site, so the tests are what cover the ones that become GitHub URLs. |
+
+That `npm install` prints a handful of audit findings, one of them `high`. They
+are known and they are not worth acting on: every one is an `esbuild` or `vite`
+advisory that VitePress pulls in, and every one only affects the **dev server** —
+cross-origin requests to `vitepress dev`, and its own file serving. What gets
+published is static HTML, and CI never starts a dev server. npm reports no fix
+because VitePress 1.6.4 is the latest stable release and pins vite 5; the version
+that moves off it is VitePress 2, still in alpha. So please don't "fix" it with
+`npm audit fix --force` — that installs the pre-release. A finding that is *not*
+dev-server-only would be a different matter; those are worth an issue.
+
 ## The rest
 
 [CLAUDE.md](https://github.com/elias-ems/elias-ems/blob/main/CLAUDE.md) in the
