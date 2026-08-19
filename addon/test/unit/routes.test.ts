@@ -189,7 +189,9 @@ describe("GET / (dashboard)", () => {
     energyEntityId: string;
   }) {
     const { addPvEntity } = await import("../../app/lib/pv-entities.server");
-    return addPvEntity(fields);
+    // Uncurtailable and unrated: these cases are about what the dashboard
+    // shows, and curtailment has its own suites.
+    return addPvEntity({ ...fields, ratedPowerW: null, curtailable: false });
   }
 
   beforeEach(async () => {

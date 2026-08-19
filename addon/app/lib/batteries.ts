@@ -13,6 +13,8 @@
  * Pure; persistence lives in `batteries.server.ts`.
  */
 
+import { slugifyTitle } from "./slug";
+
 export type BatteryFields = {
   title: string;
   /** Usable capacity in kWh. */
@@ -135,29 +137,6 @@ export function normalizeBattery(battery: Battery): Battery {
  */
 export function isSteerable(battery: Pick<BatteryFields, "steered">): boolean {
   return battery.steered === true;
-}
-
-/**
- * The battery's title reduced to something that can be part of a Home
- * Assistant event type: lowercase, accents folded away, and every run of
- * anything else turned into a single underscore.
- *
- * "Home battery" becomes `home_battery`, and so does "Home  Battery!" — the
- * point is that the name in an automation is predictable from the name on the
- * settings page, not that every distinct title survives intact. Accents are
- * folded rather than dropped so that "Réserve" is `reserve` instead of `r_serve`.
- *
- * Empty when the title has no letters or digits at all. Callers decide what to
- * do about that: the form rejects such a title, and `batterySlug` falls back to
- * the record id for anything a hand-edited file gets past it.
- */
-export function slugifyTitle(title: string): string {
-  return title
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
 }
 
 /** The battery's slug, with a last-resort fallback so it is never empty. */

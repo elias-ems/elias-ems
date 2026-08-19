@@ -35,6 +35,8 @@ import {
   runControlTick,
   syncControlLoop,
 } from "../../app/lib/control-loop.server";
+import { DEFAULT_CURTAILMENT_CONFIG } from "../../app/lib/curtailment";
+import { saveCurtailmentConfig } from "../../app/lib/curtailment-config.server";
 import {
   clearDiagnostics,
   readDiagnostics,
@@ -143,6 +145,19 @@ beforeEach(async () => {
   ha.events.length = 0;
   for (const battery of await listBatteries()) await removeBattery(battery.id);
   await saveGrid(GRID);
+  // Each tick now gates its halves on what is stored, so that switching a
+  // feature on or off takes effect without restarting the loop. These cases are
+  // battery control's, so that is what is on; the `syncControlLoop` cases below
+  // save their own config over this one.
+  await saveControlConfig({
+    enabled: true,
+    strategy: "net-zero-energy",
+    intervalSeconds: 5,
+  });
+  await saveCurtailmentConfig({
+    ...DEFAULT_CURTAILMENT_CONFIG,
+    enabled: false,
+  });
   clearDiagnostics();
   resetControlLoop();
 });
