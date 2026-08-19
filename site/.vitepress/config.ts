@@ -64,6 +64,7 @@ export default defineConfig({
             { text: "Battery control", link: "/internals/battery-control" },
             { text: "Live readings", link: "/internals/live-readings" },
             { text: "Diagnostics", link: "/internals/diagnostics" },
+            { text: "Dynamic prices", link: "/internals/dynamic-prices" },
           ],
         },
       ],
