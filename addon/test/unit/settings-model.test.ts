@@ -11,7 +11,6 @@ import {
   normalizeBattery,
   parseBattery,
   resolvePowerLimits,
-  slugifyTitle,
   targetEventType,
 } from "../../app/lib/batteries";
 import {
@@ -21,7 +20,15 @@ import {
   parseControlConfig,
 } from "../../app/lib/control";
 import { isGridConfigured, normalizeGrid, parseGrid } from "../../app/lib/grid";
-import { normalizePvEntity } from "../../app/lib/pv-entities";
+import type { PvEntity } from "../../app/lib/pv-entities";
+import {
+  isCurtailable,
+  normalizePvEntity,
+  parsePvEntity,
+  pvLimitEventType,
+  pvSlug,
+} from "../../app/lib/pv-entities";
+import { slugifyTitle } from "../../app/lib/slug";
 
 function form(fields: Record<string, string>): FormData {
   const formData = new FormData();
@@ -314,15 +321,111 @@ describe("resolvePowerLimits", () => {
 });
 
 describe("normalizePvEntity", () => {
+  /** A stored record from before a field existed, as it really appears on disk. */
+  const stored = (extra: Record<string, unknown> = {}) =>
+    ({
+      id: "a",
+      title: "Roof",
+      powerEntityId: "sensor.p",
+      energyEntityId: "sensor.e",
+      ...extra,
+    }) as PvEntity;
+
   it("falls back to the power entity id for records saved before titles existed", () => {
+    expect(normalizePvEntity(stored({ title: "   " })).title).toBe("sensor.p");
+  });
+
+  it("reads a record saved before curtailment as uncurtailable and unrated", () => {
+    expect(normalizePvEntity(stored())).toMatchObject({
+      ratedPowerW: null,
+      curtailable: false,
+    });
+  });
+
+  it("keeps a configured rating and the curtailable flag", () => {
     expect(
-      normalizePvEntity({
-        id: "a",
-        title: "   ",
-        powerEntityId: "sensor.p",
-        energyEntityId: "sensor.e",
-      }).title,
-    ).toBe("sensor.p");
+      normalizePvEntity(stored({ ratedPowerW: 5000, curtailable: true })),
+    ).toMatchObject({ ratedPowerW: 5000, curtailable: true });
+  });
+
+  it("collapses a nonsensical rating to null rather than keeping it", () => {
+    // A 0 W rating makes every percentage meaningless, and a negative one is
+    // not a rating at all. Both are far more likely to be a hand-edited typo
+    // than something anyone meant.
+    for (const ratedPowerW of [0, -100, "", "abc", null]) {
+      expect(normalizePvEntity(stored({ ratedPowerW })).ratedPowerW).toBeNull();
+    }
+  });
+
+  it("treats anything but a true flag as not curtailable", () => {
+    for (const curtailable of ["yes", 1, null, undefined]) {
+      expect(normalizePvEntity(stored({ curtailable })).curtailable).toBe(
+        false,
+      );
+    }
+  });
+});
+
+describe("isCurtailable", () => {
+  it("needs both the flag and a rating", () => {
+    expect(isCurtailable({ curtailable: true, ratedPowerW: 5000 })).toBe(true);
+    // Ticked but never filled in: a half-finished form, and treating it as
+    // steerable would mean dividing by null.
+    expect(isCurtailable({ curtailable: true, ratedPowerW: null })).toBe(false);
+    expect(isCurtailable({ curtailable: false, ratedPowerW: 5000 })).toBe(
+      false,
+    );
+  });
+});
+
+describe("pvSlug and pvLimitEventType", () => {
+  it("builds the event type from the title", () => {
+    expect(pvLimitEventType(pvSlug({ id: "x", title: "South roof" }))).toBe(
+      "elias_ems_south_roof_pv_limit",
+    );
+  });
+
+  it("falls back to the record id when a title has nothing to slugify", () => {
+    expect(pvSlug({ id: "abc-1", title: "⚡" })).toBe("pv_abc_1");
+  });
+});
+
+describe("parsePvEntity", () => {
+  const valid = {
+    title: "South roof",
+    powerEntityId: "sensor.p",
+    energyEntityId: "sensor.e",
+  };
+
+  it("accepts an array with no rating while it is not curtailable", () => {
+    const parsed = parsePvEntity(form(valid));
+    expect(parsed).toMatchObject({
+      ok: true,
+      fields: { ratedPowerW: null, curtailable: false },
+    });
+  });
+
+  it("demands a rating once the array is marked curtailable", () => {
+    const parsed = parsePvEntity(form({ ...valid, curtailable: "on" }));
+
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.ratedPowerW).toMatch(/rated power/i);
+  });
+
+  it("rejects a rating that is not a positive number", () => {
+    for (const ratedPowerW of ["0", "-5", "abc"]) {
+      const parsed = parsePvEntity(form({ ...valid, ratedPowerW }));
+      expect(parsed.ok).toBe(false);
+    }
+  });
+
+  it("rejects a title with nothing to build an event type from", () => {
+    const parsed = parsePvEntity(form({ ...valid, title: "⚡ !!! ⚡" }));
+
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.title).toMatch(/letter or digit/);
   });
 });
 

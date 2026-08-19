@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
-import { slugifyTitle, targetEventType } from "../../lib/batteries";
+import { targetEventType } from "../../lib/batteries";
+import { slugifyTitle } from "../../lib/slug";
 import {
   errorStyle,
   fieldStyle,

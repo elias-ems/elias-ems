@@ -8,7 +8,6 @@ import {
   DUPLICATE_SLUG_ERROR,
   isSteerable,
   parseBattery,
-  slugifyTitle,
 } from "../lib/batteries";
 import {
   addBattery,
@@ -36,6 +35,7 @@ import {
   updatePvEntity,
 } from "../lib/pv-entities.server";
 import type { SettingsActionData } from "../lib/settings-form";
+import { slugifyTitle } from "../lib/slug";
 import type { Route } from "./+types/settings";
 
 export async function loader() {
