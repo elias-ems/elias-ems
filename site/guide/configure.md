@@ -134,19 +134,28 @@ by, which for most houses it is.
 
 ## PV entities
 
-One entry per array, purely for display — nothing decides anything from these
-yet.
+One entry per array. The first three fields are all you need for the dashboard;
+the last two are what [PV curtailment](/guide/pv-curtailment) needs to hold an
+array back.
 
 | Field | What it wants |
 | --- | --- |
-| **Title** | e.g. "Roof south". |
+| **Title** | e.g. "Roof south". Also names the array's limit event, so it has to be unique. |
 | **Total energy generated (kWh)** | Cumulative production counter. |
 | **Current power (W)** | Instantaneous production. |
+| **Allow curtailing this array** | Whether the add-on may ever hold it back. Off by default. |
+| **Inverter rated power (W)** | The inverter's rated AC output. Required once the box above is ticked. |
+
+Curtailment is commanded as a percentage of that rating, which is why it has to
+be typed in — a power sensor does not publish one. Leave the box unticked for an
+array you want on the dashboard but never curtailed; it still counts towards what
+the house is generating.
 
 ## Prices
 
-Optional, and independent of everything above — nothing decides anything from
-prices yet, so this can wait until the rest is working.
+Optional, and independent of everything above — but [PV
+curtailment](/guide/pv-curtailment) cannot be enabled without it, since it
+decides on what a kWh put on the grid earns.
 
 | Field | What it wants |
 | --- | --- |

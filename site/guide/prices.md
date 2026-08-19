@@ -5,12 +5,14 @@ exchange prices Home Assistant already has and turn them into the two numbers
 that actually matter: **what a kWh costs you** and **what a kWh earns you**, for
 every quarter hour of today and tomorrow.
 
-::: warning It imports and shows. Nothing acts on it yet.
-No strategy reads these numbers — the battery still runs net-zero-energy and
-knows nothing about price. Price-aware charging and PV curtailment are the next
-steps, and this is the piece they both need first. What you get today is the
-prices on your dashboard, and a chance to check the arithmetic is right before
-anything depends on it.
+::: tip One thing acts on this so far: PV curtailment.
+[PV curtailment](/guide/pv-curtailment) reads the **production** leg and holds
+your panels back while a kWh put on the grid earns less than it costs to make.
+Battery control does not read prices at all yet — it still runs
+net-zero-energy — so price-aware charging is still to come.
+
+Either way, get the arithmetic below right first: curtailment acts on what your
+production formula says, so a wrong formula is a wrong decision.
 :::
 
 ## What you need
@@ -168,8 +170,9 @@ At a market price of -0.05 EUR/kWh, the example formulas give:
 
 Network costs and VAT do not go away when the market does, so a negative
 exchange price rarely means free electricity. It very often *does* mean your
-injection is worth nothing, which is the case PV curtailment will eventually key
-off. One number could not have told you both.
+injection is worth nothing, or less — which is exactly the case [PV
+curtailment](/guide/pv-curtailment) keys off. One number could not have told you
+both.
 
 ### Checking it against a bill
 

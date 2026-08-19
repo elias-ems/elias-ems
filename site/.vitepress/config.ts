@@ -52,6 +52,7 @@ export default defineConfig({
             { text: "The dashboard", link: "/guide/dashboard" },
             { text: "Battery control", link: "/guide/battery-control" },
             { text: "Dynamic prices", link: "/guide/prices" },
+            { text: "PV curtailment", link: "/guide/pv-curtailment" },
             { text: "Diagnostics", link: "/guide/diagnostics" },
             { text: "Troubleshooting", link: "/guide/troubleshooting" },
           ],

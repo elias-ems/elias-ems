@@ -41,7 +41,11 @@ configured entirely from its own pages — no YAML.
 - **Dynamic prices** — day-ahead exchange prices read off an integration you
   already have, put through your own contract's arithmetic, so the dashboard
   shows what a kWh costs and earns for every quarter hour of today and tomorrow.
-  Nothing acts on them yet. See [Dynamic prices](/guide/prices).
+  See [Dynamic prices](/guide/prices).
+- **PV curtailment** — while a kWh put on the grid earns less than it costs to
+  make, your arrays are held back to roughly what the house and its battery can
+  absorb, published as an event per array. See [PV
+  curtailment](/guide/pv-curtailment).
 
 ## What it cannot do yet
 
@@ -53,10 +57,10 @@ configured entirely from its own pages — no YAML.
   listening for a battery's old name, and an inverter quietly ignoring the value
   all look identical from the add-on's side. This is the single most likely reason a correct-looking
   setup appears to do nothing.
-- **Act on a price.** Prices are imported and shown, but no strategy reads
-  them — the battery still runs net-zero-energy and knows nothing about what
-  electricity costs. Price-aware charging and PV curtailment on negative prices
-  are the next steps.
+- **Charge your battery on price.** PV curtailment reads prices, but battery
+  control does not — it still runs net-zero-energy and knows nothing about what
+  electricity costs. Buying cheap to use later, and being paid to charge at a
+  negative price, are the next steps.
 - **Fetch prices itself.** It reads what a price integration publishes, so it
   needs one installed. There is no built-in client yet, and Home Assistant's
   *core* Nord Pool integration is not usable — see

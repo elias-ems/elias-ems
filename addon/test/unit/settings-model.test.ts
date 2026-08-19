@@ -19,6 +19,13 @@ import {
   normalizeControlConfig,
   parseControlConfig,
 } from "../../app/lib/control";
+import {
+  DEFAULT_CURTAILMENT_CONFIG,
+  MAX_GRID_TARGET_W,
+  MAX_SETTLE_SECONDS,
+  normalizeCurtailmentConfig,
+  parseCurtailmentConfig,
+} from "../../app/lib/curtailment";
 import { isGridConfigured, normalizeGrid, parseGrid } from "../../app/lib/grid";
 import type { PvEntity } from "../../app/lib/pv-entities";
 import {
@@ -531,5 +538,113 @@ describe("naming a battery on the event bus", () => {
     expect(targetEventType("home_battery")).toBe(
       "elias_ems_home_battery_target_power",
     );
+  });
+});
+
+describe("normalizeCurtailmentConfig", () => {
+  it("reads a missing file as the defaults, and off", () => {
+    expect(normalizeCurtailmentConfig(null)).toEqual(
+      DEFAULT_CURTAILMENT_CONFIG,
+    );
+  });
+
+  it("defaults the minimum limit above zero", () => {
+    // Not a preference. With a floor of 0 the strategy has a fixed point it
+    // cannot climb out of: a dark array and a balanced meter compute 0%, which
+    // keeps the array dark, which keeps the meter balanced. See curtail.ts.
+    expect(DEFAULT_CURTAILMENT_CONFIG.minLimitPercent).toBeGreaterThan(0);
+  });
+
+  it("clamps a hand-edited file rather than rejecting it", () => {
+    // This runs on a file, not a form. Leaving the feature working at the
+    // nearest sane value beats leaving the loop with nothing to run.
+    const config = normalizeCurtailmentConfig({
+      enabled: true,
+      minLimitPercent: 400,
+      deadbandW: -50,
+      settleSeconds: 99_999,
+      gridTargetW: 10_000_000,
+    });
+
+    expect(config).toMatchObject({
+      enabled: true,
+      minLimitPercent: 100,
+      deadbandW: 0,
+      settleSeconds: MAX_SETTLE_SECONDS,
+      gridTargetW: MAX_GRID_TARGET_W,
+    });
+  });
+
+  it("keeps a negative grid target, which is a meaningful setting", () => {
+    // Aiming to keep a little export, as insurance against dipping into import
+    // at the consumption price. Clamping this to zero would silently drop it.
+    expect(normalizeCurtailmentConfig({ gridTargetW: -200 }).gridTargetW).toBe(
+      -200,
+    );
+  });
+
+  it("keeps a negative price threshold, which is the whole point", () => {
+    expect(
+      normalizeCurtailmentConfig({ priceThresholdPerKwh: -0.05 })
+        .priceThresholdPerKwh,
+    ).toBe(-0.05);
+  });
+});
+
+describe("parseCurtailmentConfig", () => {
+  const valid = {
+    priceThresholdPerKwh: "0",
+    gridTargetW: "0",
+    deadbandW: "50",
+    minLimitPercent: "5",
+    settleSeconds: "30",
+  };
+
+  it("accepts a filled-in form, and reads an absent checkbox as off", () => {
+    const parsed = parseCurtailmentConfig(form(valid));
+
+    expect(parsed).toMatchObject({
+      ok: true,
+      config: { enabled: false, deadbandW: 50, minLimitPercent: 5 },
+    });
+  });
+
+  it("accepts a negative threshold and a negative grid target", () => {
+    const parsed = parseCurtailmentConfig(
+      form({ ...valid, priceThresholdPerKwh: "-0.05", gridTargetW: "-200" }),
+    );
+
+    expect(parsed).toMatchObject({
+      ok: true,
+      config: { priceThresholdPerKwh: -0.05, gridTargetW: -200 },
+    });
+  });
+
+  it("rejects a limit outside 0–100", () => {
+    for (const minLimitPercent of ["-1", "101", "5.5", "abc", ""]) {
+      const parsed = parseCurtailmentConfig(
+        form({ ...valid, minLimitPercent }),
+      );
+      expect(parsed.ok, `minLimitPercent=${minLimitPercent}`).toBe(false);
+    }
+  });
+
+  it("rejects a settle time outside its range", () => {
+    for (const settleSeconds of ["-1", "901", "abc", ""]) {
+      const parsed = parseCurtailmentConfig(form({ ...valid, settleSeconds }));
+      expect(parsed.ok, `settleSeconds=${settleSeconds}`).toBe(false);
+    }
+  });
+
+  it("rejects a threshold that is not a number at all", () => {
+    // No range on it beyond being a number: it is a price, and how negative a
+    // price can get is the market's business rather than ours.
+    const parsed = parseCurtailmentConfig(
+      form({ ...valid, priceThresholdPerKwh: "cheap" }),
+    );
+
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.priceThresholdPerKwh).toBeTruthy();
   });
 });
