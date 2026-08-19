@@ -329,8 +329,11 @@ for, the check is yours to make — the diagnostics log, the event listener in
 Developer Tools, and the automation's own trace, in that order.
 :::
 
-There is also no price awareness of any kind: dynamic prices, negative-price
-strategies and PV curtailment are on the roadmap and not started.
+There is also no price awareness **in this feature**: the battery runs
+net-zero-energy and knows nothing about what electricity costs, so negative-price
+charging is still on the roadmap. Prices are imported (see [Dynamic
+prices](/guide/prices)) and [PV curtailment](/guide/pv-curtailment) does act on
+them.
 
 The full list with the reasoning behind each item is in
 [the internals](/internals/battery-control#not-done-yet).
