@@ -11,8 +11,8 @@ import { failureFor } from "../../lib/settings-form";
 import EntityAutocomplete from "../EntityAutocomplete";
 import Field from "../Field";
 import { hintStyle, labelStyle } from "../form";
-import BatteryNameField from "./BatteryNameField";
 import EditableList from "./EditableList";
+import EventNameField from "./EventNameField";
 import Section from "./Section";
 import { useSectionEditor } from "./useSectionEditor";
 
@@ -78,10 +78,14 @@ export default function BatteriesSection({
           const errors = errorsFor(battery);
           return (
             <>
-              <BatteryNameField
+              <EventNameField
                 defaultValue={battery?.title}
                 savedTitle={battery?.title}
                 error={errors.title}
+                placeholder="e.g. Home battery"
+                noun="battery"
+                carries="target power"
+                eventType={targetEventType}
               />
               <Field
                 name="capacityKwh"

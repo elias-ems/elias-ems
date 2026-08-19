@@ -7,6 +7,7 @@ import EntityAutocomplete from "../EntityAutocomplete";
 import Field from "../Field";
 import { hintStyle, labelStyle } from "../form";
 import EditableList from "./EditableList";
+import EventNameField from "./EventNameField";
 import Section from "./Section";
 import { useSectionEditor } from "./useSectionEditor";
 
@@ -66,13 +67,14 @@ export default function PvSection({
           const errors = errorsFor(entity);
           return (
             <>
-              <Field
-                name="title"
-                label="Title"
-                placeholder="e.g. South roof"
+              <EventNameField
                 defaultValue={entity?.title}
+                savedTitle={entity?.title}
                 error={errors.title}
-                hint="Names the array on the dashboard, and is what its limit event is called after."
+                placeholder="e.g. South roof"
+                noun="PV array"
+                carries="generation limit"
+                eventType={pvLimitEventType}
               />
               <EntityAutocomplete
                 name="powerEntityId"
