@@ -47,6 +47,13 @@ import {
   startHaLive,
   stopHaLive,
 } from "../../app/lib/ha-live.server";
+import { DEFAULT_PRICE_CONFIG } from "../../app/lib/prices";
+import { savePriceConfig } from "../../app/lib/prices.server";
+import {
+  addPvEntity,
+  listPvEntities,
+  removePvEntity,
+} from "../../app/lib/pv-entities.server";
 import { defaultStates, startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
@@ -64,6 +71,42 @@ async function subscribe(): Promise<void> {
 }
 
 const GRID = { powerEntityId: "sensor.grid_power" };
+
+/** 1234.5 W in the fixture, against a 5 kW inverter. */
+const PV_ARRAY = {
+  title: "South roof",
+  powerEntityId: "sensor.inverter_power",
+  energyEntityId: "sensor.inverter_energy_total",
+  ratedPowerW: 5000,
+  curtailable: true,
+};
+
+/**
+ * Prices whose *sign* is fixed regardless of when the suite runs.
+ *
+ * The mock's price series is a real-shaped day, so what it says right now
+ * depends on the wall clock — which is exactly what a test must not depend on.
+ * A production formula with a large constant in it puts the injection price
+ * unambiguously on one side of the threshold whatever the spot happens to be,
+ * and it exercises the thing that actually decides: the production leg with the
+ * contract applied, not the exchange price.
+ */
+const PRICES = (productionFormula: string) => ({
+  source: "home-assistant" as const,
+  forecastEntityId: "sensor.energi_epex_spot",
+  consumptionFormula: "price",
+  productionFormula,
+});
+
+const NEGATIVE_INJECTION = PRICES("price - 10");
+const POSITIVE_INJECTION = PRICES("price + 10");
+
+/** Curtailment on, and acting at once unless a case is about the settle rule. */
+const CURTAILMENT = {
+  ...DEFAULT_CURTAILMENT_CONFIG,
+  enabled: true,
+  settleSeconds: 0,
+};
 
 const BATTERY = {
   title: "Home battery",
@@ -93,10 +136,23 @@ function logged(fragment: string): boolean {
 
 /** Every target published so far, as [event type, watts] pairs, in order. */
 function targetEvents(): Array<[string, unknown]> {
-  return ha.events.map((event) => [
-    event.eventType,
-    (event.data as { power_w?: unknown }).power_w,
-  ]);
+  return ha.events
+    .filter((event) => event.eventType.endsWith("_target_power"))
+    .map((event) => [
+      event.eventType,
+      (event.data as { power_w?: unknown }).power_w,
+    ]);
+}
+
+/** The same for PV limits, as [event type, percent, released] triples. */
+function pvLimitEvents(): Array<[string, unknown, unknown]> {
+  return ha.events
+    .filter((event) => event.eventType.endsWith("_pv_limit"))
+    .map((event) => [
+      event.eventType,
+      (event.data as { limit_percent?: unknown }).limit_percent,
+      (event.data as { released?: unknown }).released,
+    ]);
 }
 
 /**
@@ -144,7 +200,9 @@ beforeEach(async () => {
   ha.setStates(await defaultStates());
   ha.events.length = 0;
   for (const battery of await listBatteries()) await removeBattery(battery.id);
+  for (const entity of await listPvEntities()) await removePvEntity(entity.id);
   await saveGrid(GRID);
+  await savePriceConfig(DEFAULT_PRICE_CONFIG);
   // Each tick now gates its halves on what is stored, so that switching a
   // feature on or off takes effect without restarting the loop. These cases are
   // battery control's, so that is what is on; the `syncControlLoop` cases below
@@ -270,6 +328,171 @@ describe("runControlTick", () => {
 
     expect(logged("discharge at 842 W")).toBe(true);
     expect(logged("capped from")).toBe(false);
+  });
+});
+
+describe("runControlTick, curtailment half", () => {
+  /** Curtailment on and battery control off — the two are independent. */
+  async function onlyCurtailment(
+    prices = NEGATIVE_INJECTION,
+    config = CURTAILMENT,
+  ): Promise<void> {
+    await addPvEntity(PV_ARRAY);
+    await savePriceConfig(prices);
+    await saveControlConfig({
+      enabled: false,
+      strategy: "net-zero-energy",
+      intervalSeconds: 5,
+    });
+    await saveCurtailmentConfig(config);
+  }
+
+  it("holds the array back to what the house can absorb", async () => {
+    await onlyCurtailment();
+
+    await runControlTick();
+
+    // The fixture generates 1234.5 W while importing 842 W, so the house can
+    // take 2076.5 W — 42% of a 5000 W inverter.
+    expect(logged("arrays at 1235 W → allow 2077 W total")).toBe(true);
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 42, false],
+    ]);
+  });
+
+  it("decides on the injection price, not the exchange price", async () => {
+    // The formula is what turns the mock's positive spot into a negative
+    // earning and back. Reading the raw price instead would get this backwards
+    // for anyone whose contract charges a fee per exported kWh.
+    await onlyCurtailment(POSITIVE_INJECTION);
+
+    await runControlTick();
+
+    expect(logged("nothing to curtail")).toBe(true);
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 100, true],
+    ]);
+  });
+
+  it("runs with battery control switched off, and publishes no targets", async () => {
+    await addBattery(BATTERY);
+    await onlyCurtailment();
+
+    await runControlTick();
+
+    // A house with panels and no interest in steering its battery is an
+    // ordinary configuration, and the loop has to serve it without the other
+    // half deciding anything.
+    expect(pvLimitEvents()).toHaveLength(1);
+    expect(targetEvents()).toEqual([]);
+  });
+
+  it("does not publish again while the limit has not moved", async () => {
+    await onlyCurtailment();
+
+    await runControlTick();
+    await runControlTick();
+
+    // On the other end of each event is an automation writing to real
+    // hardware, which on some brands commits to flash.
+    expect(pvLimitEvents()).toHaveLength(1);
+  });
+
+  it("waits for the meter to settle before moving the limit", async () => {
+    vi.useFakeTimers();
+    await onlyCurtailment(NEGATIVE_INJECTION, {
+      ...DEFAULT_CURTAILMENT_CONFIG,
+      enabled: true,
+      settleSeconds: 30,
+    });
+
+    await runControlTick();
+
+    // This is the window in which battery control would be ramping. Cutting
+    // now would throw away a surplus the battery was about to take.
+    expect(logged("settling, 0s of 30s")).toBe(true);
+    expect(pvLimitEvents()).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(31_000);
+    await runControlTick();
+
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 42, false],
+    ]);
+  });
+
+  it("releases the array rather than guessing when the grid goes unreadable", async () => {
+    await onlyCurtailment();
+    await runControlTick();
+    ha.setState("sensor.grid_power", "unavailable", {});
+    ha.events.length = 0;
+
+    await runControlTick();
+
+    // Fail open, and the opposite of what battery control does when blind: an
+    // array left pinned loses a sunny day with nothing looking wrong.
+    expect(logged("grid power sensor is not readable")).toBe(true);
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 100, true],
+    ]);
+  });
+
+  it("says nothing about an array nobody asked to curtail", async () => {
+    await addPvEntity({ ...PV_ARRAY, curtailable: false });
+    await savePriceConfig(NEGATIVE_INJECTION);
+    await saveCurtailmentConfig(CURTAILMENT);
+
+    await runControlTick();
+
+    expect(pvLimitEvents()).toEqual([]);
+    expect(logged("No PV array is curtailable")).toBe(true);
+  });
+});
+
+describe("syncControlLoop, with curtailment", () => {
+  it("releases the arrays when curtailment is switched off", async () => {
+    await addPvEntity(PV_ARRAY);
+    await savePriceConfig(NEGATIVE_INJECTION);
+    await saveControlConfig({
+      enabled: false,
+      strategy: "net-zero-energy",
+      intervalSeconds: 5,
+    });
+    await saveCurtailmentConfig(CURTAILMENT);
+    await syncControlLoop();
+    await pendingControlTick();
+    ha.events.length = 0;
+
+    await saveCurtailmentConfig({ ...CURTAILMENT, enabled: false });
+    await syncControlLoop();
+
+    // The single most important thing this feature does: an array that stops
+    // being decided for must be handed back, or the last limit stands for ever.
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 100, true],
+    ]);
+    expect(logged("Released the array to 100%.")).toBe(true);
+  });
+
+  it("runs the loop for curtailment alone, and says so in its own log", async () => {
+    await addPvEntity(PV_ARRAY);
+    await savePriceConfig(NEGATIVE_INJECTION);
+    await saveControlConfig({
+      enabled: false,
+      strategy: "net-zero-energy",
+      intervalSeconds: 5,
+    });
+    await saveCurtailmentConfig(CURTAILMENT);
+
+    const status = await syncControlLoop();
+    await pendingControlTick();
+
+    // `running` is battery control's view, and it is deliberately narrower than
+    // "a timer exists" — the home page would otherwise report the wrong feature
+    // as running.
+    expect(status.running).toBe(false);
+    expect(logged("PV curtailment enabled")).toBe(true);
+    expect(logged("Battery control enabled")).toBe(false);
   });
 });
 
@@ -445,7 +668,11 @@ describe("syncControlLoop", () => {
     const status = await syncControlLoop();
 
     expect(status.running).toBe(false);
-    expect(logged("loop stopped")).toBe(true);
+    // Named per feature rather than as one line about the loop: the loop is
+    // shared with curtailment now, and "the loop stopped" would be the wrong
+    // thing to say in battery control's box when the other feature is what was
+    // switched off.
+    expect(logged("Battery control disabled.")).toBe(true);
 
     // And it really is stopped, not merely reported as such.
     const before = decisionTicks();

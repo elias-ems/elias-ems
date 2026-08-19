@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 See [docs/project.md](docs/project.md) for what we're building and architecture decisions, [docs/architecture.md](docs/architecture.md) for repo/code structure, [docs/roadmap.md](docs/roadmap.md) for current and future goals, and [docs/routines.md](docs/routines.md) for scheduled Claude routines. Keep these up to date as the project evolves.
 
-Per-feature docs live in [docs/features/](docs/features), one file per feature: [battery-control.md](docs/features/battery-control.md), [live-readings.md](docs/features/live-readings.md), [diagnostics.md](docs/features/diagnostics.md), [dynamic-prices.md](docs/features/dynamic-prices.md).
+Per-feature docs live in [docs/features/](docs/features), one file per feature: [battery-control.md](docs/features/battery-control.md), [live-readings.md](docs/features/live-readings.md), [diagnostics.md](docs/features/diagnostics.md), [dynamic-prices.md](docs/features/dynamic-prices.md), [pv-curtailment.md](docs/features/pv-curtailment.md).
 
 ## Commands
 

@@ -59,6 +59,7 @@ import { isCurtailable, type PvEntity, pvSlug } from "./pv-entities";
 import { listPvEntities } from "./pv-entities.server";
 import {
   describePvLimitPublishes,
+  forgetPublishedLimit,
   forgetPublishedLimits,
   publishPvLimits,
 } from "./pv-limits.server";
@@ -128,6 +129,28 @@ function log(
   message: string,
 ): void {
   appendDiagnostic(origin, level, message);
+}
+
+/**
+ * A line about the loop itself — a tick that failed, or one that overlapped —
+ * rather than about either feature's decision.
+ *
+ * Written to **every** enabled feature's log, because each one's box is where
+ * somebody would go to find out why its decisions stopped arriving. Sending it
+ * to battery control alone was right while that was the only thing on the loop;
+ * now it would leave a house running curtailment on its own with a silent box
+ * and no way to tell a dead loop from a quiet one.
+ */
+function logLoop(level: DiagnosticsLevel, message: string): void {
+  const origins: DiagnosticsOrigin[] = [];
+  if (state.config?.enabled) origins.push("battery-control");
+  if (state.curtailment?.enabled) origins.push("pv-curtailment");
+
+  // Nothing enabled and yet a tick happened — a forced tick from the UI, or a
+  // race with a save. Battery control's box is the one the home page shows.
+  for (const origin of origins.length > 0 ? origins : ["battery-control"]) {
+    log(origin as DiagnosticsOrigin, level, message);
+  }
 }
 
 /** The stored configuration a tick's entity lists and its snapshots share. */
@@ -557,6 +580,45 @@ export async function releasePvArrays(): Promise<void> {
 }
 
 /**
+ * Hands **one** array back, for when it alone stops being steered — removed
+ * from settings, or un-ticked, or its rating cleared.
+ *
+ * Takes the record as it was *before* the change, which is the whole point: an
+ * array that has just been deleted is no longer on disk to look up, and one
+ * whose rating has just been cleared no longer has the number the limit was a
+ * percentage of. Neither could be released from what settings now say.
+ *
+ * Without this the last limit published for that array would stand for ever.
+ * Nothing decides for it any more, so nothing would ever supersede it, and the
+ * add-on would go on quietly costing its owner a slice of every sunny day.
+ */
+export async function releasePvArray(array: PvEntity): Promise<void> {
+  if (!isCurtailable(array)) return;
+
+  const [publish] = await publishPvLimits([
+    {
+      arrayId: array.id,
+      title: array.title,
+      slug: pvSlug(array),
+      ratedPowerW: array.ratedPowerW,
+      commandPercent: 100,
+      released: true,
+      force: true,
+    },
+  ]);
+
+  forgetPublishedLimit(array.id);
+
+  log(
+    "pv-curtailment",
+    publish.status === "published" ? "info" : "error",
+    publish.status === "published"
+      ? `${array.title} is no longer curtailable — released it to 100%.`
+      : `${array.title} is no longer curtailable, but the release did not go out (${publish.detail ?? publish.status}) — check it is not still being held back.`,
+  );
+}
+
+/**
  * Starts a tick without waiting for it — the interval callback cannot be async
  * and nothing about serving a page depends on the outcome. The promise is kept
  * in `state.inFlight` so it can be both the overlap guard and something tests
@@ -568,11 +630,7 @@ function startTick(): void {
   // unreachable HA takes far longer than that to give up, which is exactly when
   // overlap would start.
   if (state.inFlight) {
-    log(
-      "battery-control",
-      "warn",
-      "Previous tick is still running — skipping this one.",
-    );
+    logLoop("warn", "Previous tick is still running — skipping this one.");
     return;
   }
 
@@ -583,7 +641,7 @@ function startTick(): void {
       // keep the schedule. A loop that dies on the first outage is worse than no
       // loop, because from the outside it still looks like it is working.
       const message = error instanceof Error ? error.message : String(error);
-      log("battery-control", "error", `Tick failed: ${message}`);
+      logLoop("error", `Tick failed: ${message}`);
     })
     .finally(() => {
       state.inFlight = null;
@@ -717,11 +775,15 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   if (!wanted) {
     if (state.timer) {
       stopControlLoop();
-      log(
-        "battery-control",
-        "info",
-        "Battery control disabled — loop stopped.",
-      );
+      // One line per feature that was actually running, under its own origin.
+      // A single "battery control disabled" would be a lie on a house that
+      // only ever had curtailment switched on.
+      if (previous?.enabled) {
+        log("battery-control", "info", "Battery control disabled.");
+      }
+      if (previousCurtailment?.enabled) {
+        log("pv-curtailment", "info", "PV curtailment disabled.");
+      }
       // Waited for, not fired and forgotten: the settings form is still
       // sitting on this response, and "it is off" should not come back before
       // the hardware has actually been let go.
@@ -733,15 +795,28 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   // A feature switched off while the other keeps the loop running still has to
   // let its own hardware go — the tick simply stops deciding for it, which on
   // its own would leave the last command standing forever.
-  if (previous?.enabled && !config.enabled) await releaseBatteries();
+  if (previous?.enabled && !config.enabled) {
+    log("battery-control", "info", "Battery control disabled.");
+    await releaseBatteries();
+  }
   if (previousCurtailment?.enabled && !curtailment.enabled) {
+    log("pv-curtailment", "info", "PV curtailment disabled.");
     await releasePvArrays();
   }
 
-  const changed =
+  // What the loop itself runs on. A feature being switched on or off does not
+  // change this — the tick gates its own halves — but it still has to restart
+  // the loop, because the watched set and the immediate first tick both depend
+  // on which features are live.
+  const cadenceChanged =
     !previous ||
     previous.intervalSeconds !== config.intervalSeconds ||
     previous.strategy !== config.strategy;
+
+  const changed =
+    cadenceChanged ||
+    previous?.enabled !== config.enabled ||
+    previousCurtailment?.enabled !== curtailment.enabled;
 
   if (state.timer && !changed) {
     // The watched set depends on which features are on, so a feature toggled
@@ -751,11 +826,28 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   }
 
   stopControlLoop();
-  log(
-    "battery-control",
-    "info",
-    `Battery control enabled — ${config.strategy}, on every change and at most every ${config.intervalSeconds}s.`,
-  );
+  // One line per feature, under its own origin: the loop is shared but each box
+  // should say what *it* is now doing, and at what cadence. Only when that
+  // feature has just come on or the cadence moved — re-announcing battery
+  // control because curtailment was toggled would be noise about something
+  // that did not change.
+  if (config.enabled && (cadenceChanged || !previous?.enabled)) {
+    log(
+      "battery-control",
+      "info",
+      `Battery control enabled — ${config.strategy}, on every change and at most every ${config.intervalSeconds}s.`,
+    );
+  }
+  if (
+    curtailment.enabled &&
+    (cadenceChanged || !previousCurtailment?.enabled)
+  ) {
+    log(
+      "pv-curtailment",
+      "info",
+      `PV curtailment enabled — on every change and at most every ${config.intervalSeconds}s, acting once the meter has been off target for ${curtailment.settleSeconds}s.`,
+    );
+  }
 
   await refreshWatched();
   armShutdownRelease();

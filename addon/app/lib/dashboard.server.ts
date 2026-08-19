@@ -75,6 +75,12 @@ export type DashboardPrices = {
   slot: string | null;
   /** How far the forecast reaches, and whether tomorrow has been published. */
   coverage: string | null;
+  /**
+   * What currency the strings above are in, so anything else on the page that
+   * has to render a price — curtailment's threshold — agrees with this card
+   * rather than guessing at EUR.
+   */
+  currency: string;
   error: string | null;
 };
 
@@ -156,6 +162,7 @@ function toPrices(
       spot: null,
       slot: null,
       coverage: null,
+      currency: "EUR",
       error: null,
     };
   }
@@ -185,6 +192,7 @@ function toPrices(
       first && last
         ? `${read.forecast?.slots.length} slots · ${formatSlotRange(first.start, last.end)}`
         : null,
+    currency,
     error: read.error,
   };
 }
