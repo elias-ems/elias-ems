@@ -1,3 +1,9 @@
+# The Node version itself lives in .node-version rather than here, because
+# actions/setup-node can read that file and cannot read this one — keeping the
+# number in one place is what stops CI and local shells from drifting apart.
+# Idiomatic version files are off by default in mise, hence the setting.
+[settings]
+idiomatic_version_file_enable_tools = ["node"]
+
 [tools]
-node = "24.19.0"
 gh = "2.97.0"

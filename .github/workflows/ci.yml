@@ -1,0 +1,171 @@
+name: CI
+
+# Lint, typecheck and test both projects on every pull request.
+#
+# Deliberately carries no `paths:` filter, unlike docs.yml. A filtered workflow
+# reports nothing at all on a PR that misses the filter, so a required status
+# check that is also path-filtered blocks the PR forever waiting for a run that
+# will never come. docs.yml can afford filters because it is not required.
+#
+# The runner is pinned rather than `ubuntu-latest`: GitHub migrates that label
+# on its own schedule, and the migration lands mid-PR with no commit to blame.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  addon:
+    name: Add-on lint, types, unit tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: addon
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: addon/package-lock.json
+
+      - name: Install dependencies
+        id: install
+        run: npm ci
+
+      # These three are independent, so one failure should not hide the other
+      # two — but they are still skipped if the install itself never succeeded,
+      # which `!cancelled()` alone would not do.
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run lint
+
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run typecheck
+
+      - name: Unit tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm test
+
+  addon-e2e:
+    name: Add-on integration and e2e tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: addon
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: addon/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Keyed on the installed Playwright version: a browser build only works
+      # with the release that downloaded it, so the cache has to miss whenever
+      # @playwright/test moves.
+      - name: Resolve the installed Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Playwright browser
+        id: playwright-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install the Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      # The cache holds the browser but not the apt packages it links against,
+      # so a hit still needs the system dependencies putting back.
+      - name: Install Playwright system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # Once, here, rather than through `npm run test:integration` and
+      # `npm run test:e2e`, which would each rebuild. Both suites need it: the
+      # ingress handling under test lives in server.js and in the built asset
+      # manifest, neither of which a dev server uses.
+      - name: Build
+        run: npm run build
+
+      - name: Integration tests
+        id: integration
+        run: npx vitest run --project integration
+
+      - name: End-to-end tests
+        if: ${{ !cancelled() && steps.integration.outcome != 'skipped' }}
+        run: npx playwright test
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            addon/playwright-report/
+            addon/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  site:
+    name: Docs site lint, types, tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            addon/package-lock.json
+            site/package-lock.json
+
+      # The site's own lint and typecheck scripts shell out to the add-on's
+      # Biome and tsc with `npm --prefix ../addon exec --no --`, where `--no`
+      # makes a missing addon/node_modules an error rather than a download. So
+      # this job needs both installs, even though it only builds the site.
+      - name: Install the add-on's dependencies
+        run: npm ci
+        working-directory: addon
+
+      - name: Install dependencies
+        id: install
+        run: npm ci
+        working-directory: site
+
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run lint
+        working-directory: site
+
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run typecheck
+        working-directory: site
+
+      # Not `docs:build` — docs.yml already builds the site on pull requests,
+      # and that build is the dead-link check.
+      - name: Tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm test
+        working-directory: site

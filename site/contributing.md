@@ -11,7 +11,8 @@ If you are here to understand how it works rather than to change it, start with
 
 ## Getting set up
 
-The tools that don't come from npm are pinned in `mise.toml`, so
+The tools that don't come from npm are pinned in `mise.toml`, and Node itself in
+`.node-version` (which mise and CI both read), so
 [mise](https://mise.jdx.dev/) installs the lot at the right versions — Node 24
 and the GitHub CLI:
 

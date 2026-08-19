@@ -68,7 +68,7 @@ Two things about its dependency are settled decisions, so that neither a depende
 
 The app is **React Router 8 in framework mode** (the successor to Remix — Remix v2's packages were collapsed into `react-router` in v7), written in **TypeScript**.
 
-- React Router 8 requires **Node >= 22.22**, React >= 19.2.7, and Vite 7+, but the add-on itself asks for **Node >= 24** (`engines` in [addon/package.json](addon/package.json), `node:24-alpine` in the Dockerfile, `24.19.0` in [mise.toml](mise.toml) — the current LTS line). Node 24 publishes no 32-bit ARM builds, which is why [addon/config.yaml](addon/config.yaml) lists only `aarch64` and `amd64`: `armv7` was dropped when Home Assistant itself dropped armv7 support. Keep `@types/node` on `^24` — it tracks the Node major we run, not the newest release.
+- React Router 8 requires **Node >= 22.22**, React >= 19.2.7, and Vite 7+, but the add-on itself asks for **Node >= 24** (`engines` in [addon/package.json](addon/package.json), `node:24-alpine` in the Dockerfile, `24.19.0` in [.node-version](.node-version) — the current LTS line). Node 24 publishes no 32-bit ARM builds, which is why [addon/config.yaml](addon/config.yaml) lists only `aarch64` and `amd64`: `armv7` was dropped when Home Assistant itself dropped armv7 support. Keep `@types/node` on `^24` — it tracks the Node major we run, not the newest release.
 - Routes still use Remix-style file naming under `addon/app/routes/`, wired up by `flatRoutes()` from `@react-router/fs-routes` in [addon/app/routes.ts](addon/app/routes.ts).
 - Route modules get generated per-route types in `.react-router/types` (gitignored). Import them as `import type { Route } from "./+types/<route-file-name>"` and prefer `Route.ComponentProps` over `useLoaderData`/`useActionData`. Run `npm run typecheck` after adding or renaming a route so the types exist.
 - `json()` and `defer()` were removed in v7 — return plain objects from loaders/actions, and use `data(value, { status })` when you need to set a status code.
@@ -120,6 +120,27 @@ Running that from the repo root instead would silently download a second copy of
 Note that lefthook globs are matched from the **repo root** and ignore the `root:` setting, so they carry the `addon/` prefix that `root: "addon/"` then strips back off.
 
 [.gitattributes](.gitattributes) pins the working tree to LF. Without it, `core.autocrlf=true` on Windows checks files out as CRLF while Biome writes LF, so the formatter and the hook rewrite each other's line endings on every run.
+
+## Continuous integration
+
+Two workflows, both on `ubuntu-24.04` and both installing Node with `actions/setup-node`:
+
+- [.github/workflows/docs.yml](.github/workflows/docs.yml) — builds the site on pull requests touching `site/`, `docs/` or itself, and deploys from `main`.
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) — three jobs covering everything else: `addon` (lint, typecheck, unit tests), `addon-e2e` (integration and end-to-end), and `site` (lint, typecheck, the link-rewriting tests).
+
+Points worth not re-deriving:
+
+- **`ci.yml` carries no `paths:` filter, on purpose.** A path-filtered workflow reports *nothing* on a pull request that misses the filter, so a check that is both required and filtered blocks the PR forever waiting for a run that will never come. docs.yml can afford filters precisely because it is not a required check.
+- **The runners are pinned rather than `ubuntu-latest`.** GitHub migrates that label on its own schedule, and the migration lands mid-pull-request with no commit to blame.
+- **Node's version lives in [.node-version](.node-version), not in [mise.toml](mise.toml).** `setup-node`'s `node-version-file` reads `package.json`, `.nvmrc`, `.node-version` and `.tool-versions` — never a `mise.toml` — so leaving the number there would have meant maintaining it twice. mise reads `.node-version` too, but only because of the `idiomatic_version_file_enable_tools = ["node"]` setting in mise.toml: idiomatic version files are **off by default** in mise, and dropping that setting silently leaves local shells with no pinned Node at all. mise.toml still owns `gh`, which has no such file.
+- **`addon-e2e` builds once and then calls `vitest` and `playwright` directly**, rather than going through `test:integration` and `test:e2e` — those scripts each run `npm run build` first, so using them would build twice.
+- **The Playwright browser is cached on the installed Playwright version**, since a browser build only works with the release that fetched it. A cache hit still runs `playwright install-deps`: the cache holds the browser, not the apt packages it links against. The alternative — running the job in `mcr.microsoft.com/playwright:<version>-noble`, which ships both — was considered and rejected for now, because the image tag then has to be bumped in lockstep with `@playwright/test` and a mismatch fails obscurely. Switching is a two-line change if e2e ever becomes the slow job.
+- **A container image is the wrong runner for this repo.** Matching the Dockerfile with `node:24-alpine` sounds appealing and cannot work: Playwright publishes no musl browser builds, and `install --with-deps` shells out to `apt-get`. What `node:24-alpine` would actually validate is the *image build*, and the way to check that is to build the Dockerfile — a job that does not exist yet.
+- **The lint/typecheck/test steps within a job run even after an earlier one fails** (`if: ${{ !cancelled() && steps.install.outcome == 'success' }}`), so one lint error doesn't hide a type error. The install guard is the part that matters: plain `!cancelled()` would keep running the checks after `npm ci` itself had failed.
+- **The `site` job installs *both* projects.** `site`'s `lint` and `typecheck` shell out to the add-on's Biome and tsc with `--no`, which makes a missing `addon/node_modules` an error rather than a download.
+- lefthook's postinstall skips itself when `CI` is set, so CI checkouts correctly get no git hooks.
+
+Nothing enforces these on merge by itself — the job names have to be added as **required status checks** on `main` in the repository settings for a red run to block anything.
 
 ## Home Assistant ingress
 
