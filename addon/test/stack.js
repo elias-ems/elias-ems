@@ -148,12 +148,22 @@ export async function startStack({
     origin: proxy.origin,
     /** The app with no ingress in front of it — where none of the bugs show. */
     directUrl: `http://127.0.0.1:${port}`,
+    /**
+     * Exactly the reverse of the startup order, and the app has to be gone
+     * before the mock is: the add-on reconnects its WebSocket whenever one
+     * drops, so closing the mock first raced its own client. `ha.close()`
+     * terminates the open sockets and then waits for `wss.close()`, which only
+     * fires once every client has gone — and a reconnect arriving in that
+     * window is a new client, so the wait never ends. Windows usually won the
+     * race and Linux CI reliably lost it, which is what a 60s `afterAll` hook
+     * timeout on a suite whose assertions had all passed turned out to be.
+     */
     async close() {
       await proxy.close();
-      await ha.close();
       const exited = new Promise((resolve) => app.once("exit", resolve));
       app.kill();
       await exited;
+      await ha.close();
     },
   };
 }
