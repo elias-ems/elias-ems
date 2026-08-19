@@ -193,10 +193,21 @@ describe("publishTargets", () => {
       }),
     ]);
 
-    expect(ha.events.map((event) => event.eventType)).toEqual([
-      targetEventType("home_battery"),
-      targetEventType("garage_battery"),
-    ]);
+    // Sorted before comparing, because `publishTargets` fires both events at
+    // once on purpose — one battery's slow publish must not hold its
+    // neighbour's up — so which of them reaches Home Assistant first is a race
+    // rather than a fact about the feature. Asserting the arrival order made
+    // this case fail about half the time.
+    //
+    // Sorting rather than only checking membership keeps the claim intact: two
+    // events, each battery with its own type, and neither of them published
+    // twice.
+    expect(ha.events.map((event) => event.eventType).sort()).toEqual(
+      [
+        targetEventType("home_battery"),
+        targetEventType("garage_battery"),
+      ].sort(),
+    );
   });
 
   it("holds each battery's deadband on its own", async () => {
