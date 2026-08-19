@@ -66,6 +66,7 @@ export default defineConfig({
             { text: "Live readings", link: "/internals/live-readings" },
             { text: "Diagnostics", link: "/internals/diagnostics" },
             { text: "Dynamic prices", link: "/internals/dynamic-prices" },
+            { text: "PV curtailment", link: "/internals/pv-curtailment" },
           ],
         },
       ],

@@ -445,6 +445,12 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     0,
   );
 
+  /** The fallback denominator, for the case where nothing is generating. */
+  const ratedTotal = participating.reduce(
+    (total, array) => total + (array.ratedPowerW ?? 0),
+    0,
+  );
+
   const decisions = decide((array) => {
     const rated = array.ratedPowerW as number;
     const powerW = array.powerW as number;
@@ -456,7 +462,7 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     const share =
       generating > 0
         ? (combinedAllowedW * Math.max(0, powerW)) / generating
-        : combinedAllowedW / participating.length;
+        : (combinedAllowedW * rated) / ratedTotal;
 
     const requestedPercent = (share / rated) * 100;
     const limitPercent = Math.min(

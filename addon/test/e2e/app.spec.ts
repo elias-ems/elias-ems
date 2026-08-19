@@ -174,8 +174,14 @@ test("battery control can be configured, enabled, and watched deciding", async (
   await expect(page.getByText("76 %")).toBeVisible();
 
   // A diagnostics box only polls while it is open, so this both expands it and
-  // is the thing that makes the log appear at all.
-  await page.getByText("Diagnostics").click();
+  // is the thing that makes the log appear at all. Scoped to battery control's
+  // section: PV curtailment has a box of its own on this page now, and a bare
+  // "Diagnostics" matches both.
+  await page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: "Battery control" }) })
+    .getByText("Diagnostics")
+    .click();
 
   // The fixture imports 842 W with the battery idle, so net zero means
   // discharging exactly that much.

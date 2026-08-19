@@ -1,6 +1,7 @@
 import { data } from "react-router";
 import BatteriesSection from "../components/settings/BatteriesSection";
 import ControlSection from "../components/settings/ControlSection";
+import CurtailmentSection from "../components/settings/CurtailmentSection";
 import GridSection from "../components/settings/GridSection";
 import PricesSection from "../components/settings/PricesSection";
 import PvSection from "../components/settings/PvSection";
@@ -20,14 +21,27 @@ import {
   readControlConfig,
   saveControlConfig,
 } from "../lib/control-config.server";
-import { syncControlLoop } from "../lib/control-loop.server";
+import { releasePvArray, syncControlLoop } from "../lib/control-loop.server";
+import {
+  NO_CURTAILABLE_ARRAY_ERROR,
+  NO_PRICES_ERROR,
+  parseCurtailmentConfig,
+} from "../lib/curtailment";
+import {
+  readCurtailmentConfig,
+  saveCurtailmentConfig,
+} from "../lib/curtailment-config.server";
 import { appendDiagnostic } from "../lib/diagnostics.server";
 import { isGridConfigured, parseGrid } from "../lib/grid";
 import { readGrid, saveGrid } from "../lib/grid.server";
 import { readPrices, summarizePrices } from "../lib/price-source.server";
-import { parsePriceConfig } from "../lib/prices";
-import { savePriceConfig } from "../lib/prices.server";
-import { parsePvEntity } from "../lib/pv-entities";
+import { isPriceConfigured, parsePriceConfig } from "../lib/prices";
+import { readPriceConfig, savePriceConfig } from "../lib/prices.server";
+import {
+  DUPLICATE_PV_SLUG_ERROR,
+  isCurtailable,
+  parsePvEntity,
+} from "../lib/pv-entities";
 import {
   addPvEntity,
   listPvEntities,
@@ -39,22 +53,25 @@ import { slugifyTitle } from "../lib/slug";
 import type { Route } from "./+types/settings";
 
 export async function loader() {
-  const [pvEntities, grid, batteries, control, prices] = await Promise.all([
-    listPvEntities(),
-    readGrid(),
-    listBatteries(),
-    readControlConfig(),
-    // Its own read rather than the dashboard's: this page has no readings to
-    // borrow, and what it needs is the *summary* — proof that the entity picked
-    // is really a price feed, which is only knowable by going and looking.
-    readPrices(),
-  ]);
+  const [pvEntities, grid, batteries, control, curtailment, prices] =
+    await Promise.all([
+      listPvEntities(),
+      readGrid(),
+      listBatteries(),
+      readControlConfig(),
+      readCurtailmentConfig(),
+      // Its own read rather than the dashboard's: this page has no readings to
+      // borrow, and what it needs is the *summary* — proof that the entity picked
+      // is really a price feed, which is only knowable by going and looking.
+      readPrices(),
+    ]);
 
   return {
     pvEntities,
     grid,
     batteries,
     control,
+    curtailment,
     prices: prices.config,
     priceSummary: summarizePrices(prices.read),
   };
@@ -80,13 +97,57 @@ export async function action({ request }: Route.ActionArgs) {
       if (!parsed.ok) {
         return failed({ section: "pv", recordId, errors: parsed.errors });
       }
-      if (recordId) await updatePvEntity(recordId, parsed.fields);
-      else await addPvEntity(parsed.fields);
+
+      // Two arrays whose titles slugify the same way would publish to the same
+      // event type and take each other's limits, with nothing anywhere
+      // reporting a problem. Here rather than in `parsePvEntity` because it
+      // needs every other array, which a pure model module cannot read — the
+      // same rule, and the same reason, as for batteries below.
+      const slug = slugifyTitle(parsed.fields.title);
+      const clash = (await listPvEntities()).some(
+        (entity) =>
+          entity.id !== recordId && slugifyTitle(entity.title) === slug,
+      );
+      if (clash) {
+        return failed({
+          section: "pv",
+          recordId,
+          errors: { title: DUPLICATE_PV_SLUG_ERROR },
+        });
+      }
+
+      if (!recordId) {
+        await addPvEntity(parsed.fields);
+        return { section: "pv" as const, ok: true as const };
+      }
+
+      // Read before writing, because the release below needs the record as it
+      // *was*: an array whose rating has just been cleared no longer carries
+      // the number its limit was a percentage of.
+      const previous = (await listPvEntities()).find(
+        (entity) => entity.id === recordId,
+      );
+      await updatePvEntity(recordId, parsed.fields);
+
+      // An array that has just left the plan must be let go of, or the last
+      // limit published for it stands for ever — nothing decides for it any
+      // more, so nothing would ever supersede it.
+      if (previous && !isCurtailable(parsed.fields)) {
+        await releasePvArray(previous);
+      }
       return { section: "pv" as const, ok: true as const };
     }
 
     case "pv-remove": {
-      await removePvEntity(String(formData.get("id")));
+      const id = String(formData.get("id"));
+      // Same reason, and more urgent: a removed array is one nothing will ever
+      // decide for again. Captured before the removal, since afterwards there
+      // is nothing left to name it by.
+      const removed = (await listPvEntities()).find(
+        (entity) => entity.id === id,
+      );
+      await removePvEntity(id);
+      if (removed) await releasePvArray(removed);
       return { section: "pv" as const, ok: true as const };
     }
 
@@ -169,6 +230,50 @@ export async function action({ request }: Route.ActionArgs) {
       return { section: "control" as const, ok: true as const };
     }
 
+    case "curtailment-save": {
+      const parsed = parseCurtailmentConfig(formData);
+      if (!parsed.ok) {
+        return failed({
+          section: "curtailment",
+          recordId: null,
+          errors: parsed.errors,
+        });
+      }
+
+      // The form disables the checkbox in these states, but the checks have to
+      // be here too: an array can stop being curtailable, or a price source can
+      // be cleared, after curtailment was switched on — and nothing stops a
+      // form being posted directly.
+      if (parsed.config.enabled) {
+        const [pvEntities, prices] = await Promise.all([
+          listPvEntities(),
+          readPriceConfig(),
+        ]);
+        if (!pvEntities.some(isCurtailable)) {
+          return failed({
+            section: "curtailment",
+            recordId: null,
+            errors: { enabled: NO_CURTAILABLE_ARRAY_ERROR },
+          });
+        }
+        if (!isPriceConfigured(prices)) {
+          return failed({
+            section: "curtailment",
+            recordId: null,
+            errors: { enabled: NO_PRICES_ERROR },
+          });
+        }
+      }
+
+      await saveCurtailmentConfig(parsed.config);
+      // Take effect now rather than at the next restart, for the reason
+      // battery control does: someone who has just ticked the box expects the
+      // log to start moving. This is also what releases the arrays when the
+      // box is *un*ticked.
+      await syncControlLoop();
+      return { section: "curtailment" as const, ok: true as const };
+    }
+
     case "prices-save": {
       const parsed = parsePriceConfig(formData);
       if (!parsed.ok) {
@@ -209,8 +314,15 @@ export default function Settings({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { pvEntities, grid, batteries, control, prices, priceSummary } =
-    loaderData;
+  const {
+    pvEntities,
+    grid,
+    batteries,
+    control,
+    curtailment,
+    prices,
+    priceSummary,
+  } = loaderData;
 
   return (
     <main style={{ padding: "2rem", maxWidth: 640 }}>
@@ -230,6 +342,15 @@ export default function Settings({
           grid: isGridConfigured(grid),
           batteries: batteries.length > 0,
           steerable: batteries.some(isSteerable),
+        }}
+        actionData={actionData}
+      />
+      <CurtailmentSection
+        config={curtailment}
+        ready={{
+          grid: isGridConfigured(grid),
+          arrays: pvEntities.some(isCurtailable),
+          prices: isPriceConfigured(prices),
         }}
         actionData={actionData}
       />

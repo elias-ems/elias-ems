@@ -98,6 +98,15 @@ export function forgetPublishedLimits(): void {
   published.clear();
 }
 
+/**
+ * The same for one array, for when it alone stops being steered — removed from
+ * settings, or simply un-ticked. Leaving its entry behind would make the next
+ * limit it were ever given look like a repeat of one it no longer holds.
+ */
+export function forgetPublishedLimit(arrayId: string): void {
+  published.delete(arrayId);
+}
+
 function shouldPublish(
   arrayId: string,
   percent: number,

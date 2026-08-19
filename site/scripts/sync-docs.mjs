@@ -41,6 +41,7 @@ export const PAGES = new Map([
   ["docs/features/live-readings.md", "live-readings"],
   ["docs/features/diagnostics.md", "diagnostics"],
   ["docs/features/dynamic-prices.md", "dynamic-prices"],
+  ["docs/features/pv-curtailment.md", "pv-curtailment"],
 ]);
 
 /** GitHub tolerates raw brackets in a path, but a URL that carries them

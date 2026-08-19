@@ -213,6 +213,7 @@ describe("GET / (dashboard)", () => {
         spot: null,
         slot: null,
         coverage: null,
+        currency: "EUR",
         error: null,
       },
       control: {
@@ -223,6 +224,15 @@ describe("GET / (dashboard)", () => {
           intervalSeconds: 5,
           lastTickAt: null,
         },
+        diagnostics: [],
+      },
+      curtailment: {
+        enabled: false,
+        // Formatted on the server, in the currency the price card is in, so the
+        // heading and the card cannot disagree about what a threshold means.
+        thresholdPerKwh: "0.0000 EUR/kWh",
+        settleSeconds: 30,
+        status: { running: false, lastTickAt: null },
         diagnostics: [],
       },
       error: null,

@@ -6,9 +6,14 @@ import LiveHealthFacts from "../components/LiveHealthFacts";
 import LiveStatus from "../components/LiveStatus";
 import Measurement from "../components/Measurement";
 import { readControlConfig } from "../lib/control-config.server";
-import { controlLoopStatus } from "../lib/control-loop.server";
+import {
+  controlLoopStatus,
+  curtailmentLoopStatus,
+} from "../lib/control-loop.server";
+import { readCurtailmentConfig } from "../lib/curtailment-config.server";
 import { type DashboardReadings, readDashboard } from "../lib/dashboard.server";
 import { readDiagnostics } from "../lib/diagnostics.server";
+import { formatPricePerKwh } from "../lib/price-format.server";
 import type { Reading } from "../lib/readings";
 import type { Route } from "./+types/_index";
 
@@ -29,9 +34,10 @@ const HIDDEN_REFRESH_INTERVAL = 60_000;
 const INITIAL_LOG_ENTRIES = 50;
 
 export async function loader() {
-  const [readings, config] = await Promise.all([
+  const [readings, config, curtailmentConfig] = await Promise.all([
     readDashboard(),
     readControlConfig(),
+    readCurtailmentConfig(),
   ]);
 
   return {
@@ -43,6 +49,22 @@ export async function loader() {
       // and the whole log is the Tools page's job.
       diagnostics: readDiagnostics({
         origin: "battery-control",
+        limit: INITIAL_LOG_ENTRIES,
+      }),
+    },
+    curtailment: {
+      enabled: curtailmentConfig.enabled,
+      // Formatted here rather than during render, for the reason every reading
+      // on this page is: a locale-dependent string built in the component is a
+      // hydration mismatch waiting to happen.
+      thresholdPerKwh: formatPricePerKwh(
+        curtailmentConfig.priceThresholdPerKwh,
+        readings.prices.currency,
+      ),
+      settleSeconds: curtailmentConfig.settleSeconds,
+      status: curtailmentLoopStatus(),
+      diagnostics: readDiagnostics({
+        origin: "pv-curtailment",
         limit: INITIAL_LOG_ENTRIES,
       }),
     },
@@ -164,7 +186,7 @@ function priceReading(display: string | null): Reading | null {
 }
 
 export default function Index({ loaderData }: Route.ComponentProps) {
-  const { control } = loaderData;
+  const { control, curtailment } = loaderData;
   const { readings, streaming } = useStreamedReadings();
 
   // The stream's readings once it has sent any, the loader's until then. Both
@@ -287,6 +309,28 @@ export default function Index({ loaderData }: Route.ComponentProps) {
         >
           <LiveHealthFacts health={health} />
         </DiagnosticsBox>
+      </section>
+
+      <section style={{ marginTop: "2rem" }}>
+        <h2 style={headingStyle}>PV curtailment</h2>
+        <p style={{ ...hintStyle, marginTop: "0.35rem" }}>
+          {curtailment.enabled
+            ? `Holding the arrays back whenever a kWh put on the grid earns less than ${curtailment.thresholdPerKwh}, after ${curtailment.settleSeconds}s off target.`
+            : "Disabled."}{" "}
+          <Link to="/settings">Settings</Link>
+        </p>
+        {/*
+          No `LiveHealthFacts` here: it describes the readings path, which is
+          one thing shared by the whole page, and repeating it under a second
+          heading would suggest there were two of them.
+        */}
+        <DiagnosticsBox
+          origin="pv-curtailment"
+          initialEntries={curtailment.diagnostics}
+          subtitle={
+            curtailment.status.running ? "loop running" : "loop stopped"
+          }
+        />
       </section>
     </main>
   );
