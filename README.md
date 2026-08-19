@@ -21,7 +21,7 @@ Then point it at your entities — the [configuration guide](https://elias-ems.g
 
 ### Tooling
 
-The tools that don't come from npm are pinned in [mise.toml](mise.toml), so [mise](https://mise.jdx.dev/) installs the lot at the right versions:
+The tools that don't come from npm are pinned in [mise.toml](mise.toml) — and Node itself in [.node-version](.node-version), which mise and GitHub Actions both read — so [mise](https://mise.jdx.dev/) installs the lot at the right versions:
 
 ```bash
 mise install
