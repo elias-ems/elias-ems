@@ -82,6 +82,42 @@ function waitForListening(child, { timeout = 30_000 } = {}) {
 }
 
 /**
+ * SIGTERM, then SIGKILL if the app is still there.
+ *
+ * `kill()` and a bare wait for `exit` is not enough, and the reason is worth
+ * knowing before shortening this. Once battery control has been switched on,
+ * `armShutdownRelease()` in control-loop.server.ts installs a `process.once`
+ * handler for SIGTERM so the batteries get released on the way out — and
+ * installing a handler *replaces* Node's default terminate. That handler
+ * deliberately does not call `process.exit`, so what actually ends the process
+ * is the event loop draining, which it never does: the Express listener and the
+ * Home Assistant WebSocket are both still open. The app then ignores SIGTERM
+ * for good.
+ *
+ * None of this shows on Windows, where `child.kill()` goes to `TerminateProcess`
+ * and no handler ever runs. On Linux it hung `afterAll` until Vitest's 60s hook
+ * timeout, in exactly the two suites that enable control — with every
+ * assertion in them already passed.
+ *
+ * @param {import("node:child_process").ChildProcess} child
+ * @param {number} [grace] How long SIGTERM gets before SIGKILL follows.
+ */
+function stopApp(child, grace = 5_000) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => child.kill("SIGKILL"), grace);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve(undefined);
+    });
+    child.kill();
+  });
+}
+
+/**
  * @param {object} [options]
  * @param {string} [options.dataDir] Where pv-entities.json lives. Give tests
  *   their own so they don't scribble on the directory used for manual clicking.
@@ -149,20 +185,12 @@ export async function startStack({
     /** The app with no ingress in front of it — where none of the bugs show. */
     directUrl: `http://127.0.0.1:${port}`,
     /**
-     * Exactly the reverse of the startup order, and the app has to be gone
-     * before the mock is: the add-on reconnects its WebSocket whenever one
-     * drops, so closing the mock first raced its own client. `ha.close()`
-     * terminates the open sockets and then waits for `wss.close()`, which only
-     * fires once every client has gone — and a reconnect arriving in that
-     * window is a new client, so the wait never ends. Windows usually won the
-     * race and Linux CI reliably lost it, which is what a 60s `afterAll` hook
-     * timeout on a suite whose assertions had all passed turned out to be.
+     * The reverse of the startup order, and the app has to be gone before the
+     * mock it reconnects to.
      */
     async close() {
       await proxy.close();
-      const exited = new Promise((resolve) => app.once("exit", resolve));
-      app.kill();
-      await exited;
+      await stopApp(app);
       await ha.close();
     },
   };
