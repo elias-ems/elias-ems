@@ -1,7 +1,7 @@
 # Configuring
 
-Everything is on the **Settings** page, in four sections: Grid, Batteries, PV
-entities, and Battery control. Each is edited and saved on its own, so a
+Everything is on the **Settings** page, in five sections: Grid, Batteries, PV
+entities, Prices, and Battery control. Each is edited and saved on its own, so a
 half-finished battery cannot stop you fixing the grid sensor.
 
 Entity fields autocomplete against your Home Assistant sensors as you type, and
@@ -142,6 +142,21 @@ yet.
 | **Title** | e.g. "Roof south". |
 | **Total energy generated (kWh)** | Cumulative production counter. |
 | **Current power (W)** | Instantaneous production. |
+
+## Prices
+
+Optional, and independent of everything above — nothing decides anything from
+prices yet, so this can wait until the rest is working.
+
+| Field | What it wants |
+| --- | --- |
+| **Source** | *Not configured*, or *Home Assistant entity*. |
+| **Prices — the day-ahead sensor** | A sensor from a price integration you already have. |
+| **Consumption** | Arithmetic turning the exchange price into what a kWh costs you. |
+| **Production** | The same for what a kWh earns you — usually a different formula. |
+
+The two formulas are the substance of it, and they have a page of their own:
+[Dynamic prices →](/guide/prices)
 
 ## Battery control
 

@@ -103,6 +103,52 @@ Both are read as-is, with no correction anywhere, so a backwards sensor makes
 every decision backwards. Negate it in a Home Assistant template sensor rather
 than compensating elsewhere. See [the grid sensor](/guide/configure#the-grid-sensor).
 
+## The prices card says the entity carries no price series
+
+The sensor exists, but nothing on it looks like a forecast. Usually the right
+integration and the wrong one of its sensors — several publish a current-price
+sensor alongside the one carrying the whole day.
+
+Check the entity in Developer Tools → **States** and look at its attributes.
+Elias ems needs either a `raw_today` list or a `data` list; a sensor with a
+price in its state and nothing useful in its attributes is not enough. See
+[what you need](/guide/prices#what-you-need).
+
+Home Assistant's **core** Nord Pool integration never works here: it exposes
+tomorrow's prices only through an action, so there is nothing on the entity to
+read.
+
+## The prices are there but roughly double what they should be
+
+You have almost certainly pointed at an **all-in total** price sensor rather
+than the raw market one, so your formula is adding markup that is already
+included.
+
+The Settings section shows the exchange price next to both derived numbers —
+if the "exchange" figure already looks like a retail price rather than a market
+one, that is the problem. See [the warning about
+totals](/guide/prices#setting-it-up).
+
+## A price shows as a dash
+
+That formula stopped producing a number — most often a division by zero, or a
+`prices.json` edited by hand into something that no longer parses. The other
+side keeps working.
+
+It deliberately does not fall back to the raw exchange price, because a market
+price shown under "Buying" is wrong by the whole of your network costs and VAT
+and looks completely reasonable. Retype the formula on the Settings page; it is
+checked before it is saved, so a formula that saves is a formula that works.
+
+## The prices card says they don't cover right now
+
+The forecast is real but has not been refreshed past the current time. That is
+the integration's job, not Elias ems's — check the source sensor in Developer
+Tools → **States** and whether the integration is still updating.
+
+Before roughly 13:00 CET, `today only` in the Settings section is normal: the
+day-ahead auction has not cleared yet.
+
 ## Everything in the log vanished
 
 Restarting the add-on empties the diagnostics buffer. It is held in memory on

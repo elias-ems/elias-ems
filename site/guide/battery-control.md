@@ -363,4 +363,4 @@ new to say. What that line does **not** prove is that anything acted on it.
 
 ## Next
 
-[Diagnostics →](/guide/diagnostics)
+[Dynamic prices →](/guide/prices)

@@ -51,6 +51,7 @@ export default defineConfig({
           items: [
             { text: "The dashboard", link: "/guide/dashboard" },
             { text: "Battery control", link: "/guide/battery-control" },
+            { text: "Dynamic prices", link: "/guide/prices" },
             { text: "Diagnostics", link: "/guide/diagnostics" },
             { text: "Troubleshooting", link: "/guide/troubleshooting" },
           ],

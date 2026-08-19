@@ -38,6 +38,10 @@ configured entirely from its own pages — no YAML.
   connection to Home Assistant is degraded. See [The dashboard](/guide/dashboard).
 - **Diagnostics** — one log every feature writes to, readable on screen and
   downloadable as a text file. See [Diagnostics](/guide/diagnostics).
+- **Dynamic prices** — day-ahead exchange prices read off an integration you
+  already have, put through your own contract's arithmetic, so the dashboard
+  shows what a kWh costs and earns for every quarter hour of today and tomorrow.
+  Nothing acts on them yet. See [Dynamic prices](/guide/prices).
 
 ## What it cannot do yet
 
@@ -49,8 +53,14 @@ configured entirely from its own pages — no YAML.
   listening for a battery's old name, and an inverter quietly ignoring the value
   all look identical from the add-on's side. This is the single most likely reason a correct-looking
   setup appears to do nothing.
-- **Anything price-aware.** Dynamic prices, negative-price strategies and PV
-  curtailment are on the roadmap and not started.
+- **Act on a price.** Prices are imported and shown, but no strategy reads
+  them — the battery still runs net-zero-energy and knows nothing about what
+  electricity costs. Price-aware charging and PV curtailment on negative prices
+  are the next steps.
+- **Fetch prices itself.** It reads what a price integration publishes, so it
+  needs one installed. There is no built-in client yet, and Home Assistant's
+  *core* Nord Pool integration is not usable — see
+  [what you need](/guide/prices#what-you-need).
 
 The full list, with the reasoning, is in
 [the internals](/internals/battery-control#not-done-yet).
@@ -61,8 +71,8 @@ Three pages, in the top bar:
 
 - **Home** — live readings, plus battery control's own diagnostics.
 - **Tools** — every feature's diagnostics merged, and the download button.
-- **Settings** — the grid sensor, your batteries, your PV entities, and the
-  control loop.
+- **Settings** — the grid sensor, your batteries, your PV entities, your energy
+  prices, and the control loop.
 
 ## Next
 

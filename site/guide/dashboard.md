@@ -1,7 +1,8 @@
 # The dashboard
 
 The home page shows live readings for the PV arrays, the grid and each battery
-you have configured, with battery control's own diagnostics underneath.
+you have configured, a **Prices** card once a price source is set up, and
+battery control's own diagnostics underneath.
 
 The numbers move as the house does. **Nothing on the page is polled** while
 things are working: Home Assistant tells the add-on that a sensor changed, and
@@ -41,6 +42,16 @@ a decision.
 That policy is only safe if you can see what is being ignored, which is what
 the chip and the ages are for. A sensor that quietly stopped reporting shows up
 as an age that keeps climbing on a value that ought to be moving.
+
+## The prices card
+
+If you have configured a [price source](/guide/prices), the page also carries
+what a kWh costs and earns right now, next to the exchange price both were
+derived from, and the quarter hour they apply to.
+
+It rides the same live connection as everything else: the price sensor changes
+at each slot boundary, Home Assistant says so, and the card follows. There is no
+clock being polled here either.
 
 ## Live health facts
 
