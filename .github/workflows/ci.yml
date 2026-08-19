@@ -27,6 +27,7 @@ jobs:
   addon:
     name: Add-on lint, types, unit tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: addon
@@ -58,9 +59,20 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm test
 
-  addon-e2e:
-    name: Add-on integration and e2e tests
+  # The end-to-end suite is deliberately NOT here yet. Its first run hung for
+  # four hours on `npx playwright install --with-deps chromium` — not failing,
+  # just never returning, so the only thing that would have ended it is the
+  # 6-hour default job timeout. Until that is diagnosed, the browser half stays
+  # off and only the integration suite runs, which needs no browser at all and
+  # so cannot hit the same wall. `npm run test:e2e` locally still covers it.
+  #
+  # Restoring it means putting back the version-keyed ~/.cache/ms-playwright
+  # cache, the install steps and the report upload — all of them in this file's
+  # history at commit 9d68687 — with whatever fixes the hang.
+  addon-integration:
+    name: Add-on integration tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: addon
@@ -76,59 +88,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Keyed on the installed Playwright version: a browser build only works
-      # with the release that downloaded it, so the cache has to miss whenever
-      # @playwright/test moves.
-      - name: Resolve the installed Playwright version
-        id: playwright
-        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Cache the Playwright browser
-        id: playwright-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-
-      - name: Install the Playwright browser
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
-
-      # The cache holds the browser but not the apt packages it links against,
-      # so a hit still needs the system dependencies putting back.
-      - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
-
-      # Once, here, rather than through `npm run test:integration` and
-      # `npm run test:e2e`, which would each rebuild. Both suites need it: the
-      # ingress handling under test lives in server.js and in the built asset
-      # manifest, neither of which a dev server uses.
+      # Not through `npm run test:integration`, which would build a second time.
+      # The suite needs the build: the ingress handling under test lives in
+      # server.js and in the built asset manifest, neither of which a dev server
+      # uses.
       - name: Build
         run: npm run build
 
       - name: Integration tests
-        id: integration
         run: npx vitest run --project integration
-
-      - name: End-to-end tests
-        if: ${{ !cancelled() && steps.integration.outcome != 'skipped' }}
-        run: npx playwright test
-
-      - name: Upload the Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-report
-          path: |
-            addon/playwright-report/
-            addon/test-results/
-          retention-days: 7
-          if-no-files-found: ignore
 
   site:
     name: Docs site lint, types, tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
@@ -143,7 +116,7 @@ jobs:
       # The site's own lint and typecheck scripts shell out to the add-on's
       # Biome and tsc with `npm --prefix ../addon exec --no --`, where `--no`
       # makes a missing addon/node_modules an error rather than a download. So
-      # this job needs both installs, even though it only builds the site.
+      # this job needs both installs, even though the checks are the site's.
       - name: Install the add-on's dependencies
         run: npm ci
         working-directory: addon
