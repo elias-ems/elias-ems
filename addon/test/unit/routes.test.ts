@@ -202,6 +202,17 @@ describe("GET / (dashboard)", () => {
       arrays: [],
       grid: { configured: false, power: null },
       batteries: [],
+      // Unconfigured is not an error: no source has been picked, so there is
+      // nothing to have failed at.
+      prices: {
+        configured: false,
+        consumption: null,
+        production: null,
+        spot: null,
+        slot: null,
+        coverage: null,
+        error: null,
+      },
       control: {
         enabled: false,
         status: {
@@ -702,5 +713,82 @@ describe("POST /settings", () => {
       section: "control",
       errors: { intervalSeconds: expect.any(String) },
     });
+  });
+
+  const postedPrices = {
+    intent: "prices-save",
+    source: "home-assistant",
+    forecastEntityId: "sensor.energi_epex_spot",
+    consumptionFormula: "((price * 1.02) + 0.1272) * 1.06",
+    productionFormula: "max(price * 0.98 - 0.015, 0)",
+  };
+
+  it("saves a price source and both formulas", async () => {
+    const result = await post(postedPrices);
+
+    expect(result).toEqual({ section: "prices", ok: true });
+    const { readPriceConfig } = await import("../../app/lib/prices.server");
+    expect(await readPriceConfig()).toEqual({
+      source: "home-assistant",
+      forecastEntityId: "sensor.energi_epex_spot",
+      consumptionFormula: "((price * 1.02) + 0.1272) * 1.06",
+      productionFormula: "max(price * 0.98 - 0.015, 0)",
+    });
+  });
+
+  it("rejects a formula the action itself cannot parse", async () => {
+    // The form previews formulas in the browser, but the check has to be here
+    // too: nothing stops a form being posted directly, and a formula that first
+    // fails at 03:00 is a price feature with no price.
+    const result = await post({
+      ...postedPrices,
+      productionFormula: "price * spot",
+    });
+
+    const { payload, status } = failure(result);
+    expect(status).toBe(400);
+    expect(payload).toMatchObject({
+      section: "prices",
+      recordId: null,
+      errors: { productionFormula: expect.any(String) },
+    });
+  });
+
+  it("refuses a formula that reaches for anything but price", async () => {
+    const result = await post({
+      ...postedPrices,
+      consumptionFormula: "process.exit(1)",
+    });
+
+    expect(failure(result).status).toBe(400);
+  });
+
+  it("requires an entity once Home Assistant is the source", async () => {
+    const result = await post({ ...postedPrices, forecastEntityId: "" });
+
+    expect(failure(result).payload).toMatchObject({
+      section: "prices",
+      errors: { forecastEntityId: expect.any(String) },
+    });
+  });
+
+  it("accepts turning the source off without asking for the rest", async () => {
+    // Those fields are hidden in that state, so validating them would reject a
+    // form nobody can see to fix.
+    const result = await post({ intent: "prices-save", source: "none" });
+
+    expect(result).toEqual({ section: "prices", ok: true });
+  });
+
+  it("files what it found under the prices origin", async () => {
+    await post(postedPrices);
+
+    const { readDiagnostics } = await import(
+      "../../app/lib/diagnostics.server"
+    );
+    const entries = readDiagnostics({ origin: "prices" });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].message).toContain("sensor.energi_epex_spot");
   });
 });

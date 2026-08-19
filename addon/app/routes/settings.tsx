@@ -2,6 +2,7 @@ import { data } from "react-router";
 import BatteriesSection from "../components/settings/BatteriesSection";
 import ControlSection from "../components/settings/ControlSection";
 import GridSection from "../components/settings/GridSection";
+import PricesSection from "../components/settings/PricesSection";
 import PvSection from "../components/settings/PvSection";
 import {
   DUPLICATE_SLUG_ERROR,
@@ -21,8 +22,12 @@ import {
   saveControlConfig,
 } from "../lib/control-config.server";
 import { syncControlLoop } from "../lib/control-loop.server";
+import { appendDiagnostic } from "../lib/diagnostics.server";
 import { isGridConfigured, parseGrid } from "../lib/grid";
 import { readGrid, saveGrid } from "../lib/grid.server";
+import { readPrices, summarizePrices } from "../lib/price-source.server";
+import { parsePriceConfig } from "../lib/prices";
+import { savePriceConfig } from "../lib/prices.server";
 import { parsePvEntity } from "../lib/pv-entities";
 import {
   addPvEntity,
@@ -34,14 +39,25 @@ import type { SettingsActionData } from "../lib/settings-form";
 import type { Route } from "./+types/settings";
 
 export async function loader() {
-  const [pvEntities, grid, batteries, control] = await Promise.all([
+  const [pvEntities, grid, batteries, control, prices] = await Promise.all([
     listPvEntities(),
     readGrid(),
     listBatteries(),
     readControlConfig(),
+    // Its own read rather than the dashboard's: this page has no readings to
+    // borrow, and what it needs is the *summary* — proof that the entity picked
+    // is really a price feed, which is only knowable by going and looking.
+    readPrices(),
   ]);
 
-  return { pvEntities, grid, batteries, control };
+  return {
+    pvEntities,
+    grid,
+    batteries,
+    control,
+    prices: prices.config,
+    priceSummary: summarizePrices(prices.read),
+  };
 }
 
 /** Null for a section's add form, the row's id when editing an existing one. */
@@ -153,6 +169,35 @@ export async function action({ request }: Route.ActionArgs) {
       return { section: "control" as const, ok: true as const };
     }
 
+    case "prices-save": {
+      const parsed = parsePriceConfig(formData);
+      if (!parsed.ok) {
+        return failed({
+          section: "prices",
+          recordId: null,
+          errors: parsed.errors,
+        });
+      }
+
+      await savePriceConfig(parsed.config);
+
+      // Logged here and nowhere else on this path. The read side runs on every
+      // dashboard render and every stream push, so logging what it found would
+      // fill the buffer with the same sentence; the card shows that state
+      // instead. A configuration change is rare, deliberate, and exactly what
+      // somebody reading back a control decision later needs to see beside it.
+      const { read } = await readPrices();
+      appendDiagnostic(
+        "prices",
+        read.error ? "warn" : "info",
+        read.error
+          ? `Prices from ${parsed.config.forecastEntityId}: ${read.error}`
+          : `Prices from ${parsed.config.forecastEntityId} — ${summarizePrices(read).detail}`,
+      );
+
+      return { section: "prices" as const, ok: true as const };
+    }
+
     default:
       // Only our own forms post here, so an unknown intent is a bug in this
       // file, not something a user can reach by filling something in wrong.
@@ -164,7 +209,8 @@ export default function Settings({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { pvEntities, grid, batteries, control } = loaderData;
+  const { pvEntities, grid, batteries, control, prices, priceSummary } =
+    loaderData;
 
   return (
     <main style={{ padding: "2rem", maxWidth: 640 }}>
@@ -173,6 +219,11 @@ export default function Settings({
       <PvSection pvEntities={pvEntities} actionData={actionData} />
       <GridSection grid={grid} actionData={actionData} />
       <BatteriesSection batteries={batteries} actionData={actionData} />
+      <PricesSection
+        config={prices}
+        summary={priceSummary}
+        actionData={actionData}
+      />
       <ControlSection
         config={control}
         ready={{

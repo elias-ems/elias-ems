@@ -40,13 +40,67 @@ export const DEFAULT_SUPERVISOR_TOKEN = "test-supervisor-token";
 /** Reported in the handshake, as the real server does. Nothing reads it yet. */
 const HA_VERSION = "2026.8.0";
 
+/**
+ * A day-ahead price sensor in the shape Energi Data Service publishes, covering
+ * today and tomorrow in quarter hours from local midnight.
+ *
+ * Generated rather than written into the fixture, and that is the whole reason
+ * it lives here: a price series is only meaningful relative to now, so a
+ * captured one would be permanently in the past and the development stack would
+ * show "these prices don't cover right now" forever — the one state you least
+ * want to be stuck in while building the thing.
+ *
+ * The prices are a smooth double hump, cheap overnight and around midday, dear
+ * at the two peaks, dipping below zero in the middle of the day. That last part
+ * is deliberate: a negative price is the case the two formulas exist to tell
+ * apart, and it is the one nobody can reproduce on demand from a real feed.
+ */
+function priceStates() {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+
+  const entry = (index) => {
+    const at = new Date(midnight.getTime() + index * 15 * 60_000);
+    const hour = (index % 96) / 4;
+    const price =
+      0.09 +
+      0.075 * Math.sin(((hour - 9) * Math.PI) / 12) +
+      0.06 * Math.sin(((hour - 3) * Math.PI) / 6);
+    return { hour: at.toISOString(), price: Number(price.toFixed(4)) };
+  };
+
+  const today = Array.from({ length: 96 }, (_, index) => entry(index));
+  const tomorrow = Array.from({ length: 96 }, (_, index) => entry(index + 96));
+  const nowIndex = Math.floor(
+    (Date.now() - midnight.getTime()) / (15 * 60_000),
+  );
+
+  return {
+    entity_id: "sensor.energi_epex_spot",
+    state: String(today[Math.min(nowIndex, 95)].price),
+    attributes: {
+      friendly_name: "Energi Epex Spot",
+      unit_of_measurement: "EUR/kWh",
+      device_class: "monetary",
+      currency: "EUR",
+      region: "Belgium",
+      region_code: "BE",
+      use_cent: false,
+      tomorrow_valid: true,
+      attribution: "Data sourced from Nord Pool",
+      raw_today: today,
+      raw_tomorrow: tomorrow,
+    },
+  };
+}
+
 /** The fixture the mock serves when a caller doesn't supply its own states. */
 export async function defaultStates() {
   const contents = await readFile(
     path.join(here, "fixtures", "ha-states.json"),
     "utf-8",
   );
-  return JSON.parse(contents);
+  return [...JSON.parse(contents), priceStates()];
 }
 
 /** @returns {Promise<object|null>} the parsed body, or null when there isn't one. */

@@ -14,10 +14,15 @@
 - Diagnostics — one log every feature writes to, shown per feature on Home and
   in full on the Tools page, downloadable as a text file. Done for the one
   feature that logs so far; see [features/diagnostics.md](features/diagnostics.md).
+- Dynamic prices — importing done, see
+  [features/dynamic-prices.md](features/dynamic-prices.md). Day-ahead prices are
+  read off a Home Assistant entity and put through a formula per direction, so
+  the add-on knows what a kWh costs and what one earns at each quarter hour.
+  Nothing acts on them yet. Still to do: a built-in price client, so the feature
+  doesn't depend on an integration the add-on can neither install nor verify.
 
 ## Future
 
-- Dynamic prices (epex)
 - PV curtailment when negative prices
 - Battery control (negative prices)
 - Telemetry cloud / backend service to remotely follow up / offer support

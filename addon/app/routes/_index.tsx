@@ -9,6 +9,7 @@ import { readControlConfig } from "../lib/control-config.server";
 import { controlLoopStatus } from "../lib/control-loop.server";
 import { type DashboardReadings, readDashboard } from "../lib/dashboard.server";
 import { readDiagnostics } from "../lib/diagnostics.server";
+import type { Reading } from "../lib/readings";
 import type { Route } from "./+types/_index";
 
 /** How often the readings refresh themselves, in milliseconds. */
@@ -150,16 +151,32 @@ function useRefreshingReadings(enabled: boolean) {
   }, [enabled, revalidate]);
 }
 
+/**
+ * An already-formatted price as something `Measurement` can render.
+ *
+ * No `updatedAt`: a price belongs to a quarter-hour slot rather than to the
+ * moment a sensor happened to report it, and the slot it belongs to is named
+ * under the card. Hovering for "last changed" would answer a question nobody
+ * asked about a price and give a misleading answer to the one they did.
+ */
+function priceReading(display: string | null): Reading | null {
+  return display === null ? null : { display, ok: true, updatedAt: null };
+}
+
 export default function Index({ loaderData }: Route.ComponentProps) {
   const { control } = loaderData;
   const { readings, streaming } = useStreamedReadings();
 
   // The stream's readings once it has sent any, the loader's until then. Both
   // are built by the same function on the server, so they are interchangeable.
-  const { arrays, grid, batteries, error, health } = readings ?? loaderData;
+  const { arrays, grid, batteries, prices, error, health } =
+    readings ?? loaderData;
 
   const hasReadings =
-    arrays.length > 0 || grid.configured || batteries.length > 0;
+    arrays.length > 0 ||
+    grid.configured ||
+    batteries.length > 0 ||
+    prices.configured;
 
   // Only while the stream isn't delivering. If it never connects — an ingress
   // proxy that buffers, a browser with EventSource disabled — the page quietly
@@ -218,6 +235,41 @@ export default function Index({ loaderData }: Route.ComponentProps) {
             </li>
           ))}
         </ul>
+      </Panel>
+
+      <Panel
+        title="Prices"
+        empty={prices.configured ? null : "No price source"}
+      >
+        {prices.error ? (
+          <p style={{ ...hintStyle, marginTop: "0.75rem" }}>{prices.error}</p>
+        ) : (
+          <>
+            <div style={{ ...measurementsStyle, marginTop: "0.75rem" }}>
+              <Measurement
+                label="Buying"
+                reading={priceReading(prices.consumption)}
+              />
+              <Measurement
+                label="Selling"
+                reading={priceReading(prices.production)}
+              />
+              {/*
+                The exchange price sits beside the two derived from it, not
+                instead of them. It is what makes a formula checkable against a
+                bill, and what makes a mis-picked entity — one already carrying
+                markups — visible rather than plausible.
+              */}
+              <Measurement
+                label="Exchange"
+                reading={priceReading(prices.spot)}
+              />
+            </div>
+            <p style={{ ...hintStyle, marginTop: "0.5rem" }}>
+              {[prices.slot, prices.coverage].filter(Boolean).join(" · ")}
+            </p>
+          </>
+        )}
       </Panel>
 
       <section style={{ marginTop: "2rem" }}>

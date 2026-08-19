@@ -1,5 +1,5 @@
 /**
- * The settings page posts to one action from four independent sections, so its
+ * The settings page posts to one action from five independent sections, so its
  * result has to say which section it belongs to. Without that discriminator a
  * failed battery form would light up the grid form's fields, and a successful
  * save in one section would look like a reason to close the editor in another.
@@ -7,9 +7,10 @@
 import type { BatteryErrors } from "./batteries";
 import type { ControlErrors } from "./control";
 import type { GridErrors } from "./grid";
+import type { PriceErrors } from "./prices";
 import type { PvEntityErrors } from "./pv-entities";
 
-export type SettingsSection = "pv" | "grid" | "battery" | "control";
+export type SettingsSection = "pv" | "grid" | "battery" | "control" | "prices";
 
 export type SettingsActionData =
   | { section: SettingsSection; ok: true }
@@ -21,7 +22,8 @@ export type SettingsActionData =
     }
   | { section: "grid"; recordId: null; errors: GridErrors }
   | { section: "battery"; recordId: string | null; errors: BatteryErrors }
-  | { section: "control"; recordId: null; errors: ControlErrors };
+  | { section: "control"; recordId: null; errors: ControlErrors }
+  | { section: "prices"; recordId: null; errors: PriceErrors };
 
 /** The failure for `section`, or null when the last action was something else. */
 export function failureFor<TSection extends SettingsSection>(

@@ -13,12 +13,15 @@
  * `DIAGNOSTICS_ORIGINS` — nothing else, since every reader is driven by this
  * list rather than by a hardcoded set of boxes.
  */
-export type DiagnosticsOrigin = "battery-control";
+export type DiagnosticsOrigin = "battery-control" | "prices";
 
 export const DIAGNOSTICS_ORIGINS: Array<{
   id: DiagnosticsOrigin;
   label: string;
-}> = [{ id: "battery-control", label: "Battery control" }];
+}> = [
+  { id: "battery-control", label: "Battery control" },
+  { id: "prices", label: "Prices" },
+];
 
 export function isDiagnosticsOrigin(
   value: unknown,
