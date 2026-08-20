@@ -30,3 +30,29 @@ export function slugifyTitle(title: string): string {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
 }
+
+/**
+ * Whether `title` would slugify onto a record other than the one being edited —
+ * two names that are different on the settings page and the same on the bus.
+ *
+ * The rule lives here; going and reading the records does not. A pure module
+ * cannot reach the store, so the caller hands in every stored record of that
+ * kind, which is why the settings action is what calls this. Both batteries and
+ * PV arrays need the identical comparison, and two hand-written copies of it
+ * are the same drift `slugifyTitle` itself lives in this module to avoid.
+ *
+ * `editedId` is the id of the record being edited, or null when one is being
+ * added — null matches no stored record, so the title is compared against all
+ * of them. Skipping the edited record is what lets a battery keep its own name
+ * across an edit that changes something else.
+ */
+export function titleSlugClashes(
+  records: readonly { id: string; title: string }[],
+  title: string,
+  editedId: string | null,
+): boolean {
+  const slug = slugifyTitle(title);
+  return records.some(
+    (record) => record.id !== editedId && slugifyTitle(record.title) === slug,
+  );
+}
