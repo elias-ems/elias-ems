@@ -12,8 +12,10 @@
   for a battery's old name, or an inverter ignoring it all look identical from
   here.
 - Diagnostics — one log every feature writes to, shown per feature on Home and
-  in full on the Tools page, downloadable as a text file. Done for the one
-  feature that logs so far; see [features/diagnostics.md](features/diagnostics.md).
+  in full on the Tools page, downloadable as a text file. Three origins write to
+  it now — battery control, PV curtailment and the price import — the first two
+  with a box of their own on Home; see
+  [features/diagnostics.md](features/diagnostics.md).
 - Dynamic prices — importing done, see
   [features/dynamic-prices.md](features/dynamic-prices.md). Day-ahead prices are
   read off a Home Assistant entity and put through a formula per direction, so

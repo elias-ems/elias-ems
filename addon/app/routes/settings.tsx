@@ -49,7 +49,7 @@ import {
   updatePvEntity,
 } from "../lib/pv-entities.server";
 import type { SettingsActionData } from "../lib/settings-form";
-import { slugifyTitle } from "../lib/slug";
+import { titleSlugClashes } from "../lib/slug";
 import type { Route } from "./+types/settings";
 
 export async function loader() {
@@ -103,12 +103,12 @@ export async function action({ request }: Route.ActionArgs) {
       // reporting a problem. Here rather than in `parsePvEntity` because it
       // needs every other array, which a pure model module cannot read — the
       // same rule, and the same reason, as for batteries below.
-      const slug = slugifyTitle(parsed.fields.title);
-      const clash = (await listPvEntities()).some(
-        (entity) =>
-          entity.id !== recordId && slugifyTitle(entity.title) === slug,
+      const pvClash = titleSlugClashes(
+        await listPvEntities(),
+        parsed.fields.title,
+        recordId,
       );
-      if (clash) {
+      if (pvClash) {
         return failed({
           section: "pv",
           recordId,
@@ -176,12 +176,12 @@ export async function action({ request }: Route.ActionArgs) {
       // same event type and take each other's targets, with nothing anywhere
       // reporting a problem. Here rather than in `parseBattery` because it
       // needs every other battery, which a pure model module cannot read.
-      const slug = slugifyTitle(parsed.fields.title);
-      const clash = (await listBatteries()).some(
-        (battery) =>
-          battery.id !== recordId && slugifyTitle(battery.title) === slug,
+      const batteryClash = titleSlugClashes(
+        await listBatteries(),
+        parsed.fields.title,
+        recordId,
       );
-      if (clash) {
+      if (batteryClash) {
         return failed({
           section: "battery",
           recordId,

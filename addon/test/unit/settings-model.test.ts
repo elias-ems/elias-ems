@@ -35,7 +35,7 @@ import {
   pvLimitEventType,
   pvSlug,
 } from "../../app/lib/pv-entities";
-import { slugifyTitle } from "../../app/lib/slug";
+import { slugifyTitle, titleSlugClashes } from "../../app/lib/slug";
 
 function form(fields: Record<string, string>): FormData {
   const formData = new FormData();
@@ -538,6 +538,34 @@ describe("naming a battery on the event bus", () => {
     expect(targetEventType("home_battery")).toBe(
       "elias_ems_home_battery_target_power",
     );
+  });
+});
+
+describe("titleSlugClashes", () => {
+  const stored = [
+    { id: "a", title: "Home battery" },
+    { id: "b", title: "Garage" },
+  ];
+
+  it("catches two titles that differ on the page and agree on the bus", () => {
+    expect(titleSlugClashes(stored, "home-battery", null)).toBe(true);
+    expect(titleSlugClashes(stored, "  Home   Battery! ", null)).toBe(true);
+  });
+
+  it("lets a genuinely new name through", () => {
+    expect(titleSlugClashes(stored, "Shed", null)).toBe(false);
+  });
+
+  it("skips the record being edited, so it keeps its own name", () => {
+    // Without this, changing a battery's capacity would fail on its own title.
+    expect(titleSlugClashes(stored, "Home battery", "a")).toBe(false);
+    // Its own id is no licence to take another record's name, though.
+    expect(titleSlugClashes(stored, "Garage", "a")).toBe(true);
+  });
+
+  it("compares an addition against every stored record", () => {
+    // A null id matches nothing, which is what makes "add" check them all.
+    expect(titleSlugClashes(stored, "Garage", null)).toBe(true);
   });
 });
 
