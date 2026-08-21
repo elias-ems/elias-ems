@@ -25,7 +25,7 @@ import {
   forgetPublishedLimits,
   type PvLimitCommand,
   publishPvLimits,
-  REPUBLISH_MS,
+  REASSERT_MS,
 } from "../../app/lib/pv-limits.server";
 import { startHaMock } from "../ha-mock.js";
 
@@ -42,6 +42,8 @@ function command(overrides: Partial<PvLimitCommand> = {}): PvLimitCommand {
     ratedPowerW: 5000,
     commandPercent: 40,
     released: false,
+    // Obeying its 40% limit (2000 W of 5000 W) unless a case says otherwise.
+    measuredW: 1900,
     ...overrides,
   };
 }
@@ -131,18 +133,88 @@ describe("publishPvLimits", () => {
     expect(ha.events).toHaveLength(2);
   });
 
-  it("restates a standing limit once it is old enough", async () => {
+  it("says nothing at all about a limit that is being obeyed, however long it stands", async () => {
     vi.useFakeTimers();
     await publishPvLimits([command()]);
 
-    await vi.advanceTimersByTimeAsync(REPUBLISH_MS);
+    // This used to restate every 30 seconds. On a house where injection prices
+    // are positive — most of the year — every array sits released with nothing
+    // to say, and that timer turned it into thousands of identical events a day
+    // in Home Assistant's activity log.
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60_000);
     const [second] = await publishPvLimits([command()]);
 
-    // The memory of what was published is an assumption about what an
-    // automation did with an event, and this is what stops it being an
-    // indefinite one: a reloaded automation or a power-cycled inverter
-    // recovers on its own rather than waiting for the limit to happen to move.
-    expect(second.status).toBe("published");
+    expect(second.status).toBe("unchanged");
+    expect(ha.events).toHaveLength(1);
+  });
+
+  it("restates a limit the array is visibly ignoring", async () => {
+    vi.useFakeTimers();
+    await publishPvLimits([command()]);
+
+    // 40% of 5000 W is 2000 W, and the array is making nearly all of its
+    // nameplate — so whatever we last said is not what the hardware is doing.
+    // The plan cannot notice this on its own: `C + (G - G_target)` returns the
+    // same percent whether or not the limit is in force.
+    await vi.advanceTimersByTimeAsync(REASSERT_MS);
+    const [second] = await publishPvLimits([command({ measuredW: 4800 })]);
+
+    expect(second).toMatchObject({
+      status: "published",
+      reason: "not-in-force",
+    });
+  });
+
+  it("drips rather than shouting while nothing is listening", async () => {
+    vi.useFakeTimers();
+    await publishPvLimits([command()]);
+    await vi.advanceTimersByTimeAsync(REASSERT_MS);
+    await publishPvLimits([command({ measuredW: 4800 })]);
+    ha.events.length = 0;
+
+    // A house with no automation at all stays over its limit for ever. One
+    // event per tick would be worse than the timer this replaced.
+    await vi.advanceTimersByTimeAsync(REASSERT_MS / 2);
+    const [again] = await publishPvLimits([command({ measuredW: 4800 })]);
+
+    expect(again.status).toBe("unchanged");
+    expect(ha.events).toEqual([]);
+  });
+
+  it("tolerates an array tracking its limit imprecisely", async () => {
+    vi.useFakeTimers();
+    await publishPvLimits([command()]);
+
+    // An inverter tracks a setpoint approximately and the sensor lags it. 2200 W
+    // against a 2000 W limit is that, not a limit being ignored.
+    await vi.advanceTimersByTimeAsync(REASSERT_MS);
+    const [second] = await publishPvLimits([command({ measuredW: 2200 })]);
+
+    expect(second.status).toBe("unchanged");
+  });
+
+  it("has nothing to enforce once the array is back at full output", async () => {
+    vi.useFakeTimers();
+    await publishPvLimits([command({ commandPercent: 100, measuredW: 4800 })]);
+
+    // Generating everything is exactly what 100% asked for, so a high reading
+    // here is obedience rather than a fault.
+    await vi.advanceTimersByTimeAsync(REASSERT_MS);
+    const [second] = await publishPvLimits([
+      command({ commandPercent: 100, measuredW: 4800 }),
+    ]);
+
+    expect(second.status).toBe("unchanged");
+  });
+
+  it("cannot check a limit while the array's own sensor is quiet", async () => {
+    vi.useFakeTimers();
+    await publishPvLimits([command()]);
+
+    await vi.advanceTimersByTimeAsync(REASSERT_MS);
+    const [second] = await publishPvLimits([command({ measuredW: null })]);
+
+    expect(second.status).toBe("unchanged");
   });
 
   it("publishes a release even when it believes the array is already there", async () => {
@@ -150,7 +222,12 @@ describe("publishPvLimits", () => {
     ha.events.length = 0;
 
     const [publish] = await publishPvLimits([
-      command({ commandPercent: 100, released: true, force: true }),
+      command({
+        commandPercent: 100,
+        released: true,
+        force: true,
+        measuredW: null,
+      }),
     ]);
 
     // Letting go is worth one event regardless of what we think, because what

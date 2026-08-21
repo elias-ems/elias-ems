@@ -8,35 +8,65 @@
  * Assistant event per array.
  *
  * An event rather than a service call, again as for batteries: nothing stores
- * it, so a loop that restates a limit every half minute does not bury a day's
- * real state changes under its own chatter — and the add-on does not have to
- * know whether this inverter takes a percentage over Modbus, a watt setpoint
- * over its own API, or something that is not in Home Assistant at all.
+ * it, so the add-on does not bury a day's real state changes under its own
+ * chatter — and it does not have to know whether this inverter takes a
+ * percentage over Modbus, a watt setpoint over its own API, or something that
+ * is not in Home Assistant at all.
  *
- * The cost is the same too: no read-back, which is what `REPUBLISH_MS` below is
- * about.
+ * Nothing stores it, but Home Assistant's activity log still *shows* it, and
+ * that turns out to matter as much: an event published for no reason is an event
+ * somebody has to scroll past while reading what happened in their house. What
+ * counts as a reason is the subject of `publishReason` below.
+ *
+ * The cost is the same as for batteries too — no read-back — and the answer here
+ * is different. See `notInForce`.
  */
 import { fireHaEvent } from "./ha.server";
 import { pvLimitEventType } from "./pv-entities";
 
 /**
- * How long an array may go without hearing its limit restated.
+ * A limit goes out when it is **new, when it changes, and when the array is
+ * visibly not obeying it** — and at no other time.
  *
- * There is no deadband constant here to go with it, and that is the difference
- * from `targets.server.ts`. A battery target is a continuous number in watts, so
- * it needs `PUBLISH_DEADBAND_W` to stop a 4 W drift firing an event every tick;
- * a limit is already quantised to whole percent by the strategy, so "the value
- * changed" is exactly "it moved by at least one step" and no second threshold
- * is wanted. One percent of a 5 kW inverter is 50 W — the same order as the
- * battery deadband, arrived at by rounding rather than by comparison.
+ * There is no deadband constant here, unlike `targets.server.ts`. A battery
+ * target is a continuous number of watts, so it needs `PUBLISH_DEADBAND_W` to
+ * stop a 4 W drift firing an event every tick; a limit is already quantised to
+ * whole percent by the strategy, so "the value changed" is exactly "it moved by
+ * at least one step".
  *
- * What is still needed is this: the memory below is an assumption about what an
- * automation did with an event, and an automation that was reloaded, an
- * inverter that was power-cycled or a Home Assistant that restarted mid-tick
- * all recover on their own within a minute or so rather than waiting for the
- * limit to happen to move.
+ * This *used* to also restate every standing limit on a 30-second timer. That
+ * was a mistake, and an expensive one: for most of the year injection prices are
+ * positive, so every array sits released at 100% with nothing to say, and the
+ * timer turned that into some 2,880 identical events per array per day. All of
+ * them land in Home Assistant's activity log, which is where somebody is trying
+ * to read what actually happened in their house.
+ *
+ * The timer was not pointless, though, and what it was quietly covering is the
+ * reason `notInForce` below exists — see there before considering removing it.
  */
-export const REPUBLISH_MS = 30_000;
+
+/**
+ * How long to leave a limit that is not being obeyed before saying it again.
+ *
+ * Long, because this only ever fires while something is already wrong, and
+ * re-asserting into a house where nothing is listening should be a slow drip
+ * with an explanation attached rather than an event every tick.
+ */
+export const REASSERT_MS = 5 * 60_000;
+
+/**
+ * How far above its limit an array may measure before the limit counts as not
+ * being obeyed: the larger of this fraction of the inverter's rating and
+ * `MIN_ENFORCEMENT_MARGIN_W`.
+ *
+ * Generous on purpose. An inverter tracks a setpoint approximately, the power
+ * sensor lags it, and a cloud edge moves faster than either — none of which is
+ * the failure this is looking for. What it is looking for is an array making
+ * roughly what it likes while we believe it is being held back, which is not a
+ * near-miss.
+ */
+export const ENFORCEMENT_MARGIN_FRACTION = 0.05;
+export const MIN_ENFORCEMENT_MARGIN_W = 100;
 
 export type PvLimitStatus =
   /** The event went out. */
@@ -48,6 +78,20 @@ export type PvLimitStatus =
   /** Home Assistant refused it, or could not be reached. */
   | "failed";
 
+/** Why a limit went out, for the log. */
+export type PvLimitReason =
+  /** Nothing was remembered for this array — a fresh process, or a release. */
+  | "first"
+  /** The limit moved by at least one step. */
+  | "changed"
+  /** A caller insisted, which today means a release. */
+  | "forced"
+  /**
+   * The array is generating well above the limit we believe it is under, so
+   * whatever we last said is not what the hardware is doing.
+   */
+  | "not-in-force";
+
 export type PvLimitPublish = {
   arrayId: string;
   title: string;
@@ -55,6 +99,8 @@ export type PvLimitPublish = {
   /** The limit asked for, in whole percent. Null when nothing was asked. */
   percent: number | null;
   status: PvLimitStatus;
+  /** Why it went out, when it did. */
+  reason?: PvLimitReason;
   /** Why, when the status alone doesn't say it. */
   detail?: string;
 };
@@ -71,6 +117,12 @@ export type PvLimitCommand = {
   commandPercent: number | null;
   /** Whether this is the add-on letting go rather than steering. */
   released: boolean;
+  /**
+   * What the array is actually generating right now, in W, or null when its
+   * sensor has no number. The one piece of feedback this module gets, and what
+   * `notInForce` is built on.
+   */
+  measuredW: number | null;
   /**
    * Publish even when nothing has changed. Set by a release on shutdown:
    * letting go is worth one event regardless of what we believe the array is
@@ -107,19 +159,64 @@ export function forgetPublishedLimit(arrayId: string): void {
   published.delete(arrayId);
 }
 
-function shouldPublish(
-  arrayId: string,
+/**
+ * Whether the array is visibly ignoring the limit we believe it is under.
+ *
+ * This is what replaced the old 30-second restatement, and it is not merely a
+ * cheaper version of it — it covers a hole the loop cannot close on its own.
+ *
+ * `curtail.ts` computes `C_allowed = C + (G - G_target)`, and that expression
+ * gives the **same answer whether or not the limit is being obeyed**. An array
+ * held at 2000 W with the meter balanced gives `2000 + 0`; the same array making
+ * 4000 W because its inverter forgot the limit, with the meter now exporting
+ * 2000 W, gives `4000 - 2000`. Both are 2000 W, both round to the same percent,
+ * and so nothing ever changes and nothing is ever republished. The house would
+ * export at a negative price indefinitely with every tick reporting success.
+ *
+ * Measured power is the only thing that tells the two apart, and it does so
+ * exactly when it matters. Note the corollary: when an array is generating
+ * *under* its limit we cannot tell whether the limit is in force — and we do not
+ * need to, because a limit that is not binding is not doing anything either way.
+ * The moment it would bind is the moment this notices.
+ *
+ * A release cannot be checked this way. An array wrongly left curtailed
+ * generates less than it might, and how much it might is precisely what nothing
+ * here can know.
+ */
+function notInForce(command: PvLimitCommand, percent: number): boolean {
+  // Nothing is being held back at full output, so there is nothing to disobey.
+  if (percent >= 100) return false;
+  if (command.measuredW === null) return false;
+
+  const limitW = (percent * command.ratedPowerW) / 100;
+  const margin = Math.max(
+    MIN_ENFORCEMENT_MARGIN_W,
+    command.ratedPowerW * ENFORCEMENT_MARGIN_FRACTION,
+  );
+
+  return command.measuredW > limitW + margin;
+}
+
+/** Why this limit is worth an event, or null when it isn't. */
+function publishReason(
+  command: PvLimitCommand,
   percent: number,
-  force: boolean,
   now: number,
-): boolean {
-  if (force) return true;
+): PvLimitReason | null {
+  if (command.force) return "forced";
 
-  const last = published.get(arrayId);
-  if (!last) return true;
-  if (last.percent !== percent) return true;
+  const last = published.get(command.arrayId);
+  if (!last) return "first";
+  if (last.percent !== percent) return "changed";
 
-  return now - last.at >= REPUBLISH_MS;
+  // Rate limited against the last time anything went out for this array, so a
+  // house where nothing is listening gets a slow drip rather than an event per
+  // tick — which would be worse than the timer this replaced.
+  if (notInForce(command, percent) && now - last.at >= REASSERT_MS) {
+    return "not-in-force";
+  }
+
+  return null;
 }
 
 async function publishOne(command: PvLimitCommand): Promise<PvLimitPublish> {
@@ -135,10 +232,9 @@ async function publishOne(command: PvLimitCommand): Promise<PvLimitPublish> {
 
   const percent = Math.round(command.commandPercent);
   const now = Date.now();
+  const reason = publishReason(command, percent, now);
 
-  if (!shouldPublish(command.arrayId, percent, command.force ?? false, now)) {
-    return { ...base, percent, status: "unchanged" };
-  }
+  if (!reason) return { ...base, percent, status: "unchanged" };
 
   try {
     await fireHaEvent(pvLimitEventType(command.slug), {
@@ -160,7 +256,7 @@ async function publishOne(command: PvLimitCommand): Promise<PvLimitPublish> {
     });
 
     published.set(command.arrayId, { percent, at: now });
-    return { ...base, percent, status: "published" };
+    return { ...base, percent, status: "published", reason };
   } catch (error) {
     // Deliberately not recorded: an event that never made it onto the bus must
     // not count as something the array has been told, or the next tick would
@@ -200,7 +296,16 @@ export function describePvLimitPublishes(
   const sent = publishes.filter((publish) => publish.status === "published");
   const trouble = publishes.filter((publish) => publish.status === "failed");
 
-  const parts = sent.map((publish) => `${publish.title} → ${publish.percent}%`);
+  const parts = sent.map((publish) => {
+    // Named rather than left to look routine. A re-assertion means the array is
+    // generating well above what it was told to, so the interesting fact is not
+    // that a limit went out — it is that the last one did not take.
+    const why =
+      publish.reason === "not-in-force"
+        ? " (restated — the array is not obeying it)"
+        : "";
+    return `${publish.title} → ${publish.percent}%${why}`;
+  });
 
   for (const publish of trouble) {
     parts.push(`${publish.title}: event failed (${publish.detail})`);
@@ -208,4 +313,9 @@ export function describePvLimitPublishes(
 
   if (parts.length === 0) return null;
   return `Published: ${parts.join("; ")}`;
+}
+
+/** Whether any of these went out because the array was ignoring its limit. */
+export function anyNotInForce(publishes: PvLimitPublish[]): boolean {
+  return publishes.some((publish) => publish.reason === "not-in-force");
 }
