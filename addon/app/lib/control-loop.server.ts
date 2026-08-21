@@ -58,6 +58,7 @@ import { readPriceConfig } from "./prices.server";
 import { isCurtailable, type PvEntity, pvSlug } from "./pv-entities";
 import { listPvEntities } from "./pv-entities.server";
 import {
+  anyNotInForce,
   describePvLimitPublishes,
   forgetPublishedLimit,
   forgetPublishedLimits,
@@ -428,6 +429,10 @@ async function tickCurtailment(
           ratedPowerW: array.ratedPowerW,
           commandPercent: decision.commandPercent,
           released: decision.released,
+          // The one piece of feedback the publish layer gets: without it, an
+          // inverter that quietly dropped its limit would never be corrected,
+          // because the plan computes the same percent either way.
+          measuredW: array.powerW,
         },
       ];
     }),
@@ -443,9 +448,15 @@ async function tickCurtailment(
   ];
 
   const troubled = publishes.some((publish) => publish.status === "failed");
+  // A limit that had to be restated because the array is ignoring it is a
+  // warning, not routine traffic: it means an automation is missing, listening
+  // for an old name, or an inverter is not honouring what it was sent — the
+  // one failure this feature otherwise cannot see.
   log(
     "pv-curtailment",
-    plan.warnings.length > 0 || troubled ? "warn" : "info",
+    plan.warnings.length > 0 || troubled || anyNotInForce(publishes)
+      ? "warn"
+      : "info",
     lines.join("\n"),
   );
 }
@@ -554,6 +565,8 @@ export async function releasePvArrays(): Promise<void> {
       ratedPowerW: array.ratedPowerW,
       commandPercent: 100,
       released: true,
+      // Nothing to check against at full output; `force` is what carries this.
+      measuredW: null,
       // Past the "nothing changed" check, for the same reason a battery's
       // release is: what we believe the array is set to is exactly what is in
       // doubt at the moment we are letting go of it.
@@ -603,6 +616,8 @@ export async function releasePvArray(array: PvEntity): Promise<void> {
       ratedPowerW: array.ratedPowerW,
       commandPercent: 100,
       released: true,
+      // Nothing to check against at full output; `force` is what carries this.
+      measuredW: null,
       force: true,
     },
   ]);

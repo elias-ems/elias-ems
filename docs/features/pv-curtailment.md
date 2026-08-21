@@ -284,10 +284,47 @@ automation:
                 data: { value: "{{ trigger.event.data.limit_percent }}" }
 ```
 
-Since there is no read-back — an event on the bus is not proof anything acted on
-it — the limit is restated every `REPUBLISH_MS` (30 s) even when it has not
-moved, so an automation that was reloaded or an inverter that was power-cycled
-recovers on its own rather than waiting for the limit to happen to change.
+### When an event is sent, and when it isn't
+
+A limit goes out when it is **new**, when it **changes**, and when the array
+turns out **not to be obeying it** — and at no other time. A limit that stands
+unchanged and is being honoured is silent, however long it stands.
+
+That last clause used to be a 30-second timer instead, and it was a mistake:
+injection prices are positive for most of the year, so an array spends almost
+all of its life released at 100% with nothing to say, and the timer turned that
+into some 2,880 identical events per array per day. Every one of them lands in
+Home Assistant's activity log, which is where somebody is trying to read what
+actually happened in their house.
+
+But it could not simply be deleted, because of what it was quietly covering.
+There is no read-back — an event on the bus is not proof anything acted on it —
+and the strategy **cannot tell an obeyed limit from an ignored one**:
+
+|  | curtailable output | meter | `C + (G - G_target)` |
+| --- | --- | --- | --- |
+| Limit honoured | 2000 W | 0 W | 2000 W → 40% |
+| Inverter forgot it | 4000 W | −2000 W | 2000 W → 40% |
+
+Identical. So nothing changes, nothing is republished, and the house exports at
+a negative price indefinitely with every tick reporting success.
+
+**Measured generation is the only thing that separates them**, and
+`pv-limits.server.ts` compares against it: an array making more than its limit
+plus a margin — the larger of 5% of the inverter's rating and 100 W — is not
+under that limit, whatever we last said. It is re-asserted at most every
+`REASSERT_MS` (5 minutes), and logged as a **warning** rather than as routine
+traffic, because it means an automation is missing, is listening for an old
+name, or an inverter is ignoring what it was sent.
+
+Two corollaries worth stating:
+
+- **An array generating *under* its limit cannot be checked** — and does not need
+  to be. A limit that is not binding is doing nothing either way, and the moment
+  it would bind is the moment this notices.
+- **A release cannot be checked at all.** An array wrongly left curtailed
+  generates less than it might, and how much it might is precisely what nothing
+  here can know. That remains the one silent failure.
 
 **Renaming an array renames its event.** The settings page says so while the
 rename is being typed, because nothing downstream can: Home Assistant does not

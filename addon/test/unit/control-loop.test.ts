@@ -54,6 +54,7 @@ import {
   listPvEntities,
   removePvEntity,
 } from "../../app/lib/pv-entities.server";
+import { REASSERT_MS } from "../../app/lib/pv-limits.server";
 import { defaultStates, startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
@@ -396,6 +397,69 @@ describe("runControlTick, curtailment half", () => {
     // On the other end of each event is an automation writing to real
     // hardware, which on some brands commits to flash.
     expect(pvLimitEvents()).toHaveLength(1);
+  });
+
+  it("stays quiet for hours once a standing limit is being obeyed", async () => {
+    vi.useFakeTimers();
+    await onlyCurtailment();
+
+    await runControlTick();
+    expect(pvLimitEvents()).toHaveLength(1);
+
+    // Six hours of a house doing exactly what it was told. This used to
+    // restate the same limit every 30 seconds — some 720 identical events
+    // across this span, every one of them landing in Home Assistant's
+    // activity log, which is where somebody is trying to read what actually
+    // happened in their house.
+    for (let hour = 0; hour < 6; hour++) {
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      await runControlTick();
+    }
+
+    expect(pvLimitEvents()).toHaveLength(1);
+  });
+
+  it("stays quiet for hours while prices are fine and the arrays are released", async () => {
+    vi.useFakeTimers();
+    await onlyCurtailment(POSITIVE_INJECTION);
+
+    await runControlTick();
+    // One event to say "generate freely", and then nothing.
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 100, true],
+    ]);
+
+    // The bulk of the noise, and the reason this matters: injection prices are
+    // positive most of the year, so this — not curtailing — is what an array
+    // spends almost all of its life doing.
+    for (let hour = 0; hour < 6; hour++) {
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      await runControlTick();
+    }
+
+    expect(pvLimitEvents()).toHaveLength(1);
+  });
+
+  it("restates a limit the array turns out not to be obeying", async () => {
+    vi.useFakeTimers();
+    await onlyCurtailment();
+
+    await runControlTick();
+    expect(pvLimitEvents()).toHaveLength(1);
+
+    // The inverter forgets its limit and goes back to full output. The meter
+    // swings to export by the same amount, so `C + (G - G_target)` lands on the
+    // *identical* 42% and the plan sees nothing wrong — 1234.5 + 842 and
+    // 4800 - 2724 are the same number. Measured power is the only thing that
+    // gives it away, which is exactly why the check reads it.
+    ha.setState("sensor.inverter_power", "4800", { unit_of_measurement: "W" });
+    ha.setState("sensor.grid_power", "-2724", { unit_of_measurement: "W" });
+    await vi.advanceTimersByTimeAsync(REASSERT_MS);
+
+    await runControlTick();
+
+    expect(pvLimitEvents()).toHaveLength(2);
+    expect(logged("the array is not obeying it")).toBe(true);
   });
 
   it("waits for the meter to settle before moving the limit", async () => {

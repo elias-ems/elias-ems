@@ -189,6 +189,37 @@ the two names were ever related — an automation listening for the old one simp
 stops hearing anything. The settings page warns you while you are typing.
 :::
 
+### How often you'll see these events
+
+Rarely, by design. An event goes out when a limit is **new**, when it
+**changes**, and when your array turns out **not to be obeying it** — and at no
+other time. A limit that stands unchanged and is being honoured is silent,
+however long it stands, so a quiet sunny afternoon produces one event and then
+nothing. Your Home Assistant activity log stays readable.
+
+That last case is worth knowing about, because it is the closest thing the
+add-on has to a check that any of this is working. It cannot see whether your
+automation ran — but it *can* see your array's power. If the array is generating
+well above the limit it was given, then whatever was sent did not take, and the
+add-on says so in the [diagnostics log](/guide/diagnostics) as a warning:
+
+```
+Published: South roof → 40% (restated — the array is not obeying it)
+```
+
+If you see that, the usual causes are a missing automation, one still listening
+for an array's old name, or an inverter that accepts the value and ignores it.
+It re-asserts at most every five minutes, so a broken setup is a slow drip in
+the log rather than a flood.
+
+::: tip What it still cannot see
+The reverse case — your array left *curtailed* when it should be free — is
+invisible to it. Working out that an array is producing less than it could would
+mean knowing what it could produce, which nothing here can. This is why
+everything the add-on is unsure about releases the arrays rather than holding
+them back.
+:::
+
 ## When it stops curtailing
 
 **Anything the add-on is unsure about ends with your panels generating**, never
