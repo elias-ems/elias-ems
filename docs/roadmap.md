@@ -29,9 +29,13 @@
   generation limit goes out as an `elias_ems_<array>_pv_limit` event for an
   automation to carry out. It shares the control loop and one snapshot per tick
   with battery control, which is what gives the battery first refusal on a
-  surplus. Still to do: the same gap battery control has — nothing here can tell
-  whether an automation acted on a limit, and an inverter that silently ignores
-  one looks exactly like one that obeyed.
+  surplus. An array generating more than its limit plus a margin is now noticed
+  rather than believed: the limit is re-asserted and logged as a warning, which
+  is the one place the add-on can currently tell that nothing acted on what it
+  sent. Still to do: that check only reaches a limit that binds. An array
+  generating under its limit cannot be checked and does not need to be, but a
+  *release* cannot be checked at all — an array wrongly left curtailed generates
+  less than it might, and how much it might is what nothing here can know.
 
 ## Future
 
