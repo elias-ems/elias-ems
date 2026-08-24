@@ -413,6 +413,12 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
   // The settle rule. Both directions, not just cutting: handing generation back
   // the instant a kettle switches off would be just as twitchy, and the cost of
   // waiting is a few seconds of a fifteen-minute price slot either way.
+  //
+  // Note what `offTargetSinceMs` means, because it is more than "when the meter
+  // went off target": the loop restarts it every time a limit actually moves,
+  // so this is equally the wait for the *last correction* to reach the meter.
+  // Without that, `C` and `G` below would describe different instants and the
+  // same watts would be corrected for twice.
   const settleMs = config.settleSeconds * 1000;
   const offTargetForMs =
     input.offTargetSinceMs === null ? 0 : input.nowMs - input.offTargetSinceMs;

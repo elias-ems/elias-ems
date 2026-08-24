@@ -485,6 +485,43 @@ describe("runControlTick, curtailment half", () => {
     ]);
   });
 
+  it("waits again after moving a limit, not only before the first move", async () => {
+    vi.useFakeTimers();
+    await onlyCurtailment(NEGATIVE_INJECTION, {
+      ...DEFAULT_CURTAILMENT_CONFIG,
+      enabled: true,
+      settleSeconds: 30,
+    });
+
+    await runControlTick();
+    await vi.advanceTimersByTimeAsync(31_000);
+    await runControlTick();
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 42, false],
+    ]);
+
+    // The meter swings further out, and the obvious reading of it is that the
+    // array should be cut to the floor. But the inverter has not finished
+    // ramping to the 42% it was told a moment ago, and the grid and PV sensors
+    // do not update together — so acting on this now would be counting the
+    // last correction twice rather than measuring a new excursion.
+    ha.setState("sensor.grid_power", "-1500", { unit_of_measurement: "W" });
+    ha.events.length = 0;
+
+    await runControlTick();
+
+    expect(messages().at(-1)).toContain("settling, 0s of 30s");
+    expect(pvLimitEvents()).toEqual([]);
+
+    // And once the wait is served it acts on whatever is true by then.
+    await vi.advanceTimersByTimeAsync(31_000);
+    await runControlTick();
+
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 5, false],
+    ]);
+  });
+
   it("releases the array rather than guessing when the grid goes unreadable", async () => {
     await onlyCurtailment();
     await runControlTick();

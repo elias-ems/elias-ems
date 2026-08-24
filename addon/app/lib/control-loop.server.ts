@@ -106,7 +106,8 @@ type LoopState = {
    * `curtail.ts` is pure — so the clock lives here and the elapsed time is
    * passed in. Reset the moment the meter comes back on target, which is what
    * makes the wait start again rather than accumulate across unrelated
-   * excursions.
+   * excursions, and **restarted again whenever a limit actually moves**, which
+   * is what stops the loop measuring its own correction before it has landed.
    */
   offTargetSinceMs: number | null;
 };
@@ -437,6 +438,31 @@ async function tickCurtailment(
       ];
     }),
   );
+
+  // Restart the settle clock whenever a *new* number has gone to the hardware,
+  // so that `settleSeconds` is the shortest time between two moves and not
+  // merely a delay before the first one.
+  //
+  // Without this the clock cleared only on coming back on target, so a meter
+  // that stayed off it — the ordinary case in a house whose load moves — left
+  // `offTargetForMs` growing without bound and every tick acted. The loop then
+  // measured before its own last correction had landed: an inverter ramp takes
+  // seconds, and the grid and PV sensors do not update together, so `C` and `G`
+  // in `C + (G - G_target)` end up describing different instants and the
+  // correction is counted twice. It showed up as one-percent dither while the
+  // house was quiet and as swings of tens of percent while it was not.
+  //
+  // A restatement is deliberately not a move: it repeats a number the array is
+  // already ignoring, so there is nothing newly in flight to wait for.
+  const moved = publishes.some(
+    (publish) =>
+      publish.status === "published" &&
+      (publish.reason === "changed" || publish.reason === "first"),
+  );
+  // Guarded on the plan having been off target, because a release publishes
+  // from the on-target path: starting a clock there would hand the *next*
+  // excursion a head start it never earned.
+  if (plan.offTarget && moved) state.offTargetSinceMs = nowMs;
 
   const sent = describePvLimitPublishes(publishes);
 
@@ -860,7 +886,7 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
     log(
       "pv-curtailment",
       "info",
-      `PV curtailment enabled — on every change and at most every ${config.intervalSeconds}s, acting once the meter has been off target for ${curtailment.settleSeconds}s.`,
+      `PV curtailment enabled — on every change and at most every ${config.intervalSeconds}s, acting once the meter has been off target for ${curtailment.settleSeconds}s and at most that often thereafter.`,
     );
   }
 

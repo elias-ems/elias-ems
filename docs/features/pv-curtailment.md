@@ -55,7 +55,7 @@ with nothing anywhere reporting a problem.
 | `gridTargetW` | `0` | Where to aim the meter, signed as the grid reading is |
 | `deadbandW` | `50` | How far off target before the limit is moved |
 | `minLimitPercent` | `5` | The lowest an array is ever taken to |
-| `settleSeconds` | `30` | How long the meter must stay off target first |
+| `settleSeconds` | `30` | How long the meter must stay off target first, and the shortest time between two moves after that |
 
 Two of those need saying out loud.
 
@@ -147,6 +147,17 @@ to stay off target for that long before the limit moves at all, in **either**
 direction — handing generation back the instant a kettle switches off would be
 just as twitchy, and a few seconds either way is cheap against a fifteen-minute
 price slot.
+
+**The same wait applies after each move, not only before the first one.** That
+is the part it is easy to leave out, and leaving it out is worse than having no
+settle time at all. `C_allowed = C + (G - G_target)` is only self-consistent
+when `C` and `G` describe the same instant, and for a few seconds after a limit
+goes out they do not: the inverter is still ramping to it, and the grid and PV
+sensors do not update on the same clock. A loop that measures again straight
+away is reading its own correction half-applied and correcting a second time for
+the same watts. Left that way it dithered a percent at a time while the house
+was quiet, and swung by tens of percent while it was not — the overshoot the
+feedback form is otherwise not supposed to have.
 
 ## Percent, not watts
 
@@ -363,9 +374,10 @@ changes at every slot boundary.
 - **Getting paid to consume** at negative prices — dumping into the battery,
   running the heat pump. That is the "battery control (negative prices)" roadmap
   item, and conflating the two would make both harder to reason about.
-- **A ramp-rate limit.** The settle time already damps the loop, and the
-  feedback form does not overshoot upwards: asking for more than the array can
-  make simply leaves the ceiling non-binding.
+- **A ramp-rate limit.** The settle time damps the loop — once it is applied
+  after each move as well as before the first, which is what bounds how fast the
+  limit can travel. A cap on the size of a single step would be a second answer
+  to the same question.
 
 ## Two things to know before relying on it
 
