@@ -49,7 +49,10 @@ afterAll(async () => {
 
 describe("the ingress prefix", () => {
   it("serves the app under the prefix", () => {
-    expect(html).toContain("<h1>Home</h1>");
+    // The page's own heading is `visually-hidden` — the add-on's name is in the
+    // bar right above it — so this matches the tag rather than the exact markup,
+    // which is not what this case is about.
+    expect(html).toMatch(/<h1[^>]*>Home<\/h1>/);
   });
 
   it("serves nothing outside the prefix", async () => {

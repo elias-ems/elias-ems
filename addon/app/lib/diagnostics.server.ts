@@ -88,16 +88,29 @@ export function appendDiagnostic(
  */
 export function readDiagnostics({
   origin,
+  origins,
   limit = CAPACITY_PER_ORIGIN,
 }: {
   origin?: DiagnosticsOrigin;
+  /**
+   * Several origins merged, newest first — what the home page's single
+   * decision feed shows. Distinct from passing no filter at all, which would
+   * also fold in origins that are not strategies: `prices` logs a parse
+   * failure, which belongs on the Tools page rather than in a list of the
+   * decisions two control loops have just taken.
+   */
+  origins?: DiagnosticsOrigin[];
   limit?: number;
 } = {}): DiagnosticEntry[] {
   if (origin) {
     return (buffers.get(origin) ?? []).slice(-limit).reverse();
   }
 
-  return [...buffers.values()]
+  const selected = origins
+    ? origins.map((id) => buffers.get(id) ?? [])
+    : [...buffers.values()];
+
+  return selected
     .flat()
     .sort((a, b) => b.seq - a.seq)
     .slice(0, limit);

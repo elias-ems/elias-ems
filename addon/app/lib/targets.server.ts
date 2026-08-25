@@ -115,6 +115,19 @@ export function forgetPublishedTargets(): void {
 }
 
 /**
+ * What a battery was last told, in W, or null when nothing has gone out for it
+ * since this process started.
+ *
+ * The dashboard shows this rather than what the current tick computed, and the
+ * two are not the same number: the deadband above means most ticks decide a
+ * value and then decline to publish it. What is standing is what the hardware
+ * is acting on, so it is what a person reading the page needs to see.
+ */
+export function publishedTargetW(batteryId: string): number | null {
+  return published.get(batteryId)?.valueW ?? null;
+}
+
+/**
  * Whether this value is worth an event, and what to record if it goes out.
  *
  * Three ways through: nothing remembered (a fresh process, or the first
