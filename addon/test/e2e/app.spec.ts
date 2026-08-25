@@ -437,3 +437,66 @@ test("the playground is not in the top bar", async ({ page }) => {
     page.getByRole("navigation").getByRole("link", { name: "Playground" }),
   ).toHaveCount(0);
 });
+
+/**
+ * How wide the document actually wants to be, against how much room it has.
+ * Anything wider is a page that scrolls sideways on a phone.
+ */
+const documentWidth = (page: Page) =>
+  page.evaluate(() => ({
+    wants: document.documentElement.scrollWidth,
+    has: document.documentElement.clientWidth,
+  }));
+
+/**
+ * The bar's spacing lives in app.css because it changes at 480px, and every one
+ * of those declarations is one an inline style in AppHeader.tsx would silently
+ * beat. Four of the five did exactly that — three overridden inline, one naming
+ * a class no element carried — so this asserts the *computed* values rather
+ * than that the rules exist.
+ */
+test("the top bar tightens on a phone and not before", async ({ page }) => {
+  const bar = page.locator(".app-header");
+  const title = page.locator(".app-header-title");
+  const tab = page.getByRole("navigation").getByRole("link", { name: "Home" });
+
+  await page.setViewportSize({ width: 600, height: 800 });
+  await page.goto("./");
+
+  await expect(bar).toHaveCSS("padding-left", "16px");
+  await expect(title).toHaveCSS("font-size", "20px");
+  await expect(tab).toHaveCSS("padding-left", "16px");
+  await expect(tab).toHaveCSS("font-size", "16px");
+
+  await page.setViewportSize({ width: 400, height: 800 });
+
+  await expect(bar).toHaveCSS("padding-left", "8px");
+  await expect(title).toHaveCSS("font-size", "17px");
+  await expect(tab).toHaveCSS("padding-left", "8px");
+  await expect(tab).toHaveCSS("font-size", "14px");
+
+  // 320px is the width the tightening exists for: the name and three tabs need
+  // more than that at full size, and fit with room to spare once tightened.
+  await page.setViewportSize({ width: 320, height: 800 });
+  expect(await documentWidth(page)).toEqual({ wants: 320, has: 320 });
+});
+
+/**
+ * Runs after the battery is configured, which is what puts a row on the page to
+ * measure. A saved row is mostly entity ids, and an id is one long token a
+ * browser will not break on its own — so the row used to be wider than a phone
+ * and took the whole document's horizontal scroll with it.
+ */
+test("a saved settings row fits a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto("./settings");
+
+  await expect(
+    page.locator("li", { hasText: "sensor.battery_state_of_charge" }),
+  ).toBeVisible();
+
+  expect(
+    await documentWidth(page),
+    "the settings page must not scroll sideways",
+  ).toEqual({ wants: 375, has: 375 });
+});
