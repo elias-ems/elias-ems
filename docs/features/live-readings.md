@@ -109,10 +109,17 @@ different string on hydration is the mismatch React warns about.
 
 [`LiveHealthFacts.tsx`](../../addon/app/components/LiveHealthFacts.tsx) carries
 the detail — connected or not, last change seen, which source the readings came
-from, reconnect count, last error. It renders inside the home page's
-[diagnostics](diagnostics.md) box rather than beside it: the decisions in that
-log are only as good as the readings behind them, so whoever opens it to read
-what happened is the same person who needs to know whether those were arriving.
+from, reconnect count, last error. On the home page it sits in a "Connection
+detail" disclosure next to the status line, closed until asked for: the one-line
+status answers the question most of the time, and the five facts behind it are
+what somebody reaches for once the answer is *Polling* or *Reconnecting*.
+
+It used to live inside the home page's battery-control [diagnostics](diagnostics.md)
+box, on the reasoning that whoever opens a log to read what a loop decided is the
+same person who needs to know whether the readings behind it were arriving. That
+box is gone — the home page now shows both loops' decisions in one always-open
+feed — and the reasoning survives the move: the disclosure sits beside the status
+line, which is the thing that says something is wrong in the first place.
 
 ## The add-on → the browser
 
