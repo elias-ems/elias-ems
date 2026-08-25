@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useHref } from "react-router";
+import { Link, useHref } from "react-router";
 import DiagnosticsBox from "../components/DiagnosticsBox";
 import {
   cardStyle,
@@ -50,6 +50,34 @@ export default function Tools({ loaderData }: Route.ComponentProps) {
           defaultOpen
         />
       </section>
+
+      {/*
+        Below the diagnostics rather than beside them: what is here is for
+        whoever is working on the add-on, not for whoever is running it, and a
+        section anyone can reach should not put a developer's page at eye level.
+        It is on Tools rather than in Settings because nothing in it is a
+        setting — Settings is where the installation is described, and this
+        changes nothing about it.
+      */}
+      <section style={{ ...cardStyle, marginTop: "1.25rem" }}>
+        <h2 style={headingStyle}>Debug</h2>
+        <p style={{ ...hintStyle, marginTop: "0.35rem", maxWidth: "62ch" }}>
+          Not part of running the add-on — these are for working on it.
+        </p>
+
+        <ul style={debugListStyle}>
+          <li>
+            <Link to="/playground">Component playground</Link>
+            <p style={{ ...hintStyle, marginTop: "0.15rem", maxWidth: "62ch" }}>
+              Every component the add-on draws with, in the states that matter —
+              including the ones a working installation never reaches. Useful
+              for checking the light and dark themes and the layout breakpoints
+              against Home Assistant's own theme, which only exists inside a
+              real panel.
+            </p>
+          </li>
+        </ul>
+      </section>
     </main>
   );
 }
@@ -59,6 +87,12 @@ const sectionHeaderStyle: CSSProperties = {
   alignItems: "center",
   justifyContent: "space-between",
   gap: "1rem",
+};
+
+const debugListStyle: CSSProperties = {
+  listStyle: "none",
+  margin: "1rem 0 0",
+  padding: 0,
 };
 
 const downloadStyle: CSSProperties = {
