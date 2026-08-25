@@ -247,19 +247,12 @@ test("readings keep updating without the page being reloaded", async ({
   page,
   request,
 }) => {
-  // Revalidations of the home loader — the polling fallback's signature. The
-  // stream is supposed to make all of them unnecessary.
-  //
-  // `/api/diagnostics.data` is excluded because it is not one: the decision
-  // feed polls that route on its own two-second clock by design, and it reads
-  // nothing but an in-memory buffer. Matching every `.data` request would count
-  // the feed doing its job as the readings falling back to polling.
+  // `?snapshot` is the polling fallback and nothing else asks for it, so one
+  // of these requests means the stream stopped delivering. The decision feed's
+  // own two-second poll is a different route and is supposed to be there.
   const polls: string[] = [];
   page.on("request", (event) => {
-    const url = event.url();
-    if (url.includes(".data") && !url.includes("api/diagnostics")) {
-      polls.push(url);
-    }
+    if (event.url().includes("snapshot")) polls.push(event.url());
   });
 
   await page.goto("./");
@@ -310,3 +303,73 @@ test("readings keep updating without the page being reloaded", async ({
   // silently stopped delivering would otherwise look exactly like success.
   expect(polls, "a working stream leaves nothing to poll for").toEqual([]);
 });
+
+/**
+ * The failure that put an "Application Error" page in front of anyone whose
+ * connection blinked: every background request on this page used to go through
+ * React Router's data layer, where a `fetch` that never comes back is a route
+ * error, and a route error replaces the page with the nearest error boundary.
+ * A dashboard left open in a tab died on the first dropped request and stayed
+ * dead until somebody reloaded it.
+ *
+ * Aborted requests, not error responses: a 500 is an answer, and the loops
+ * already survive those. This is the connection itself going away.
+ */
+test("a dropped background request doesn't take the dashboard down", async ({
+  page,
+}) => {
+  await page.goto("./");
+  await expect(
+    page.getByRole("heading", { name: "Solar & batteries" }),
+  ).toBeVisible();
+
+  await page.route("**/api/diagnostics*", (route) => route.abort());
+  await page.route("**/api/readings*", (route) => route.abort());
+
+  // Both captions are the page still rendering, from state that changed after
+  // the requests started failing — so they prove it is alive, not just that it
+  // hasn't been replaced yet.
+  await expect(page.getByText("not updating").first()).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByText("Offline", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+
+  await expect(page.getByText("Application Error")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Solar & batteries" }),
+  ).toBeVisible();
+});
+
+/**
+ * The other half of the same fix: when something *does* reach the error
+ * boundary, what renders is the app's own page inside the app's own document —
+ * top bar, stylesheet, scripts — rather than the framework's bare fallback
+ * with a minified stack trace on it.
+ *
+ * Deliberately the un-extended `test`: the response here really is a 404,
+ * which is the one thing the fixture at the top of this file exists to fail on.
+ */
+base(
+  "an unknown page gets the app's own error page, with a way out",
+  async ({ page }) => {
+    const response = await page.goto("./nope");
+    expect(response?.status()).toBe(404);
+
+    await expect(
+      page.getByRole("heading", { name: "Page not found" }),
+    ).toBeVisible();
+
+    // The bar is only there if the boundary rendered inside the root Layout, and
+    // the link only works if the page hydrated — the two things the framework's
+    // fallback would not have.
+    await page
+      .getByRole("navigation")
+      .getByRole("link", { name: "Home" })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Solar & batteries" }),
+    ).toBeVisible();
+  },
+);

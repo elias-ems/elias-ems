@@ -12,6 +12,13 @@
  * Router. What the browser cannot do is guarantee the stream arrives — an
  * ingress proxy that buffers would swallow it — so the page keeps its polling
  * fallback and uses whichever works.
+ *
+ * `?snapshot` is that fallback: the same readings, once, as JSON. It lives
+ * here rather than in a route of its own because it is the same answer to the
+ * same question, and because the page has to be able to ask it *outside* React
+ * Router's data layer — a revalidation that fails is a route error, and a route
+ * error every five seconds on a connection that blinks is a dashboard that dies
+ * while nobody is looking at it. See `lib/json-fetch.ts`.
  */
 import { readDashboard, watchedEntityIds } from "../lib/dashboard.server";
 import { onHaChange } from "../lib/ha-live.server";
@@ -31,6 +38,10 @@ const COALESCE_MS = 500;
 const HEARTBEAT_MS = 25_000;
 
 export async function loader({ request }: Route.LoaderArgs) {
+  if (new URL(request.url).searchParams.has("snapshot")) {
+    return Response.json(await readDashboard());
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({

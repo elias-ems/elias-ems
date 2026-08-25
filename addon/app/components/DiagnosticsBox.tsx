@@ -1,16 +1,19 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
-import { useFetcher } from "react-router";
+import { useState } from "react";
 import {
   type DiagnosticEntry,
   type DiagnosticsData,
   type DiagnosticsOrigin,
   diagnosticsOriginLabel,
 } from "../lib/diagnostics";
+import { usePolledJson } from "../lib/json-fetch";
 import { hintStyle } from "./form";
 
 /** Fast enough to watch a five-second loop without polling for its own sake. */
 const POLL_INTERVAL = 2_000;
+
+/** The same, while the browser says the page is hidden. */
+const HIDDEN_POLL_INTERVAL = 60_000;
 
 const LEVEL_COLOR: Record<DiagnosticEntry["level"], string> = {
   info: "var(--color-text)",
@@ -56,33 +59,21 @@ export default function DiagnosticsBox({
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const fetcher = useFetcher<DiagnosticsData>();
 
   const href = origin
     ? `/api/diagnostics?origin=${origin}`
     : "/api/diagnostics";
 
-  // useFetcher returns a new object every render, so depending on fetcher.load
-  // would restart the interval on each render and refire immediately. Only
-  // `open` and the URL should retrigger it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
-  useEffect(() => {
-    if (!open) return undefined;
+  // Not `useFetcher`: a failed poll there is a route error, which would take
+  // the whole page down over a log nobody had to be able to read. See
+  // `lib/json-fetch.ts`.
+  const { data, failing } = usePolledJson<DiagnosticsData>(href, {
+    enabled: open,
+    intervalMs: POLL_INTERVAL,
+    hiddenIntervalMs: HIDDEN_POLL_INTERVAL,
+  });
 
-    const poll = () => {
-      // The add-on panel usually sits in a background tab; there is no point
-      // polling one nobody can see.
-      if (document.visibilityState === "visible") {
-        fetcher.load(href);
-      }
-    };
-
-    poll();
-    const timer = setInterval(poll, POLL_INTERVAL);
-    return () => clearInterval(timer);
-  }, [open, href]);
-
-  const entries = fetcher.data?.entries ?? initialEntries;
+  const entries = data?.entries ?? initialEntries;
 
   return (
     <details
@@ -104,6 +95,7 @@ export default function DiagnosticsBox({
         {entries.length === 0
           ? "nothing logged yet"
           : `${entries.length} entries`}
+        {failing && " · not updating"}
       </p>
 
       {children}

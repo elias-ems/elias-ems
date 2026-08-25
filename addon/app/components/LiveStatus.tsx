@@ -16,15 +16,18 @@ import { hintStyle } from "./form";
 export default function LiveStatus({
   health,
   streaming,
+  reachable = true,
 }: {
   health: LiveHealth;
   /** Whether the browser's own stream is delivering, which the server can't know. */
   streaming: boolean;
+  /** Whether the browser is getting answers from the add-on at all. */
+  reachable?: boolean;
 }) {
   const sinceEvent = useElapsedSince(health.lastEventAt);
   const sinceConnected = useElapsedSince(health.connectedSince);
 
-  const { color, label, detail } = describe(health, streaming, {
+  const { color, label, detail } = describe(health, streaming, reachable, {
     sinceEvent,
     sinceConnected,
   });
@@ -59,8 +62,20 @@ export default function LiveStatus({
 function describe(
   health: LiveHealth,
   streaming: boolean,
+  reachable: boolean,
   since: { sinceEvent: string | null; sinceConnected: string | null },
 ): { color: string; label: string; detail: string | null } {
+  // First, because it makes everything below it unknowable: `health` is what
+  // the add-on last managed to say about itself, and this is the page saying
+  // it can no longer hear the add-on. Nothing on screen is current.
+  if (!reachable) {
+    return {
+      color: "var(--color-danger)",
+      label: "Offline",
+      detail: "can't reach the add-on; showing the last values it sent",
+    };
+  }
+
   if (!health.connected) {
     return {
       color: "var(--color-warning)",
