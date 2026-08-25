@@ -83,7 +83,6 @@ export default function DecisionFeed({
   return (
     <div
       style={{
-        borderLeft: "1px solid var(--color-border)",
         padding: "0.9375rem 1.125rem",
         display: "flex",
         flexDirection: "column",
@@ -99,6 +98,7 @@ export default function DecisionFeed({
         </p>
       ) : (
         <ol
+          className="dash-feed"
           style={{
             listStyle: "none",
             margin: 0,
