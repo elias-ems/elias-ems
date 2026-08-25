@@ -46,6 +46,54 @@
 
   --color-focus: light-dark(#2186eb, #5eaaf5);
 
+  /* A link that is a link rather than body text. The focus blue is one step too
+     light for this: it clears the 3:1 a focus ring needs and only 3.7:1 against
+     white, where text wants 4.5:1. The dashboard's links are 12px and sit inside
+     cards, so they are underlined as well as coloured. */
+  --color-link: light-dark(#0967d2, #5eaaf5);
+
+  /* What each part of the house is drawn in on the dashboard. Same ramps as
+     everything above, picked so each clears 4.5:1 as a number on the surface it
+     sits on and 4.5:1 again on its own tint, in both themes.
+
+     `--color-import` is red-on-the-meter, not danger: importing is normal, and
+     the colour is here to make the sign of a signed number readable at a
+     glance rather than to say something is wrong. */
+  --color-pv: light-dark(#a3450f, #f0b429);
+  --color-battery: light-dark(#0b6e99, #38bec9);
+  --color-import: light-dark(#ab091e, #fa8a8a);
+  --color-export: light-dark(#0f7b3f, #3ddc84);
+
+  /* Chart marks are graphics, so 3:1 is the bar to clear — but the blue-grey
+     that reads as "quiet" only manages 2.9:1 on white, hence the darker light
+     value. `--color-chart-now` is deliberately heavier than `--color-import` in
+     both directions: darker in light, brighter in dark. */
+  --color-chart-bar: light-dark(#6b8299, #9aa5b1);
+  --color-chart-now: light-dark(#7f0710, #ffb0b0);
+
+  /* The tints a pill or a callout sits on. Kept faint enough that the colour
+     above still clears 4.5:1 when drawn on them. */
+  --color-pv-soft: light-dark(
+    rgba(163, 69, 15, 0.12),
+    rgba(240, 180, 41, 0.14)
+  );
+  --color-battery-soft: light-dark(
+    rgba(11, 110, 153, 0.12),
+    rgba(56, 190, 201, 0.14)
+  );
+  --color-import-soft: light-dark(
+    rgba(171, 9, 30, 0.12),
+    rgba(250, 138, 138, 0.12)
+  );
+  --color-export-soft: light-dark(
+    rgba(15, 123, 63, 0.12),
+    rgba(61, 220, 132, 0.14)
+  );
+  --color-warning-soft: light-dark(
+    rgba(141, 103, 8, 0.08),
+    rgba(240, 180, 41, 0.13)
+  );
+
   /* The add-on's own top bar — the one surface here that isn't the page canvas.
      Home Assistant's theme variables don't cross the ingress iframe, so this
      can't track HA's real primary colour; it is HA's default blue darkened
@@ -58,17 +106,52 @@
     0 4px 12px rgba(0, 0, 0, 0.08),
     0 4px 12px rgba(0, 0, 0, 0.5)
   );
+
+  /* Dark needs no lift: the raised surface already separates a card from the
+     canvas, and a shadow on a dark ground only muddies the edge. */
+  --shadow-card: light-dark(0 1px 2px rgba(16, 24, 40, 0.05), none);
+
+  /* Every reading on the dashboard is set in this, so that a column of numbers
+     lines up and a value doesn't jitter sideways as it changes. Locally
+     installed faces only — an add-on has to work in a house with no internet,
+     which rules out fetching a webfont at runtime. */
+  --font-mono:
+    ui-monospace, "Cascadia Mono", "Segoe UI Mono", "SF Mono", Menlo, monospace;
 }
 
 body {
   margin: 0;
-  font-family: sans-serif;
+  /* `sans-serif` resolves to something different on every platform and to
+     Arial on most. `system-ui` follows the OS the way Home Assistant's own UI
+     does, which is what the add-on is embedded in. */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   background: var(--color-bg);
   color: var(--color-text);
 }
 
 a {
   color: inherit;
+}
+
+/*
+ * A heading that only a screen reader gets. The dashboard's own name is in the
+ * top bar directly above it, so printing "Home" again would be the same word
+ * twice — but a page with no h1 is a page a screen reader cannot summarise.
+ *
+ * The clip-path/1px recipe rather than `display: none` or `visibility: hidden`,
+ * both of which take the element out of the accessibility tree along with the
+ * layout, which is the opposite of the point.
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 code {

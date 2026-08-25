@@ -1,6 +1,7 @@
 /**
  * What a diagnostics box polls while it is open. `?origin=` narrows it to one
- * feature; without it, every feature's entries come back merged.
+ * feature, repeating it narrows to those features merged, and without it every
+ * feature's entries come back merged.
  *
  * Separate from the page loaders on purpose: the home loader reads every
  * configured Home Assistant entity, which is far too much work to repeat every
@@ -14,14 +15,21 @@ import type { Route } from "./+types/api.diagnostics";
 export async function loader({
   request,
 }: Route.LoaderArgs): Promise<DiagnosticsData> {
-  const origin = new URL(request.url).searchParams.get("origin");
+  // Unknown origins are dropped rather than erroring, and dropping every one
+  // reads as "no filter": the only thing that can produce one is a stale client
+  // after an origin was renamed, and showing it the whole log beats showing it
+  // a failure.
+  const requested = new URL(request.url).searchParams
+    .getAll("origin")
+    .filter(isDiagnosticsOrigin);
 
-  // An unknown origin reads as "no filter" rather than as an error: the only
-  // thing that can produce one is a stale client after an origin was renamed,
-  // and showing it the whole log beats showing it a failure.
+  if (requested.length === 1) {
+    return { entries: readDiagnostics({ origin: requested[0] }) };
+  }
+
   return {
     entries: readDiagnostics(
-      isDiagnosticsOrigin(origin) ? { origin } : undefined,
+      requested.length > 1 ? { origins: requested } : undefined,
     ),
   };
 }

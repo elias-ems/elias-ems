@@ -64,12 +64,16 @@ test("links keep working across a client navigation and a reload", async ({
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
   await nav.getByRole("link", { name: "Home" }).click();
-  await expect(page.getByRole("heading", { name: "Solar" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Solar & batteries" }),
+  ).toBeVisible();
 
   // The reload is the point: a Home link without the trailing slash renders and
   // navigates fine, then 404s at Home Assistant the moment someone refreshes.
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Solar" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Solar & batteries" }),
+  ).toBeVisible();
 });
 
 test("a PV entity can be added, appears on the dashboard, and removed", async ({
@@ -173,21 +177,19 @@ test("battery control can be configured, enabled, and watched deciding", async (
   await expect(page.getByText("10–90% of 10 kWh")).toBeVisible();
   await expect(page.getByText("76 %")).toBeVisible();
 
-  // A diagnostics box only polls while it is open, so this both expands it and
-  // is the thing that makes the log appear at all. Scoped to battery control's
-  // section: PV curtailment has a box of its own on this page now, and a bare
-  // "Diagnostics" matches both.
-  await page
-    .locator("section")
-    .filter({ has: page.getByRole("heading", { name: "Battery control" }) })
-    .getByText("Diagnostics")
-    .click();
-
-  // The fixture imports 842 W with the battery idle, so net zero means
-  // discharging exactly that much.
-  await expect(page.getByText(/Home battery: discharge at 842 W/)).toBeVisible({
+  // The decision feed is open and polling on its own — there is no box to
+  // expand any more — and it carries the summary line of each tick. The fixture
+  // imports 842 W with the battery idle, so net zero means discharging exactly
+  // that much, and the loop inside server.js is what has to say so.
+  await expect(page.getByText(/Grid net \+842 W/).first()).toBeVisible({
     timeout: 15_000,
   });
+
+  // The per-battery detail is the tick's second line, which the feed trims and
+  // the Tools page keeps — the next test is where that is checked.
+  await expect(
+    page.getByRole("link", { name: "Full diagnostics" }),
+  ).toBeVisible();
 });
 
 /**
@@ -237,9 +239,17 @@ test("readings keep updating without the page being reloaded", async ({
 }) => {
   // Revalidations of the home loader — the polling fallback's signature. The
   // stream is supposed to make all of them unnecessary.
+  //
+  // `/api/diagnostics.data` is excluded because it is not one: the decision
+  // feed polls that route on its own two-second clock by design, and it reads
+  // nothing but an in-memory buffer. Matching every `.data` request would count
+  // the feed doing its job as the readings falling back to polling.
   const polls: string[] = [];
   page.on("request", (event) => {
-    if (event.url().includes(".data")) polls.push(event.url());
+    const url = event.url();
+    if (url.includes(".data") && !url.includes("api/diagnostics")) {
+      polls.push(url);
+    }
   });
 
   await page.goto("./");

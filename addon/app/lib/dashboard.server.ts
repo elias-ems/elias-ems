@@ -10,9 +10,18 @@
  * Readings are formatted here, on the server, for the reason `readings.server.ts`
  * gives: the strings are locale-dependent, and formatting them during render
  * would risk the server and the browser disagreeing.
+ *
+ * What comes out is typed in [dashboard.ts](dashboard.ts) rather than here, so
+ * that the components drawing it can have the shape without importing a
+ * `.server` module.
  */
 import type { Battery } from "./batteries";
 import { listBatteries } from "./batteries.server";
+import type {
+  DashboardPrices,
+  DashboardReadings,
+  PriceCurvePoint,
+} from "./dashboard";
 import { type Grid, isGridConfigured } from "./grid";
 import { readGrid } from "./grid.server";
 import { haLiveStatus } from "./ha-live.server";
@@ -22,67 +31,16 @@ import {
   formatSlotRange,
 } from "./price-format.server";
 import { priceEntityIds, readPricesFrom } from "./price-source.server";
-import type { PriceConfig } from "./prices";
+import type { PriceConfig, PriceForecast, PriceFormulas } from "./prices";
+import { parsePriceFormulas, priceSlot } from "./prices";
 import { readPriceConfig } from "./prices.server";
 import type { PvEntity } from "./pv-entities";
 import { listPvEntities } from "./pv-entities.server";
-import type { LiveHealth, Reading } from "./readings";
-import { toReading } from "./readings.server";
+import { publishedLimitPercent } from "./pv-limits.server";
+
+import { toNumber, toReading } from "./readings.server";
 import { readingAge, readStates, type StateRead } from "./states.server";
-
-export type DashboardReadings = {
-  arrays: Array<{
-    id: string;
-    title: string;
-    power: Reading | null;
-    energy: Reading | null;
-  }>;
-  grid: {
-    configured: boolean;
-    power: Reading | null;
-  };
-  batteries: Array<{
-    id: string;
-    title: string;
-    window: string;
-    charge: Reading | null;
-    power: Reading | null;
-    energy: Reading | null;
-  }>;
-  prices: DashboardPrices;
-  /** Why the readings are missing, when they are. Null when all is well. */
-  error: string | null;
-  /** How these readings reached us, and how well that path is working. */
-  health: LiveHealth;
-};
-
-/**
- * The price card, formatted on the server like every other reading here.
- *
- * Strings rather than numbers, for the reason at the top of this file: what is
- * shown depends on the server's timezone and on a fixed number of decimals, and
- * deciding either during render risks the browser disagreeing with the markup
- * it is hydrating.
- */
-export type DashboardPrices = {
-  configured: boolean;
-  /** What a kWh costs and earns right now, with the contract applied. */
-  consumption: string | null;
-  production: string | null;
-  /** The exchange price the two were derived from, shown so they can be checked. */
-  spot: string | null;
-  /** Which quarter hour those are for, e.g. `22:45–23:00`. */
-  slot: string | null;
-  /** How far the forecast reaches, and whether tomorrow has been published. */
-  coverage: string | null;
-  /**
-   * What currency the strings above are in, so anything else on the page that
-   * has to render a price — curtailment's threshold — agrees with this card
-   * rather than guessing at EUR.
-   */
-  currency: string;
-  error: string | null;
-};
+import { publishedTargetW } from "./targets.server";
 
 /** The stored configuration everything on the page is derived from. */
 type DashboardConfig = {
@@ -151,8 +109,9 @@ function dashboardEntityIds({
 function toPrices(
   config: PriceConfig,
   states: Map<string, StateRead>,
+  now: number,
 ): DashboardPrices {
-  const read = readPricesFrom(config, states.get(config.forecastEntityId));
+  const read = readPricesFrom(config, states.get(config.forecastEntityId), now);
 
   if (!read.configured) {
     return {
@@ -160,9 +119,12 @@ function toPrices(
       consumption: null,
       production: null,
       spot: null,
+      productionPerKwh: null,
       slot: null,
       coverage: null,
       currency: "EUR",
+      curve: [],
+      nowMinutes: null,
       error: null,
     };
   }
@@ -185,6 +147,7 @@ function toPrices(
     consumption: price(read.now?.consumptionPerKwh),
     production: price(read.now?.productionPerKwh),
     spot: price(read.now?.spotPerKwh),
+    productionPerKwh: read.now?.productionPerKwh ?? null,
     slot: read.now
       ? formatSlotClock(read.now.slot.start, read.now.slot.end)
       : null,
@@ -193,8 +156,65 @@ function toPrices(
         ? `${read.forecast?.slots.length} slots · ${formatSlotRange(first.start, last.end)}`
         : null,
     currency,
+    curve: read.forecast
+      ? toCurve(read.forecast, parsePriceFormulas(config), now)
+      : [],
+    nowMinutes: read.now ? startMinutes(read.now.slot.start) : null,
     error: read.error,
   };
+}
+
+/** Minutes past local midnight for an ISO instant, or null when it won't parse. */
+function startMinutes(iso: string): number | null {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime())
+    ? null
+    : at.getHours() * 60 + at.getMinutes();
+}
+
+/**
+ * Today's slots, averaged into one point per hour.
+ *
+ * Today only: the forecast carries tomorrow as soon as it is published, and a
+ * chart that silently grew a second day would make every hour half as wide
+ * halfway through the afternoon.
+ *
+ * Bucketed by the hour each slot *starts* in rather than by an index, for the
+ * reason `PriceSlot` carries explicit boundaries at all — providers publish
+ * quarter-hourly or hourly and a DST day has neither 96 nor 24 of them, so any
+ * arithmetic over a position in the array is wrong twice a year.
+ */
+function toCurve(
+  forecast: PriceForecast,
+  formulas: PriceFormulas,
+  now: number,
+): PriceCurvePoint[] {
+  const today = new Date(now).toDateString();
+  const buckets = new Map<number, number[]>();
+
+  for (const slot of forecast.slots) {
+    const at = new Date(slot.start);
+    if (Number.isNaN(at.getTime()) || at.toDateString() !== today) continue;
+
+    // A slot whose selling leg does not evaluate is left out rather than
+    // charted as zero: the gap says "no number here", which is true, and a
+    // zero would sit exactly on the threshold line and read as a decision.
+    const selling = priceSlot(slot, formulas).productionPerKwh;
+    if (selling === null) continue;
+
+    const hour = at.getHours() * 60;
+    const bucket = buckets.get(hour);
+    if (bucket) bucket.push(selling);
+    else buckets.set(hour, [selling]);
+  }
+
+  return [...buckets.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([startMinutes, values]) => ({
+      startMinutes,
+      sellingPerKwh:
+        values.reduce((sum, value) => sum + value, 0) / values.length,
+    }));
 }
 
 export async function readDashboard(): Promise<DashboardReadings> {
@@ -210,7 +230,11 @@ export async function readDashboard(): Promise<DashboardReadings> {
     return read ? toReading(read.state, read.updatedAt) : null;
   };
 
+  /** The same read as a number, for the bars and meters rather than the labels. */
+  const value = (id: string) => toNumber(states.get(id)?.state ?? null);
+
   const status = haLiveStatus();
+  const now = Date.now();
 
   return {
     arrays: pvEntities.map((entity) => ({
@@ -218,10 +242,15 @@ export async function readDashboard(): Promise<DashboardReadings> {
       title: entity.title,
       power: reading(entity.powerEntityId),
       energy: reading(entity.energyEntityId),
+      powerW: value(entity.powerEntityId),
+      ratedPowerW: entity.ratedPowerW,
+      curtailable: entity.curtailable,
+      limitPercent: publishedLimitPercent(entity.id),
     })),
     grid: {
       configured: isGridConfigured(grid),
       power: grid.powerEntityId ? reading(grid.powerEntityId) : null,
+      powerW: grid.powerEntityId ? value(grid.powerEntityId) : null,
     },
     batteries: batteries.map((battery) => ({
       id: battery.id,
@@ -230,8 +259,10 @@ export async function readDashboard(): Promise<DashboardReadings> {
       charge: reading(battery.socEntityId),
       power: reading(battery.powerEntityId),
       energy: reading(battery.energyEntityId),
+      chargePercent: value(battery.socEntityId),
+      targetW: publishedTargetW(battery.id),
     })),
-    prices: toPrices(config.prices, states),
+    prices: toPrices(config.prices, states, now),
     error,
     health: {
       connected: status.connected,

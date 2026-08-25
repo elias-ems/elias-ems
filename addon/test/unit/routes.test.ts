@@ -202,7 +202,7 @@ describe("GET / (dashboard)", () => {
   it("returns nothing to show before anything is configured", async () => {
     expect(await loadIndex()).toEqual({
       arrays: [],
-      grid: { configured: false, power: null },
+      grid: { configured: false, power: null, powerW: null },
       batteries: [],
       // Unconfigured is not an error: no source has been picked, so there is
       // nothing to have failed at.
@@ -211,9 +211,12 @@ describe("GET / (dashboard)", () => {
         consumption: null,
         production: null,
         spot: null,
+        productionPerKwh: null,
         slot: null,
         coverage: null,
         currency: "EUR",
+        curve: [],
+        nowMinutes: null,
         error: null,
       },
       control: {
@@ -224,17 +227,23 @@ describe("GET / (dashboard)", () => {
           intervalSeconds: 5,
           lastTickAt: null,
         },
-        diagnostics: [],
       },
       curtailment: {
         enabled: false,
-        // Formatted on the server, in the currency the price card is in, so the
-        // heading and the card cannot disagree about what a threshold means.
-        thresholdPerKwh: "0.0000 EUR/kWh",
+        // The threshold twice: as a number for the chart, which draws a line at
+        // it, and formatted on the server in the currency the price card is in,
+        // so the rule and the card cannot disagree about what it means.
+        thresholdPerKwh: 0,
+        thresholdDisplay: "0.0000 EUR/kWh",
         settleSeconds: 30,
+        gridTargetW: 0,
+        deadbandW: 50,
+        minLimitPercent: 5,
         status: { running: false, lastTickAt: null },
-        diagnostics: [],
       },
+      // Both strategies' logs merged, which is what the one feed on the page
+      // shows.
+      decisions: [],
       error: null,
       // `lastError` is left out on purpose: whether the failed connection to a
       // Home Assistant that isn't there has been reported yet is a race, and
@@ -284,6 +293,11 @@ describe("GET / (dashboard)", () => {
           ok: true,
           updatedAt: expect.any(Number),
         },
+        // The same charge again as a number, for the bar beside it.
+        chargePercent: 76,
+        // Nothing has been published: battery control is off in this case, and
+        // null is how the page tells that from a target of zero watts.
+        targetW: null,
       },
     ]);
   });
@@ -382,7 +396,18 @@ describe("GET / (dashboard)", () => {
 
     expect(error).toBeTruthy();
     expect(arrays).toEqual([
-      { id: expect.any(String), title: "Roof", power: null, energy: null },
+      {
+        id: expect.any(String),
+        title: "Roof",
+        power: null,
+        energy: null,
+        powerW: null,
+        // The configuration survives an unreachable Home Assistant even though
+        // the readings do not: these come off disk, not off the wire.
+        ratedPowerW: null,
+        curtailable: false,
+        limitPercent: null,
+      },
     ]);
   });
 });

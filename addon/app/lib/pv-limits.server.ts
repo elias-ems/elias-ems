@@ -160,6 +160,18 @@ export function forgetPublishedLimit(arrayId: string): void {
 }
 
 /**
+ * The limit an array is standing under, as a whole percentage of its rating, or
+ * null when none has gone out since this process started.
+ *
+ * Read-only, for the dashboard. Null and 100 mean different things and the page
+ * draws them differently: 100 is "released, generate freely", null is "we have
+ * not said anything to this array at all".
+ */
+export function publishedLimitPercent(arrayId: string): number | null {
+  return published.get(arrayId)?.percent ?? null;
+}
+
+/**
  * Whether the array is visibly ignoring the limit we believe it is under.
  *
  * This is what replaced the old 30-second restatement, and it is not merely a

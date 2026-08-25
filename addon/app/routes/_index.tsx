@@ -1,20 +1,27 @@
 import { useEffect, useState } from "react";
-import { Link, useHref, useRevalidator } from "react-router";
-import DiagnosticsBox from "../components/DiagnosticsBox";
-import { headingStyle, hintStyle, rowStyle } from "../components/form";
+import { useHref, useRevalidator } from "react-router";
+import { sectionLabelStyle } from "../components/dashboard/chrome";
+import DeviceTable from "../components/dashboard/DeviceTable";
+import GridCard from "../components/dashboard/GridCard";
+import PriceCard from "../components/dashboard/PriceCard";
+import StrategyRail from "../components/dashboard/StrategyRail";
+import { hintStyle } from "../components/form";
 import LiveHealthFacts from "../components/LiveHealthFacts";
 import LiveStatus from "../components/LiveStatus";
-import Measurement from "../components/Measurement";
 import { readControlConfig } from "../lib/control-config.server";
 import {
   controlLoopStatus,
   curtailmentLoopStatus,
 } from "../lib/control-loop.server";
 import { readCurtailmentConfig } from "../lib/curtailment-config.server";
-import { type DashboardReadings, readDashboard } from "../lib/dashboard.server";
+import type { DashboardReadings } from "../lib/dashboard";
+import { readDashboard } from "../lib/dashboard.server";
+import {
+  batteryControlSummary,
+  curtailmentSummary,
+} from "../lib/dashboard-view";
 import { readDiagnostics } from "../lib/diagnostics.server";
 import { formatPricePerKwh } from "../lib/price-format.server";
-import type { Reading } from "../lib/readings";
 import type { Route } from "./+types/_index";
 
 /** How often the readings refresh themselves, in milliseconds. */
@@ -30,8 +37,8 @@ const REFRESH_INTERVAL = 5_000;
  */
 const HIDDEN_REFRESH_INTERVAL = 60_000;
 
-/** Enough of the log to be useful on first paint; the box then polls for more. */
-const INITIAL_LOG_ENTRIES = 50;
+/** Enough of the feed to be useful on first paint; it then polls for more. */
+const INITIAL_LOG_ENTRIES = 20;
 
 export async function loader() {
   const [readings, config, curtailmentConfig] = await Promise.all([
@@ -45,29 +52,29 @@ export async function loader() {
     control: {
       enabled: config.enabled,
       status: controlLoopStatus(),
-      // Only battery control's own entries: this box sits under that heading,
-      // and the whole log is the Tools page's job.
-      diagnostics: readDiagnostics({
-        origin: "battery-control",
-        limit: INITIAL_LOG_ENTRIES,
-      }),
     },
     curtailment: {
       enabled: curtailmentConfig.enabled,
       // Formatted here rather than during render, for the reason every reading
       // on this page is: a locale-dependent string built in the component is a
       // hydration mismatch waiting to happen.
-      thresholdPerKwh: formatPricePerKwh(
+      thresholdPerKwh: curtailmentConfig.priceThresholdPerKwh,
+      thresholdDisplay: formatPricePerKwh(
         curtailmentConfig.priceThresholdPerKwh,
         readings.prices.currency,
       ),
       settleSeconds: curtailmentConfig.settleSeconds,
+      gridTargetW: curtailmentConfig.gridTargetW,
+      deadbandW: curtailmentConfig.deadbandW,
+      minLimitPercent: curtailmentConfig.minLimitPercent,
       status: curtailmentLoopStatus(),
-      diagnostics: readDiagnostics({
-        origin: "pv-curtailment",
-        limit: INITIAL_LOG_ENTRIES,
-      }),
     },
+    // Both strategies in one list, newest first — what the rail's feed shows
+    // until its first poll comes back.
+    decisions: readDiagnostics({
+      origins: ["pv-curtailment", "battery-control"],
+      limit: INITIAL_LOG_ENTRIES,
+    }),
   };
 }
 
@@ -173,20 +180,8 @@ function useRefreshingReadings(enabled: boolean) {
   }, [enabled, revalidate]);
 }
 
-/**
- * An already-formatted price as something `Measurement` can render.
- *
- * No `updatedAt`: a price belongs to a quarter-hour slot rather than to the
- * moment a sensor happened to report it, and the slot it belongs to is named
- * under the card. Hovering for "last changed" would answer a question nobody
- * asked about a price and give a misleading answer to the one they did.
- */
-function priceReading(display: string | null): Reading | null {
-  return display === null ? null : { display, ok: true, updatedAt: null };
-}
-
 export default function Index({ loaderData }: Route.ComponentProps) {
-  const { control, curtailment } = loaderData;
+  const { control, curtailment, decisions } = loaderData;
   const { readings, streaming } = useStreamedReadings();
 
   // The stream's readings once it has sent any, the loader's until then. Both
@@ -206,170 +201,103 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   useRefreshingReadings(hasReadings && !streaming);
 
   return (
-    <main style={{ padding: "2rem", maxWidth: 640 }}>
-      <h1>Home</h1>
+    <main
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "1.125rem",
+        padding: "1.125rem 1.5rem 1.75rem",
+        // Wide enough for the chart to be worth drawing, bounded so the table
+        // does not stretch to a 4K panel.
+        maxWidth: 1240,
+      }}
+    >
+      {/* The page's own name is in the top bar, which is the only thing above
+          this. A visible "Home" heading would say it a second time. */}
+      <h1 className="visually-hidden">Home</h1>
 
-      {hasReadings && <LiveStatus health={health} streaming={streaming} />}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.75rem",
+          flexWrap: "wrap",
+        }}
+      >
+        {hasReadings && <LiveStatus health={health} streaming={streaming} />}
+        <span style={{ flexGrow: 1 }} />
+        <details style={hintStyle}>
+          <summary style={{ cursor: "pointer" }}>Connection detail</summary>
+          <div style={{ marginTop: "0.5rem" }}>
+            <LiveHealthFacts health={health} />
+          </div>
+        </details>
+      </div>
 
       {error && (
-        <p style={{ fontSize: "0.875rem", color: "var(--color-text-muted)" }}>
+        <p style={hintStyle}>
           Couldn't read live values from Home Assistant: {error}
         </p>
       )}
 
-      <Panel
-        title="Solar"
-        empty={arrays.length === 0 ? "No PV entities" : null}
-      >
-        <ul style={listStyle}>
-          {arrays.map((array) => (
-            <li key={array.id} style={rowStyle}>
-              <div style={{ fontWeight: 600 }}>{array.title}</div>
-              <div style={measurementsStyle}>
-                <Measurement label="Power" reading={array.power} />
-                <Measurement label="Energy" reading={array.energy} />
-              </div>
-            </li>
-          ))}
-        </ul>
-      </Panel>
+      <PriceCard
+        prices={prices}
+        thresholdPerKwh={curtailment.thresholdPerKwh}
+        thresholdDisplay={curtailment.thresholdDisplay}
+        curtailing={curtailment.enabled}
+      />
 
-      <Panel title="Grid" empty={grid.configured ? null : "No grid sensor"}>
-        <div style={{ ...measurementsStyle, marginTop: "0.75rem" }}>
-          <Measurement label="Power" reading={grid.power} />
-        </div>
-      </Panel>
+      <GridCard
+        configured={grid.configured}
+        power={grid.power}
+        powerW={grid.powerW}
+        targetW={curtailment.gridTargetW}
+        deadbandW={curtailment.deadbandW}
+        settleSeconds={curtailment.settleSeconds}
+        minLimitPercent={curtailment.minLimitPercent}
+      />
 
-      <Panel
-        title="Batteries"
-        empty={batteries.length === 0 ? "No batteries" : null}
-      >
-        <ul style={listStyle}>
-          {batteries.map((battery) => (
-            <li key={battery.id} style={rowStyle}>
-              <div style={{ fontWeight: 600 }}>{battery.title}</div>
-              <div style={hintStyle}>{battery.window}</div>
-              <div style={measurementsStyle}>
-                <Measurement label="Charge" reading={battery.charge} />
-                <Measurement label="Power" reading={battery.power} />
-                <Measurement label="Energy" reading={battery.energy} />
-              </div>
-            </li>
-          ))}
-        </ul>
-      </Panel>
+      <h2 style={{ ...sectionLabelStyle, marginTop: "0.25rem" }}>
+        Active strategies
+      </h2>
+      <StrategyRail
+        curtailment={{
+          summary: curtailmentSummary(arrays, {
+            enabled: curtailment.enabled,
+            running: curtailment.status.running,
+          }),
+          rule: curtailment.enabled ? (
+            <>
+              Holding the arrays back whenever a kWh put on the grid earns less
+              than <strong>{curtailment.thresholdDisplay}</strong>, after{" "}
+              {curtailment.settleSeconds} s off target.
+            </>
+          ) : (
+            <>Switched off — no limit is published for any array.</>
+          ),
+        }}
+        control={{
+          summary: batteryControlSummary(batteries, {
+            enabled: control.enabled,
+            running: control.status.running,
+          }),
+          rule: control.enabled ? (
+            <>
+              Running the <strong>{control.status.strategy}</strong> strategy
+              whenever a reading changes, at most every{" "}
+              {control.status.intervalSeconds} s.
+            </>
+          ) : (
+            <>Switched off — no target is published for any battery.</>
+          ),
+        }}
+        initialEntries={decisions}
+      />
 
-      <Panel
-        title="Prices"
-        empty={prices.configured ? null : "No price source"}
-      >
-        {prices.error ? (
-          <p style={{ ...hintStyle, marginTop: "0.75rem" }}>{prices.error}</p>
-        ) : (
-          <>
-            <div style={{ ...measurementsStyle, marginTop: "0.75rem" }}>
-              <Measurement
-                label="Buying"
-                reading={priceReading(prices.consumption)}
-              />
-              <Measurement
-                label="Selling"
-                reading={priceReading(prices.production)}
-              />
-              {/*
-                The exchange price sits beside the two derived from it, not
-                instead of them. It is what makes a formula checkable against a
-                bill, and what makes a mis-picked entity — one already carrying
-                markups — visible rather than plausible.
-              */}
-              <Measurement
-                label="Exchange"
-                reading={priceReading(prices.spot)}
-              />
-            </div>
-            <p style={{ ...hintStyle, marginTop: "0.5rem" }}>
-              {[prices.slot, prices.coverage].filter(Boolean).join(" · ")}
-            </p>
-          </>
-        )}
-      </Panel>
-
-      <section style={{ marginTop: "2rem" }}>
-        <h2 style={headingStyle}>Battery control</h2>
-        <p style={{ ...hintStyle, marginTop: "0.35rem" }}>
-          {control.enabled
-            ? `Running the ${control.status.strategy} strategy whenever a reading changes, at most every ${control.status.intervalSeconds}s.`
-            : "Disabled."}{" "}
-          <Link to="/settings">Settings</Link>
-        </p>
-        <DiagnosticsBox
-          origin="battery-control"
-          initialEntries={control.diagnostics}
-          subtitle={control.status.running ? "loop running" : "loop stopped"}
-        >
-          <LiveHealthFacts health={health} />
-        </DiagnosticsBox>
-      </section>
-
-      <section style={{ marginTop: "2rem" }}>
-        <h2 style={headingStyle}>PV curtailment</h2>
-        <p style={{ ...hintStyle, marginTop: "0.35rem" }}>
-          {curtailment.enabled
-            ? `Holding the arrays back whenever a kWh put on the grid earns less than ${curtailment.thresholdPerKwh}, after ${curtailment.settleSeconds}s off target.`
-            : "Disabled."}{" "}
-          <Link to="/settings">Settings</Link>
-        </p>
-        {/*
-          No `LiveHealthFacts` here: it describes the readings path, which is
-          one thing shared by the whole page, and repeating it under a second
-          heading would suggest there were two of them.
-        */}
-        <DiagnosticsBox
-          origin="pv-curtailment"
-          initialEntries={curtailment.diagnostics}
-          subtitle={
-            curtailment.status.running ? "loop running" : "loop stopped"
-          }
-        />
-      </section>
+      <h2 style={{ ...sectionLabelStyle, marginTop: "0.25rem" }}>
+        Solar &amp; batteries
+      </h2>
+      <DeviceTable arrays={arrays} batteries={batteries} />
     </main>
-  );
-}
-
-const listStyle = { listStyle: "none", padding: 0, margin: 0 } as const;
-const measurementsStyle = {
-  display: "flex",
-  gap: "2rem",
-  marginTop: "0.35rem",
-} as const;
-
-/**
- * A section that either has readings to show or says what to configure. The
- * empty state stays a section rather than disappearing, so the page's shape
- * doesn't change as things get configured.
- */
-function Panel({
-  title,
-  empty,
-  children,
-}: {
-  title: string;
-  /** The reason there is nothing to show, or null when there is. */
-  empty: string | null;
-  children: React.ReactNode;
-}) {
-  return (
-    <section style={{ marginTop: "2rem" }}>
-      <h2 style={headingStyle}>{title}</h2>
-      {empty ? (
-        <p style={{ ...hintStyle, marginTop: "0.35rem" }}>
-          {/* Number-neutral on purpose: the grid is one sensor, the other two
-              panels are lists. */}
-          {empty} yet — head to <Link to="/settings">Settings</Link>.
-        </p>
-      ) : (
-        children
-      )}
-    </section>
   );
 }
