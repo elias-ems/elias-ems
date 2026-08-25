@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { useFetcher } from "react-router";
 import type { EntitiesData } from "../lib/entities";
+import { useFetchedJson } from "../lib/json-fetch";
 import {
   errorStyle,
   fieldStyle,
@@ -20,6 +20,9 @@ type EntityAutocompleteProps = {
   defaultValue?: string;
 };
 
+/** Long enough that typing a sensor name isn't one request per letter. */
+const DEBOUNCE_MS = 200;
+
 export default function EntityAutocomplete({
   name,
   label,
@@ -31,26 +34,25 @@ export default function EntityAutocomplete({
   const [query, setQuery] = useState(defaultValue);
   const [selected, setSelected] = useState(defaultValue);
   const [open, setOpen] = useState(false);
-  const fetcher = useFetcher<EntitiesData>();
   const containerRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
   const inputId = useId();
 
-  // useFetcher returns a new object every render, so depending on fetcher.load
-  // would restart the debounce on each render and refire the request. Only
-  // query and open should retrigger it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
+  // The request is driven by the URL, so the debounce is on the query that
+  // builds it rather than on the fetch itself: every keystroke re-renders,
+  // only a pause requests.
+  const [debounced, setDebounced] = useState(defaultValue);
   useEffect(() => {
-    if (!open) return undefined;
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      const params = new URLSearchParams({ q: query });
-      fetcher.load(`/api/entities?${params}`);
-    }, 200);
-    return () => clearTimeout(debounceRef.current);
-  }, [query, open]);
+    const timer = setTimeout(() => setDebounced(query), DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // Not `useFetcher`: a request that fails while somebody is typing is a route
+  // error, and a route error would replace the settings page — and everything
+  // typed into it — with an error page. See `lib/json-fetch.ts`.
+  const { data, failing } = useFetchedJson<EntitiesData>(
+    `/api/entities?${new URLSearchParams({ q: debounced })}`,
+    { enabled: open },
+  );
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -65,8 +67,10 @@ export default function EntityAutocomplete({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const entities = fetcher.data?.entities ?? [];
-  const loadError = fetcher.data?.error;
+  const entities = data?.entities ?? [];
+  // The loader reports a Home Assistant it couldn't read as a value; `failing`
+  // is the other half — the request never reaching the add-on at all.
+  const loadError = failing ? "the add-on didn't answer" : data?.error;
 
   function selectEntity(entityId: string) {
     setSelected(entityId);

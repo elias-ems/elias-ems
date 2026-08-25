@@ -94,13 +94,14 @@ is what the health chip is for.
 ## The health chip
 
 [`LiveStatus.tsx`](../../addon/app/components/LiveStatus.tsx) sits above the
-readings and says one of three things:
+readings and says one of four things:
 
 | Chip | Means |
 | --- | --- |
 | **Live** · last change 3s ago | The subscription is up and the stream is delivering. With no changes yet, it dates itself by how long the link has been up instead. |
 | **Reconnecting** · showing values read on request | The WebSocket is down. Readings still appear — over REST — which is exactly why this needs saying. |
-| **Polling** · live updates aren't getting through | The server is fine; the browser's stream isn't. The page is revalidating every 5s instead. |
+| **Polling** · live updates aren't getting through | The server is fine; the browser's stream isn't. The page is asking for a snapshot every 5s instead. |
+| **Offline** · can't reach the add-on | Neither the stream nor the snapshot is getting an answer. Everything on the page is the last thing that arrived, and nothing on it is current — which is why this one is checked before the rest: `health` describes the add-on's link to Home Assistant, and the page can no longer hear the add-on itself. |
 
 Hovering a reading shows when that particular value last changed, as an absolute
 timestamp. The relative form ("3s ago") is rendered client-side only: a relative
@@ -142,6 +143,11 @@ one way, `EventSource` reconnects itself, and a stream is a plain `Response` —
 dependency, and no upgrade handler reaching around React Router's request
 handling.
 
+The same route answers `?snapshot=1` with those readings once, as JSON, which is
+what the page polls when the stream isn't delivering. It is the same answer to
+the same question, so it stays in the same route; what makes it a plain request
+rather than a revalidation of the home loader is the last row of the table below.
+
 ## When it doesn't work
 
 Every hop degrades instead of failing:
@@ -151,7 +157,8 @@ Every hop degrades instead of failing:
 | The subscription isn't up yet, or Home Assistant isn't reachable | `readDashboard()` reads over REST, one request per entity, as it always did |
 | No `SUPERVISOR_TOKEN` (any run outside Home Assistant) | No socket is dialled at all; the page reads over REST, which also fails, and says so |
 | The token is refused | Reported as a rejected token rather than an unreachable server — the two look identical from outside and are fixed differently |
-| The stream never opens, or stops delivering | The page falls back to revalidating the home loader every 5 seconds, which is what it did before this existed |
+| The stream never opens, or stops delivering | The page falls back to asking `/api/readings?snapshot=1` for the same readings every 5 seconds |
+| That fallback fails too — the add-on restarting, the tunnel blinking, a laptop waking up | The last readings stay on screen and the chip says **Offline**. The failure is deliberately *not* thrown: a rejected `fetch` inside React Router's data layer is a route error, and a route error every five seconds on an unreliable connection is a dashboard that replaces itself with an error page while nobody is watching. See [`json-fetch.ts`](../../addon/app/lib/json-fetch.ts) |
 
 That last row is the one that matters most in production. **Home Assistant's
 ingress proxy is the one thing that cannot be verified outside a real install**:
@@ -160,8 +167,9 @@ the stream into a connection that looks healthy and never delivers.
 [`test/integration/readings-stream.test.ts`](../../addon/test/integration/readings-stream.test.ts)
 reproduces the shape of that failure against the mock ingress proxy, but only an
 install proves it. If it ever does happen, the page is 5 seconds stale rather
-than broken, and the browser's network tab shows it: repeated `.data` requests
-mean the fallback took over.
+than broken, and the browser's network tab shows it: repeated `?snapshot=1`
+requests mean the fallback took over. Nothing else asks for that URL, which is
+what makes it a usable signal — and what the end-to-end suite asserts on.
 
 ## Testing it
 

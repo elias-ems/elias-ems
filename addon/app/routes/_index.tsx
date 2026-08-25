@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useHref, useRevalidator } from "react-router";
+import { useHref } from "react-router";
 import { sectionLabelStyle } from "../components/dashboard/chrome";
 import DeviceTable from "../components/dashboard/DeviceTable";
 import GridCard from "../components/dashboard/GridCard";
@@ -22,6 +22,7 @@ import {
   curtailmentSummary,
 } from "../lib/dashboard-view";
 import { readDiagnostics } from "../lib/diagnostics.server";
+import { usePolledJson } from "../lib/json-fetch";
 import { formatPricePerKwh } from "../lib/price-format.server";
 import type { Route } from "./+types/_index";
 
@@ -89,18 +90,25 @@ export async function loader() {
 }
 
 /**
- * Subscribes to the readings stream, which pushes a fresh set every time Home
- * Assistant says one of the entities on this page moved.
+ * The readings the page shows, however they can be got: the stream while it is
+ * delivering, and a poll of the same readings while it isn't.
  *
- * Returns what to render and whether the stream is working. Until the first
- * message lands there is nothing to render but the loader's own data, which is
- * also what keeps hydration honest: the first client render is the server's.
+ * Power is a live value, so a number that never moves is worse than no number
+ * — hence the fallback. It exists because nothing guarantees the stream
+ * arrives: an ingress proxy that buffers, a browser with `EventSource`
+ * disabled, a connection that dropped and hasn't come back.
+ *
+ * Returns what to render, whether the stream is working, and whether the
+ * add-on is answering at all. Until the first message or the first poll lands
+ * there is nothing to render but the loader's own data, which is also what
+ * keeps hydration honest: the first client render is the server's.
  */
-function useStreamedReadings(): {
+function useLiveReadings(enabled: boolean): {
   readings: DashboardReadings | null;
   streaming: boolean;
+  reachable: boolean;
 } {
-  const [readings, setReadings] = useState<DashboardReadings | null>(null);
+  const [streamed, setStreamed] = useState<DashboardReadings | null>(null);
   const [streaming, setStreaming] = useState(false);
 
   // Through `useHref`, so the URL carries the ingress prefix. A bare
@@ -112,7 +120,7 @@ function useStreamedReadings(): {
     const source = new EventSource(href);
 
     source.addEventListener("message", (event) => {
-      setReadings(JSON.parse(event.data) as DashboardReadings);
+      setStreamed(JSON.parse(event.data) as DashboardReadings);
       setStreaming(true);
     });
 
@@ -128,87 +136,57 @@ function useStreamedReadings(): {
     };
   }, [href]);
 
-  return { readings, streaming };
-}
+  // Deliberately not `useRevalidator`: a revalidation that fails is a route
+  // error, and a route error replaces this page with the error boundary. The
+  // fallback runs precisely when the connection is unreliable, so that is a
+  // dashboard destroying itself over the one round it was built to survive.
+  // See `lib/json-fetch.ts`.
+  const { data: polled, failing } = usePolledJson<DashboardReadings>(
+    "/api/readings?snapshot=1",
+    {
+      enabled: enabled && !streaming,
+      intervalMs: REFRESH_INTERVAL,
+      hiddenIntervalMs: HIDDEN_REFRESH_INTERVAL,
+      // One interval's grace before the first poll: on a normal load the
+      // stream's opening message is already on its way, and polling for the
+      // same readings alongside it would cost Home Assistant a second read of
+      // every entity for nothing.
+      leading: false,
+    },
+  );
 
-/**
- * Keeps the loader's readings current when the stream cannot: power is a live
- * value, so a number that never moves would be misleading.
- *
- * The next refresh is scheduled only once the previous one has come back,
- * rather than on a fixed interval. A `setInterval` would need a guard against
- * refreshes piling up on a slow Home Assistant, and every version of that guard
- * is one stuck request away from skipping every refresh from then on — the page
- * then sits there showing whatever it last managed to read, which is exactly
- * the failure this is meant to prevent.
- */
-function useRefreshingReadings(enabled: boolean) {
-  const { revalidate } = useRevalidator();
-
-  useEffect(() => {
-    if (!enabled) return undefined;
-
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let stopped = false;
-    let refreshing = false;
-
-    const schedule = () => {
-      clearTimeout(timer);
-      timer = setTimeout(
-        refresh,
-        document.visibilityState === "visible"
-          ? REFRESH_INTERVAL
-          : HIDDEN_REFRESH_INTERVAL,
-      );
-    };
-
-    const refresh = async () => {
-      if (stopped || refreshing) return;
-      refreshing = true;
-      // A failed revalidation is already reported by the loader, which returns
-      // the reason instead of throwing; all that matters here is that one bad
-      // round does not end the schedule.
-      await revalidate().catch(() => {});
-      refreshing = false;
-      if (!stopped) schedule();
-    };
-
-    // Coming back to the page should show current numbers straight away rather
-    // than the minute-old ones it was left on.
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-
-    schedule();
-    document.addEventListener("visibilitychange", onVisibilityChange);
-
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [enabled, revalidate]);
+  return {
+    // Whichever is the more recent: the stream while it delivers, the poll
+    // once it has stopped and the poll has caught up.
+    readings: (streaming ? streamed : (polled ?? streamed)) ?? null,
+    streaming,
+    reachable: streaming || !failing,
+  };
 }
 
 export default function Index({ loaderData }: Route.ComponentProps) {
   const { control, curtailment, decisions } = loaderData;
-  const { readings, streaming } = useStreamedReadings();
 
-  // The stream's readings once it has sent any, the loader's until then. Both
-  // are built by the same function on the server, so they are interchangeable.
+  // Read from the loader rather than from the readings below, which is what
+  // lets it gate the hook that produces them. It answers the same question
+  // either way: what is configured only changes on the settings page, which
+  // comes back here as a navigation and a fresh loader.
+  //
+  // Nothing configured is nothing to refresh, and nothing to report the health
+  // of: an empty installation would poll Home Assistant forever to be told
+  // again that it has no entities.
+  const configured =
+    loaderData.arrays.length > 0 ||
+    loaderData.grid.configured ||
+    loaderData.batteries.length > 0 ||
+    loaderData.prices.configured;
+
+  const { readings, streaming, reachable } = useLiveReadings(configured);
+
+  // Whatever arrived last, the loader's own until something does. All three are
+  // built by the same function on the server, so they are interchangeable.
   const { arrays, grid, batteries, prices, error, health } =
     readings ?? loaderData;
-
-  const hasReadings =
-    arrays.length > 0 ||
-    grid.configured ||
-    batteries.length > 0 ||
-    prices.configured;
-
-  // Only while the stream isn't delivering. If it never connects — an ingress
-  // proxy that buffers, a browser with EventSource disabled — the page quietly
-  // goes back to polling rather than showing numbers that stopped moving.
-  useRefreshingReadings(hasReadings && !streaming);
 
   return (
     // The column, its gaps and its padding are in app.css with the rest of the
@@ -228,7 +206,13 @@ export default function Index({ loaderData }: Route.ComponentProps) {
           flexWrap: "wrap",
         }}
       >
-        {hasReadings && <LiveStatus health={health} streaming={streaming} />}
+        {configured && (
+          <LiveStatus
+            health={health}
+            streaming={streaming}
+            reachable={reachable}
+          />
+        )}
         <span style={{ flexGrow: 1 }} />
         <details style={hintStyle}>
           <summary style={{ cursor: "pointer" }}>Connection detail</summary>

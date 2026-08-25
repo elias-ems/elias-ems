@@ -102,6 +102,25 @@ describe("GET /api/readings behind ingress", () => {
     await stream.return(undefined);
   });
 
+  /**
+   * The page's fallback when the stream isn't delivering. It is a plain
+   * request rather than a revalidation on purpose — see `lib/json-fetch.ts` —
+   * so it has to answer a plain `fetch`, JSON, no event stream in sight.
+   */
+  it("answers ?snapshot with the same readings as JSON, once", async () => {
+    const response = await fetch(`${stack.baseUrl}api/readings?snapshot=1`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+
+    // The body ends, which is the entire difference: awaiting .json() on the
+    // stream would never return.
+    const readings = await response.json();
+    expect(readings.grid).toMatchObject({ configured: true });
+    expect(readings.grid.power.ok).toBe(true);
+    expect(readings.health).toMatchObject({ connected: true });
+  });
+
   it("holds one subscription to Home Assistant however many browsers are watching", async () => {
     const streams = await Promise.all(
       [1, 2].map(async () =>

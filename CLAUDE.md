@@ -158,6 +158,44 @@ Three related notes:
 - Express `trust proxy` must stay **off**. HA sets no `X-Forwarded-Host`/`X-Forwarded-Proto` and forwards the browser's original `Host` header untouched, which is exactly what React Router's action-origin CSRF check needs. Turning `trust proxy` on would make Express prefer a client-suppliable header instead.
 - To reproduce ingress locally, run [addon/test/ingress-proxy.js](addon/test/ingress-proxy.js) in front of `npm run start`. Loading the app directly on port 3000 will not surface any of the bugs above, because there is no prefix to get wrong.
 
+## Failing well in the browser
+
+Every background request the page makes goes through `useFetchedJson` or
+`usePolledJson` in [json-fetch.ts](addon/app/lib/json-fetch.ts) — a plain
+`fetch`, with a failed round kept as a flag rather than thrown. **Do not
+reach for `useFetcher().load()` or `useRevalidator().revalidate()` for
+anything on a timer**, however much shorter it is.
+
+The reason is what React Router does with a rejected `fetch`: inside its data
+layer that is a *route error*, and a route error replaces the page with the
+nearest `ErrorBoundary`. That is right for a navigation somebody asked for and
+wrong for a poll firing every two seconds — Home Assistant restarts, a tunnel
+blinks, a laptop wakes up, and the dashboard someone left open is gone until
+they reload it. It reached production as a bare "TypeError: Failed to fetch"
+over a minified stack trace, which is React Router's own default boundary; the
+app had none of its own.
+
+Three consequences worth keeping:
+
+- **`root.tsx` exports `Layout`, the component, and `ErrorBoundary` separately.**
+  The framework renders an error page inside the root `Layout` if there is one
+  and inside a bare document of its own if there isn't, so collapsing the shell
+  back into the default export would silently cost the error page its
+  stylesheet, its navigation and its `Scripts`.
+- **A hand-rolled `fetch` has to resolve its URL through `useHref`.** A fetcher
+  applied the `basename` for us; a bare `/api/whatever` resolves against the
+  Home Assistant origin, where this app is not served. Same trap as the asset
+  manifest — see [Home Assistant ingress](#home-assistant-ingress).
+- **Say when a poll is failing.** Both hooks return `failing` beside the data,
+  and every caller shows something ("not updating", the **Offline** chip):
+  silently holding the last values is the failure mode the health chip exists
+  to prevent.
+
+Form submissions still go through `<Form method="post">` and still land on the
+error boundary when the connection drops. That is deliberate — a save that
+didn't happen has to say so — and it is why the boundary distinguishes a
+`TypeError` from a real fault and offers a retry.
+
 ## Theming
 
 [addon/app/app.css](addon/app/app.css) is the only stylesheet, and it exists to hold the light/dark colour tokens. Components keep styling themselves with inline `style` objects, but every colour goes through a `var(--color-*)` — **never a literal hex**. A hardcoded colour is by definition broken in one of the two themes, which is exactly how the app ended up dark-grey-on-dark before the tokens existed.
