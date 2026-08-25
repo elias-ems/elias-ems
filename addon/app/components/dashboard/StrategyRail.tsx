@@ -45,13 +45,9 @@ export default function StrategyRail({
   initialEntries: DiagnosticEntry[];
 }) {
   return (
-    <section
-      style={{
-        ...cardStyle,
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 340px)",
-      }}
-    >
+    // The feed sits beside the rows on a panel and underneath them below
+    // 920px; app.css owns that and the divider that turns with it.
+    <section className="dash-rail dash-split" style={cardStyle}>
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
         <StrategyRow
           icon={<SunIcon size={17} />}
@@ -132,7 +128,7 @@ function StrategyRow({
         </p>
       </div>
 
-      <div style={{ width: 168, flex: "none" }}>
+      <div className="dash-metric">
         <div
           style={{
             ...monoStyle,

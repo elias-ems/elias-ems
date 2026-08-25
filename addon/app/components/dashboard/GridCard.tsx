@@ -42,20 +42,10 @@ export default function GridCard({
   minLimitPercent: number;
 }) {
   return (
-    <section
-      style={{
-        ...cardStyle,
-        display: "grid",
-        gridTemplateColumns: "minmax(190px, 220px) minmax(0, 1fr) 220px",
-        alignItems: "center",
-      }}
-    >
-      <div
-        style={{
-          padding: "1rem 1.25rem",
-          borderRight: "1px solid var(--color-border)",
-        }}
-      >
+    // Three columns on a panel, stacked below 880px, with the divider turning
+    // from a left edge into a top one. See the dashboard block in app.css.
+    <section className="dash-grid dash-split" style={cardStyle}>
+      <div style={{ padding: "1rem 1.25rem" }}>
         <h2 style={{ ...eyebrowStyle, marginBottom: "0.5rem" }}>
           <ExchangeIcon size={14} />
           Grid exchange
@@ -104,7 +94,6 @@ export default function GridCard({
       <div
         style={{
           padding: "1rem 1.25rem",
-          borderLeft: "1px solid var(--color-border)",
           display: "flex",
           flexDirection: "column",
           gap: "0.3125rem",

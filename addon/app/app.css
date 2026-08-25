@@ -190,3 +190,178 @@ input {
 .app-header :focus-visible {
   outline-color: var(--color-header-text);
 }
+
+/*
+ * ---------------------------------------------------------------------------
+ * Dashboard layout
+ * ---------------------------------------------------------------------------
+ *
+ * The second thing an inline style cannot express, and the reason these rules
+ * are here rather than in the components: a media query. A card that is three
+ * columns on a laptop and one on a phone has to say so somewhere, and `style`
+ * has nowhere to put it. Everything else about these cards — colour, spacing,
+ * type — stays inline in the component, as the rest of the app does.
+ *
+ * Only *layout* lives here. If a rule could be an inline style, it should be.
+ *
+ * Breakpoints are chosen from what each card needs rather than from a device:
+ *  560px  the price chart stops being legible when scaled down past this
+ *  620px  four table columns stop fitting
+ *  880px  the grid card's three columns stop fitting
+ *  920px  the strategy rows and the decision feed stop fitting side by side
+ * 1000px  the price figures and a readable chart stop fitting side by side
+ */
+
+.dash {
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+  padding: 1.125rem 1.5rem 1.75rem;
+  /* Wide enough for the chart to be worth drawing, bounded so the table does
+     not stretch across a 4K panel. */
+  max-width: 1240px;
+}
+
+@media (max-width: 640px) {
+  .dash {
+    gap: 0.875rem;
+    padding: 0.875rem 0.875rem 1.5rem;
+  }
+}
+
+/*
+ * Every multi-column card is a single column until it has the room, and the
+ * rule that divides its sections turns with it: a border between columns is a
+ * left edge, the same border between stacked rows is a top edge.
+ */
+.dash-split > * + * {
+  border-top: 1px solid var(--color-border);
+}
+
+@media (min-width: 1000px) {
+  .dash-price {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
+
+  .dash-price > * + * {
+    border-top: 0;
+    border-left: 1px solid var(--color-border);
+  }
+}
+
+@media (min-width: 880px) {
+  .dash-grid {
+    display: grid;
+    grid-template-columns: minmax(190px, 220px) minmax(0, 1fr) 220px;
+    align-items: center;
+  }
+
+  .dash-grid > * + * {
+    border-top: 0;
+    border-left: 1px solid var(--color-border);
+  }
+}
+
+@media (min-width: 920px) {
+  .dash-rail {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+
+  .dash-rail > * + * {
+    border-top: 0;
+    border-left: 1px solid var(--color-border);
+  }
+}
+
+/*
+ * A strategy's number and bar sit in a fixed column beside its description on a
+ * wide row, and go full width underneath it once that column would squeeze the
+ * sentence into a ladder of two-word lines.
+ */
+.dash-metric {
+  width: 168px;
+  flex: none;
+}
+
+@media (max-width: 620px) {
+  .dash-metric {
+    width: 100%;
+  }
+}
+
+/*
+ * On a phone the decision feed is the most verbose thing on the page and the
+ * least likely reason anyone opened it — the question there is what the price
+ * is doing and whether the add-on is acting, not what it logged eight ticks
+ * ago. Three lines and the link to the rest.
+ */
+@media (max-width: 640px) {
+  .dash-feed > li:nth-child(n + 4) {
+    display: none;
+  }
+}
+
+/*
+ * Two renderings of the same content, one shown at a time.
+ *
+ * Used where a layout cannot be reached by rearranging one set of markup: the
+ * price chart needs a different plot geometry rather than a smaller copy of the
+ * same one, because an SVG scaled to a phone scales its labels down with it
+ * until they are four pixels tall. The device table needs a real `<table>` on a
+ * panel and a list of rows on a phone, and restyling table elements with
+ * `display` would keep the markup and throw away the semantics.
+ *
+ * `display: none` takes the hidden copy out of the accessibility tree too, so
+ * only one of the pair is ever announced.
+ */
+.dash-wide-only {
+  display: none;
+}
+
+.dash-narrow-only {
+  display: block;
+}
+
+@media (min-width: 620px) {
+  .dash-wide-only {
+    display: block;
+  }
+
+  .dash-narrow-only {
+    display: none;
+  }
+}
+
+/* The chart's own switch, which happens earlier than the table's. */
+.dash-chart-wide {
+  display: none;
+}
+
+@media (min-width: 560px) {
+  .dash-chart-wide {
+    display: block;
+  }
+
+  .dash-chart-narrow {
+    display: none;
+  }
+}
+
+/* The bar keeps the top bar's proportions but stops crowding itself out. */
+@media (max-width: 480px) {
+  .app-header {
+    padding: 0 0.5rem;
+    gap: 0.25rem;
+  }
+
+  .app-header-title {
+    font-size: 1.0625rem;
+  }
+
+  .app-header a {
+    padding: 0 0.5rem;
+    font-size: 0.875rem;
+  }
+}

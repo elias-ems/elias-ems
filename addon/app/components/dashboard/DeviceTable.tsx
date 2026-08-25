@@ -47,9 +47,71 @@ export default function DeviceTable({
 
   return (
     <section style={{ ...cardStyle, padding: "0.875rem 1.125rem 0.25rem" }}>
-      {/* The table itself scrolls rather than the page: a narrow phone should
-          not make the whole dashboard slide sideways. */}
-      <div style={{ overflowX: "auto" }}>
+      {/*
+        Two renderings, one shown at a time — see the dashboard block in
+        app.css. Four columns need about 520px before they stop being a row of
+        collisions, and below that a phone wants a list, not a table it has to
+        drag sideways. The alternative, restyling the table elements with
+        `display`, keeps the markup and throws away the semantics: a `<td>` set
+        to `block` stops being a cell, and a hidden `<thead>` takes the column
+        headers out of the accessibility tree with it.
+      */}
+      <ul className="dash-narrow-only" style={listStyle}>
+        {arrays.map((array) => (
+          <NarrowRow
+            key={array.id}
+            icon={<SunIcon size={14} />}
+            color="var(--color-pv)"
+            title={array.title}
+            detail={
+              array.ratedPowerW
+                ? `${array.ratedPowerW} W rated`
+                : "no rating set"
+            }
+            now={<Value reading={array.power} />}
+            energy={array.energy}
+            state={<LimitState array={array} />}
+          />
+        ))}
+
+        {batteries.map((battery) => (
+          <NarrowRow
+            key={battery.id}
+            icon={<BatteryIcon size={14} />}
+            color="var(--color-battery)"
+            title={battery.title}
+            detail={battery.window}
+            now={
+              <Value
+                reading={battery.power}
+                color={battery.power?.ok ? "var(--color-battery)" : undefined}
+              />
+            }
+            energy={battery.energy}
+            state={
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.625rem",
+                  flexGrow: 1,
+                }}
+              >
+                <Value reading={battery.charge} />
+                <span style={{ flexGrow: 1, maxWidth: 120 }}>
+                  <FillBar
+                    percent={battery.chargePercent}
+                    color="var(--color-battery)"
+                    label={`${battery.title} state of charge`}
+                  />
+                </span>
+              </div>
+            }
+          />
+        ))}
+      </ul>
+
+      <div className="dash-wide-only" style={{ overflowX: "auto" }}>
         <table
           style={{
             width: "100%",
@@ -148,6 +210,69 @@ export default function DeviceTable({
         </table>
       </div>
     </section>
+  );
+}
+
+const listStyle = { listStyle: "none", margin: 0, padding: 0 } as const;
+
+/**
+ * One device on a phone: name and current power on the first line, then what it
+ * has produced or stored and what it has been told, on the second.
+ *
+ * Two lines rather than four labelled cells, because the labels are what a
+ * table needs and a phone has no room for: "3,420 W" beside a solar icon does
+ * not need a column heading saying Now.
+ */
+function NarrowRow({
+  icon,
+  color,
+  title,
+  detail,
+  now,
+  energy,
+  state,
+}: {
+  icon: React.ReactNode;
+  color: string;
+  title: string;
+  detail: string;
+  now: React.ReactNode;
+  energy: Reading | null;
+  state: React.ReactNode;
+}) {
+  return (
+    <li
+      style={{
+        padding: "0.75rem 0",
+        borderBottom: "1px solid var(--color-border)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span style={{ color, display: "flex", flex: "none" }}>{icon}</span>
+        <h3 style={{ margin: 0, fontSize: "0.8125rem", fontWeight: 600 }}>
+          {title}
+        </h3>
+        <span style={{ flexGrow: 1 }} />
+        {now}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem 0.625rem",
+          flexWrap: "wrap",
+          marginTop: "0.4375rem",
+          fontSize: "0.71875rem",
+          color: "var(--color-text-muted)",
+        }}
+      >
+        <span>
+          {energy?.display ?? "—"} · {detail}
+        </span>
+        {state}
+      </div>
+    </li>
   );
 }
 

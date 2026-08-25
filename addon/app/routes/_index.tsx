@@ -201,17 +201,10 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   useRefreshingReadings(hasReadings && !streaming);
 
   return (
-    <main
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "1.125rem",
-        padding: "1.125rem 1.5rem 1.75rem",
-        // Wide enough for the chart to be worth drawing, bounded so the table
-        // does not stretch to a 4K panel.
-        maxWidth: 1240,
-      }}
-    >
+    // The column, its gaps and its padding are in app.css with the rest of the
+    // dashboard's layout, because the padding tightens on a phone and an inline
+    // style has nowhere to put a media query.
+    <main className="dash">
       {/* The page's own name is in the top bar, which is the only thing above
           this. A visible "Home" heading would say it a second time. */}
       <h1 className="visually-hidden">Home</h1>

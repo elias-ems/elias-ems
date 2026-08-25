@@ -8,9 +8,19 @@
  * The whole stack (mock Home Assistant, built server, ingress proxy) is started
  * by test/stack.js via `webServer` in playwright.config.ts.
  */
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import { HA_MOCK_PORT } from "../../playwright.config";
 import { DEFAULT_SUPERVISOR_TOKEN } from "../ha-mock.js";
+
+/**
+ * The dashboard renders its devices twice — a table once there is room for four
+ * columns, a list of rows below that — with CSS showing one at a time. Both are
+ * in the DOM, so a bare `getByText` for a reading is two matches and a strict
+ * mode violation; this asks for the copy that is actually on screen at whatever
+ * viewport the test is running at.
+ */
+const onScreen = (page: Page, text: string | RegExp) =>
+  page.getByText(text).filter({ visible: true });
 
 /**
  * A 404 on a script is the signature of the asset-prefix bug. Without this it
@@ -107,9 +117,9 @@ test("a PV entity can be added, appears on the dashboard, and removed", async ({
   const nav = page.getByRole("navigation");
 
   await nav.getByRole("link", { name: "Home" }).click();
-  await expect(page.getByText("Roof array")).toBeVisible();
+  await expect(onScreen(page, "Roof array")).toBeVisible();
   // 1234.5 W from the fixture, with whatever separators the server's locale uses.
-  await expect(page.getByText(/1\D?234\D5 W/)).toBeVisible();
+  await expect(onScreen(page, /1\D?234\D5 W/)).toBeVisible();
 
   await nav.getByRole("link", { name: "Settings" }).click();
   await page
@@ -174,8 +184,8 @@ test("battery control can be configured, enabled, and watched deciding", async (
     .click();
 
   // The battery's readings reached the dashboard.
-  await expect(page.getByText("10–90% of 10 kWh")).toBeVisible();
-  await expect(page.getByText("76 %")).toBeVisible();
+  await expect(onScreen(page, "10–90% of 10 kWh")).toBeVisible();
+  await expect(onScreen(page, "76 %")).toBeVisible();
 
   // The decision feed is open and polling on its own — there is no box to
   // expand any more — and it carries the summary line of each tick. The fixture
@@ -253,7 +263,7 @@ test("readings keep updating without the page being reloaded", async ({
   });
 
   await page.goto("./");
-  await expect(page.getByText("76 %")).toBeVisible();
+  await expect(onScreen(page, "76 %")).toBeVisible();
 
   // The health chip. With the policy this app runs under, an old reading is
   // shown rather than refused, so this line is the only thing standing between
@@ -281,7 +291,7 @@ test("readings keep updating without the page being reloaded", async ({
   );
   expect(response.ok()).toBe(true);
 
-  await expect(page.getByText("41 %")).toBeVisible({ timeout: 20_000 });
+  await expect(onScreen(page, "41 %")).toBeVisible({ timeout: 20_000 });
 
   // And the chip now has a change to date it by. Before this it had none —
   // which is the honest answer on a house where nothing has moved yet, not a

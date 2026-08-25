@@ -43,19 +43,12 @@ export default function PriceCard({
     prices.productionPerKwh < thresholdPerKwh;
 
   return (
-    <section
-      style={{
-        ...cardStyle,
-        display: "grid",
-        // One column until there is room for the chart beside the figures.
-        gridTemplateColumns: "minmax(260px, 300px) minmax(0, 1fr)",
-        gap: 0,
-      }}
-    >
+    // The two columns, the stacking, and which edge the divider sits on are in
+    // app.css: a media query is the one thing an inline style cannot say.
+    <section className="dash-price dash-split" style={cardStyle}>
       <div
         style={{
           padding: "1.125rem 1.25rem",
-          borderRight: "1px solid var(--color-border)",
           display: "flex",
           flexDirection: "column",
           gap: "0.875rem",
@@ -157,12 +150,30 @@ export default function PriceCard({
       >
         <h2 style={eyebrowStyle}>Selling price · today, hourly average</h2>
         {prices.curve.length > 0 ? (
-          <PriceChart
-            curve={prices.curve}
-            nowMinutes={prices.nowMinutes}
-            thresholdPerKwh={thresholdPerKwh}
-            currency={prices.currency}
-          />
+          <>
+            {/*
+              The same chart at two plot sizes, one shown at a time. The wide
+              one scaled into a phone column would render its axis at five
+              pixels tall; see `PriceChart`.
+            */}
+            <div className="dash-chart-wide">
+              <PriceChart
+                curve={prices.curve}
+                nowMinutes={prices.nowMinutes}
+                thresholdPerKwh={thresholdPerKwh}
+                currency={prices.currency}
+              />
+            </div>
+            <div className="dash-chart-narrow">
+              <PriceChart
+                compact
+                curve={prices.curve}
+                nowMinutes={prices.nowMinutes}
+                thresholdPerKwh={thresholdPerKwh}
+                currency={prices.currency}
+              />
+            </div>
+          </>
         ) : (
           <Empty>
             {prices.configured
