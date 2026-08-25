@@ -373,3 +373,67 @@ base(
     ).toBeVisible();
   },
 );
+
+/**
+ * The playground is the one page whose whole content is client-rendered
+ * components fed made-up data, and the one page nothing else in this suite
+ * visits. Two things can only fail there: a fixture that drives a component
+ * into a state the real pages never reach and crashes it, and a settings form
+ * posting to a route with no action.
+ */
+test("the playground renders every specimen and swallows what its forms post", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+
+  await page.goto("./tools");
+  await page.getByRole("link", { name: "Component playground" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Component playground" }),
+  ).toBeVisible();
+
+  // One specimen from each end of the catalogue, so a component that throws
+  // half way down cannot pass by rendering everything above it.
+  await expect(
+    page.getByRole("heading", { name: "Field", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "CurtailmentSection" }),
+  ).toBeVisible();
+
+  // A rejected form — a state the real Settings page cannot be put into
+  // without breaking the installation, which is the reason this page exists.
+  await expect(
+    onScreen(page, "Capacity has to be more than zero.").first(),
+  ).toBeVisible();
+
+  // The index is anchors into this same page, so following one must not
+  // navigate away from it.
+  await page.getByRole("link", { name: "GridCard" }).click();
+  await expect(page.getByRole("heading", { name: "GridCard" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Component playground" }),
+  ).toBeVisible();
+
+  // Saving has to reach this route's own action rather than 405ing, and has to
+  // report the post rather than storing it.
+  await page.getByRole("button", { name: "Save grid" }).first().click();
+  await expect(onScreen(page, "intent=grid-save")).toBeVisible();
+
+  expect(errors, "no specimen may throw").toEqual([]);
+});
+
+/**
+ * A developer's page, so it is reachable from the Debug section of Tools and
+ * from nothing else. If it ever appears in the top bar, every user of the
+ * add-on has a fourth tab full of fixtures.
+ */
+test("the playground is not in the top bar", async ({ page }) => {
+  await page.goto("./playground");
+
+  await expect(
+    page.getByRole("navigation").getByRole("link", { name: "Playground" }),
+  ).toHaveCount(0);
+});

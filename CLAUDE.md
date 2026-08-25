@@ -224,6 +224,14 @@ Four traps worth knowing:
 
 Check contrast in both themes when touching colours — every piece of text should clear WCAG AA (4.5:1, or 3:1 for large text) against the surface it actually sits on.
 
+The place to do that check is the **component playground** at `/playground` ([playground.tsx](addon/app/routes/playground.tsx)), linked from the Debug section at the foot of Tools and from nowhere else. It renders every component against fixtures from [playground-fixtures.ts](addon/app/lib/playground-fixtures.ts), including the states a working installation never reaches — an unavailable sensor, a rejected form, a loop enabled but not running — so both repo-wide rules can be checked in one scroll: every token beside every component in whichever theme is active, and every breakpoint at once, with a ruler at the top saying which side of each the window is on. Three things about it are deliberate:
+
+- **It ships rather than being stripped from the production build.** The theme it exists to be checked against is Home Assistant's, and that only reaches the app through the ingress iframe — so the check has to be runnable inside a real panel, not only against `npm run dev`.
+- **Its fixtures take a `now` from the loader** rather than reading a clock during render. Several of them carry timestamps, some of which are printed verbatim, and a `Date.now()` on each side of the wire is a hydration mismatch.
+- **The route has an `action`.** The settings sections post to whichever route renders them, so without one the first Save would be a 405. It reports the fields and saves nothing; the playground must never write to `addon/data`.
+
+The two components under [components/playground/](addon/app/components/playground/) are the page's own chrome, and the only components with no specimen — cataloguing them would be the page describing itself.
+
 ## Talking to Home Assistant
 
 Two modules do it, both through the Supervisor's proxy and both authenticated with the `SUPERVISOR_TOKEN` env var that Supervisor injects:
