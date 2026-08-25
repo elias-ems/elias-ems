@@ -235,6 +235,9 @@ describe("GET / (dashboard)", () => {
         // so the rule and the card cannot disagree about what it means.
         thresholdPerKwh: 0,
         thresholdDisplay: "0.0000 EUR/kWh",
+        // Null because the default strategy is `threshold`, whose whole rule is
+        // already stated by the threshold beside it.
+        strategyLabel: null,
         settleSeconds: 30,
         gridTargetW: 0,
         deadbandW: 50,

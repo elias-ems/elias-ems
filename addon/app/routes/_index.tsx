@@ -13,6 +13,7 @@ import {
   controlLoopStatus,
   curtailmentLoopStatus,
 } from "../lib/control-loop.server";
+import { CURTAILMENT_STRATEGIES } from "../lib/curtailment";
 import { readCurtailmentConfig } from "../lib/curtailment-config.server";
 import type { DashboardReadings } from "../lib/dashboard";
 import { readDashboard } from "../lib/dashboard.server";
@@ -63,6 +64,15 @@ export async function loader() {
         curtailmentConfig.priceThresholdPerKwh,
         readings.prices.currency,
       ),
+      // Null under `threshold`, which is the rule the card already describes by
+      // showing the threshold at all — naming it there too would be one more
+      // figure saying nothing new.
+      strategyLabel:
+        curtailmentConfig.strategy === "threshold"
+          ? null
+          : (CURTAILMENT_STRATEGIES.find(
+              (strategy) => strategy.id === curtailmentConfig.strategy,
+            )?.label ?? null),
       settleSeconds: curtailmentConfig.settleSeconds,
       gridTargetW: curtailmentConfig.gridTargetW,
       deadbandW: curtailmentConfig.deadbandW,
@@ -237,6 +247,7 @@ export default function Index({ loaderData }: Route.ComponentProps) {
         prices={prices}
         thresholdPerKwh={curtailment.thresholdPerKwh}
         thresholdDisplay={curtailment.thresholdDisplay}
+        strategyLabel={curtailment.strategyLabel}
         curtailing={curtailment.enabled}
       />
 

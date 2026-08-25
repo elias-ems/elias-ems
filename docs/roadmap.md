@@ -29,7 +29,10 @@
   generation limit goes out as an `elias_ems_<array>_pv_limit` event for an
   automation to carry out. It shares the control loop and one snapshot per tick
   with battery control, which is what gives the battery first refusal on a
-  surplus. Still to do: the same gap battery control has — nothing here can tell
+  surplus. What happens in the marginal band *above* the threshold is now a
+  choice of three strategies — release everything, cap each inverter, or allow a
+  price-graded share of export — see
+  [Strategies](features/pv-curtailment.md#strategies). Still to do: the same gap battery control has — nothing here can tell
   whether an automation acted on a limit, and an inverter that silently ignores
   one looks exactly like one that obeyed.
 

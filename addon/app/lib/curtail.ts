@@ -72,7 +72,7 @@
  * zero. See `curtailment.ts`.
  */
 
-import type { CurtailmentConfig } from "./curtailment";
+import type { CurtailmentBand, CurtailmentConfig } from "./curtailment";
 
 export type PvArraySnapshot = {
   id: string;
@@ -204,6 +204,31 @@ function price(value: number, currency: string): string {
   return `${value.toFixed(4)} ${currency}/kWh`;
 }
 
+/**
+ * Which step of the marginal region a price falls in, or null when it is past
+ * the top of it — clear of the whole thing, and so not held back at all.
+ *
+ * `threshold` has no marginal region by definition: it is the rule that says
+ * the moment exporting stops costing money, stop interfering. Answering null
+ * for it here rather than at each call site is what keeps the two other
+ * strategies from having to know it exists.
+ */
+function bandFor(
+  config: CurtailmentConfig,
+  abovePerKwh: number,
+): CurtailmentBand | null {
+  if (config.strategy === "threshold") return null;
+  return config.bands.find((band) => abovePerKwh < band.abovePerKwh) ?? null;
+}
+
+/** The top of the marginal region, for saying in the log what was cleared. */
+function lastBandEdge(config: CurtailmentConfig): number {
+  return config.bands.reduce(
+    (highest, band) => Math.max(highest, band.abovePerKwh),
+    0,
+  );
+}
+
 /** A decision that says nothing and leaves whatever was last published standing. */
 function hold(
   array: PvArraySnapshot,
@@ -324,16 +349,90 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     );
   }
 
-  if (productionPricePerKwh >= priceThresholdPerKwh) {
+  const decide = (
+    reasonFor: (array: PvArraySnapshot) => PvArrayDecision,
+  ): PvArrayDecision[] =>
+    arrays.map((array) => {
+      if (!array.curtailable) return hold(array, NOT_CURTAILABLE_REASON);
+      if ((array.ratedPowerW ?? 0) <= 0) {
+        return hold(array, "no rated power configured");
+      }
+      if (array.powerW === null) {
+        return release(array, "power reading unavailable");
+      }
+      return reasonFor(array);
+    });
+
+  // How far above the threshold the price sits, and which step of the marginal
+  // region that is. Negative means below the threshold, where every strategy
+  // does the same thing and `band` is deliberately not consulted.
+  const abovePerKwh = productionPricePerKwh - priceThresholdPerKwh;
+  const band = abovePerKwh >= 0 ? bandFor(config, abovePerKwh) : null;
+
+  if (abovePerKwh >= 0 && band === null) {
     return releaseAll(
       input,
-      `Injection at ${price(productionPricePerKwh, currency)} — at or above the ${price(priceThresholdPerKwh, currency)} threshold, nothing to curtail.`,
+      `Injection at ${price(productionPricePerKwh, currency)} — ${config.strategy === "threshold" ? `at or above the ${price(priceThresholdPerKwh, currency)} threshold` : `clear of the ${price(priceThresholdPerKwh + lastBandEdge(config), currency)} top band`}, nothing to curtail.`,
       `injection at ${price(productionPricePerKwh, currency)}`,
     );
   }
 
-  // Past here the price says hold back, and only a reading can stop us.
-  const priceClause = `injection at ${price(productionPricePerKwh, currency)}, below the ${price(priceThresholdPerKwh, currency)} threshold`;
+  // Past here the price says hold back to some degree, and only a reading can
+  // stop us.
+  const priceClause =
+    band === null
+      ? `injection at ${price(productionPricePerKwh, currency)}, below the ${price(priceThresholdPerKwh, currency)} threshold`
+      : `injection at ${price(productionPricePerKwh, currency)}, within ${price(band.abovePerKwh, currency)} of the ${price(priceThresholdPerKwh, currency)} threshold`;
+
+  // The soft ceiling is decided here, before the grid is even looked at, and
+  // that is the whole character of it: a fixed share of each inverter's rating
+  // for as long as the price stays in this band. Nothing to balance against
+  // means nothing that can go wrong with the balancing, and it is the one
+  // strategy that still works with an unreadable meter.
+  //
+  // The cost is that it is a *ceiling* and not a cut. 70% of nameplate binds
+  // around noon and does nothing at dusk, and no amount of measuring afterwards
+  // would tell it the difference.
+  if (band !== null && config.strategy === "soft-ceiling") {
+    const ceilingPercent = Math.min(
+      100,
+      Math.max(minLimitPercent, Math.round(band.ceilingPercent)),
+    );
+
+    return {
+      curtailing: true,
+      netW: gridPowerW,
+      curtailablePvW: arrays
+        .filter(participates)
+        .reduce((total, array) => total + (array.powerW ?? 0), 0),
+      combinedAllowedW: null,
+      // No meter, so nothing is ever off target and the loop's settle clock
+      // stays cleared. A ceiling moves when the price moves into another band,
+      // which is its own pacing and does not want a second one on top.
+      offTarget: false,
+      decisions: decide((array) => {
+        const rated = array.ratedPowerW as number;
+        const limitW = Math.round((ceilingPercent * rated) / 100);
+        const reason = `ceiling ${ceilingPercent}% (${limitW} W of ${rated} W, now ${magnitude(array.powerW as number)})`;
+
+        return {
+          arrayId: array.id,
+          title: array.title,
+          action:
+            ceilingPercent >= 100 ? ("release" as const) : ("curtail" as const),
+          limitPercent: ceilingPercent,
+          limitW,
+          commandPercent: ceilingPercent,
+          released: ceilingPercent >= 100,
+          currentW: array.powerW,
+          reason,
+          message: `${array.title}: ${reason}`,
+        };
+      }),
+      summary: `${priceClause}. Soft ceiling — holding every array at ${ceilingPercent}% of its rating.`,
+      warnings: [],
+    };
+  }
 
   if (gridPowerW === null) {
     return releaseAll(
@@ -372,28 +471,38 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     );
   }
 
+  /** The fallback denominator for the split, and what an export share is of. */
+  const ratedTotal = participating.reduce(
+    (total, array) => total + (array.ratedPowerW ?? 0),
+    0,
+  );
+
+  // Graded export is one number and nothing else: how far the meter is allowed
+  // to sit *below* the configured target while the price is only marginally
+  // worth selling at. Everything after this — the deadband, the settle rule,
+  // the generation-proportional split, the floor — is the same code on a
+  // different target, which is the reason to express it this way rather than as
+  // a second control law.
+  //
+  // A share of the rating rather than a number of watts, so that the same
+  // percentage means the same thing on any house, and so that an array which
+  // drops out of `participating` takes its share of the allowance with it.
+  const exportAllowanceW =
+    band !== null && config.strategy === "graded-export"
+      ? (Math.min(100, band.exportPercent) / 100) * ratedTotal
+      : 0;
+  const effectiveTargetW = gridTargetW - exportAllowanceW;
+
   const netW = gridPowerW;
-  const offBy = netW - gridTargetW;
+  const offBy = netW - effectiveTargetW;
   const offTarget = Math.abs(offBy) >= deadbandW;
   const combinedAllowedW = curtailablePvW + offBy;
 
   const flow = netW > 0 ? "importing" : "exporting";
   const target =
-    gridTargetW === 0 ? "balanced" : `a ${signed(gridTargetW)} target`;
-
-  const decide = (
-    reasonFor: (array: PvArraySnapshot) => PvArrayDecision,
-  ): PvArrayDecision[] =>
-    arrays.map((array) => {
-      if (!array.curtailable) return hold(array, NOT_CURTAILABLE_REASON);
-      if ((array.ratedPowerW ?? 0) <= 0) {
-        return hold(array, "no rated power configured");
-      }
-      if (array.powerW === null) {
-        return release(array, "power reading unavailable");
-      }
-      return reasonFor(array);
-    });
+    effectiveTargetW === 0
+      ? "balanced"
+      : `a ${signed(effectiveTargetW)} target`;
 
   if (!offTarget) {
     return {
@@ -451,12 +560,6 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     0,
   );
 
-  /** The fallback denominator, for the case where nothing is generating. */
-  const ratedTotal = participating.reduce(
-    (total, array) => total + (array.ratedPowerW ?? 0),
-    0,
-  );
-
   const decisions = decide((array) => {
     const rated = array.ratedPowerW as number;
     const powerW = array.powerW as number;
@@ -507,7 +610,7 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     combinedAllowedW,
     offTarget: true,
     decisions,
-    summary: `${priceClause}. Grid net ${signed(netW)} (${flow}), arrays at ${magnitude(curtailablePvW)} → allow ${magnitude(combinedAllowedW)} total.`,
+    summary: `${priceClause}.${exportAllowanceW > 0 ? ` Graded export — up to ${magnitude(exportAllowanceW)} may cross the meter.` : ""} Grid net ${signed(netW)} (${flow}), arrays at ${magnitude(curtailablePvW)} → allow ${magnitude(combinedAllowedW)} total.`,
     warnings,
   };
 }

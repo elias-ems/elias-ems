@@ -522,6 +522,58 @@ describe("runControlTick, curtailment half", () => {
     ]);
   });
 
+  /**
+   * The mock's day-ahead curve swings between about -0.045 and 0.225, so a band
+   * anchored near zero would drift in and out of range depending on the time of
+   * day the suite runs. These two put the threshold far below the injection
+   * price and the edges far above it, which lands the price in the first band
+   * whatever the clock says.
+   */
+  const BANDED = (
+    strategy: "soft-ceiling" | "graded-export",
+    exportPercent: number,
+  ) => ({
+    ...DEFAULT_CURTAILMENT_CONFIG,
+    enabled: true,
+    settleSeconds: 0,
+    strategy,
+    priceThresholdPerKwh: -11,
+    bands: [
+      { abovePerKwh: 2, ceilingPercent: 70, exportPercent },
+      { abovePerKwh: 3, ceilingPercent: 80, exportPercent: 100 },
+      { abovePerKwh: 4, ceilingPercent: 90, exportPercent: 100 },
+    ],
+  });
+
+  it("publishes a soft ceiling without ever reading the meter", async () => {
+    await onlyCurtailment(NEGATIVE_INJECTION, BANDED("soft-ceiling", 40));
+    // The one strategy that still decides with the meter gone, which is the
+    // whole of what it buys by not using it.
+    ha.setState("sensor.grid_power", "unavailable", {});
+
+    await runControlTick();
+
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 70, false],
+    ]);
+    expect(logged("Soft ceiling")).toBe(true);
+  });
+
+  it("moves the target rather than the law under graded export", async () => {
+    await onlyCurtailment(NEGATIVE_INJECTION, BANDED("graded-export", 40));
+
+    await runControlTick();
+
+    // Same feedback law, one different number in it: 40% of the 5000 W rating
+    // is 2000 W of permitted export, so the target moves from 0 to -2000 W and
+    // 1234.5 + (842 + 2000) is 4076 W — 82% rather than the 42% the same house
+    // gets below the threshold.
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 82, false],
+    ]);
+    expect(logged("up to 2000 W may cross the meter")).toBe(true);
+  });
+
   it("releases the array rather than guessing when the grid goes unreadable", async () => {
     await onlyCurtailment();
     await runControlTick();

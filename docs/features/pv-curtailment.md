@@ -51,6 +51,8 @@ with nothing anywhere reporting a problem.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `enabled` | `false` | |
+| `strategy` | `threshold` | What happens in the band *above* the threshold — see [Strategies](#strategies) |
+| `bands` | 1c/2c/3c | Three steps of that band, ascending. Ignored by `threshold` |
 | `priceThresholdPerKwh` | `0` | Curtail while the **production** price is below this |
 | `gridTargetW` | `0` | Where to aim the meter, signed as the grid reading is |
 | `deadbandW` | `50` | How far off target before the limit is moved |
@@ -158,6 +160,96 @@ away is reading its own correction half-applied and correcting a second time for
 the same watts. Left that way it dithered a percent at a time while the house
 was quiet, and swung by tens of percent while it was not — the overshoot the
 feedback form is otherwise not supposed to have.
+
+## Strategies
+
+The threshold splits the day in two, and everything above says *"a kWh put on
+the grid earns something"*. But 0.1c and 6c are both above it, and treating them
+the same is the crude part of the rule: it sells the marginal kWh as eagerly as
+the valuable one.
+
+A strategy is what happens in that marginal band. **Below the threshold every
+strategy does the same thing** — the feedback law above, aimed at `gridTargetW`
+— and they differ only between "exporting is costing me money" and "exporting is
+clearly worth it".
+
+| | Reads the meter | Caps | Acts through |
+| --- | --- | --- | --- |
+| `threshold` | — | nothing | releasing everything |
+| `soft-ceiling` | no | each inverter, as % of its own rating | a fixed limit per band |
+| `graded-export` | yes | what may cross the meter | the same feedback law, on a moved target |
+
+`threshold` is what the feature shipped with and stays the default, so an
+existing installation behaves exactly as it did until somebody chooses
+otherwise.
+
+### The bands
+
+Three of them, each an offset **above** `priceThresholdPerKwh`, ascending. A
+price falls in the first band whose edge it is *under*; one past the last edge is
+released outright. The default shape, and the reason it runs the way it does:
+
+| Above the threshold | `soft-ceiling` cap | `graded-export` allowance |
+| --- | --- | --- |
+| 0 – 1c | 70% | 33% |
+| 1 – 2c | 80% | 67% |
+| 2 – 3c | 90% | 100% |
+| over 3c | released | released |
+
+**Looser as the price rises**, which is the direction that pays. The band nearest
+the threshold is where a kWh is worth least, so it is the one held back hardest;
+by 3c above, exporting is worth enough not to interfere with.
+
+Edges are exclusive at the top for a reason worth stating: a price sitting
+exactly on 1c belongs to the 1–2c band. Were the edge inclusive, two neighbouring
+bands would both claim it and the first would win by accident of iteration order,
+which is a coin toss dressed up as a rule.
+
+Both values are percentages, and that is deliberate. The same six numbers keep
+their meaning when the strategy is switched, so trying the other one for an
+afternoon costs nothing; and a default in watts would have been right for a 10 kW
+house and wrong for everyone else.
+
+### `soft-ceiling`
+
+Each inverter is capped at a percentage of **its own rating**, and the grid meter
+is never read. That is the whole of it — no deadband, no settle time, no split.
+The limit moves when the price moves into another band and at no other time,
+which makes it the quietest of the three on the event bus.
+
+Not reading the meter buys one real thing: it is the only strategy that still
+decides when the grid sensor is unreadable, because there is nothing to balance
+against and so nothing that can go wrong with the balancing.
+
+**It is a ceiling, not a cut**, with everything [percent, not
+watts](#percent-not-watts) says about that. 70% of nameplate binds around noon
+and does nothing at dusk, and nothing measured afterwards would tell it the
+difference. If what you want is "hold the house to roughly zero export", this is
+not the strategy that does it — `graded-export` is.
+
+### `graded-export`
+
+One number changes and nothing else does:
+
+```
+allowance = exportPercent% × (combined rating of the arrays taking part)
+target    = gridTargetW − allowance
+```
+
+and the plan carries on into the same deadband, the same settle rule, the same
+generation-proportional split and the same floor. It is the same control law on a
+moved target rather than a second control law, which is why nothing downstream
+needed to know it exists.
+
+A share of the *rating* rather than a number of watts, so that an array dropping
+out of the plan — its power sensor gone quiet — takes its share of the allowance
+with it, and the arithmetic stays exact for the rest.
+
+This is the shape of the system this add-on was written alongside: a
+`sensor.solar_injection_load_balancing` whose allowed export scaled with the
+injection price, fitted across three days at `2170 W + 129,000 × price` and
+clamped to the array's 10 kW — zero export at about −1.7c, unrestricted from
+about +6c. Three bands are that curve in steps.
 
 ## Percent, not watts
 
@@ -378,6 +470,11 @@ changes at every slot boundary.
   after each move as well as before the first, which is what bounds how fast the
   limit can travel. A cap on the size of a single step would be a second answer
   to the same question.
+- **A continuous price ramp.** [`graded-export`](#graded-export) is three steps
+  where the system it was modelled on used a straight line, and steps were the
+  deliberate choice: they are legible in a settings form and in a log, and a
+  boundary jump every fifteen minutes is nothing next to the price jump that
+  caused it. The band model does not preclude adding the line later.
 
 ## Two things to know before relying on it
 
