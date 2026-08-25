@@ -154,12 +154,21 @@ a {
   border: 0;
 }
 
+/*
+ * Nearly every `code` here holds an entity id, and an entity id is one
+ * unbroken word — `sensor.technical_room_indevolt_cms_sf2000_battery_consumed`
+ * has no space or hyphen for the browser to break at, so a phone-width column
+ * could not shrink below it and the whole settings page scrolled sideways.
+ * `anywhere` also lets the id count as zero-width for min-content sizing,
+ * which is what actually lets the column narrow.
+ */
 code {
   padding: 0.1em 0.3em;
   border-radius: 3px;
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
   font-size: 0.9em;
+  overflow-wrap: anywhere;
 }
 
 /* Inputs and buttons inherit the page colours instead of the platform's
@@ -193,7 +202,7 @@ input {
 
 /*
  * ---------------------------------------------------------------------------
- * Dashboard layout
+ * Page and dashboard layout
  * ---------------------------------------------------------------------------
  *
  * The second thing an inline style cannot express, and the reason these rules
@@ -209,23 +218,69 @@ input {
  *  620px  four table columns stop fitting
  *  880px  the grid card's three columns stop fitting
  *  920px  the strategy rows and the decision feed stop fitting side by side
+ *  992px  a second column of settings cards fits at a comfortable measure
  * 1000px  the price figures and a readable chart stop fitting side by side
+ * 1500px  the fixed side columns can afford to grow, and a third settings
+ *         column fits
  */
+
+/*
+ * Every page's shell: full width, with padding that tightens on a phone.
+ *
+ * Full width on purpose. Home Assistant's own panels — the file editor, the
+ * energy dashboard, the entity tables — use the whole panel, and an add-on
+ * that caps itself at a column reads as a page that failed to load rather than
+ * one that was designed. Each *card* still bounds its own content, which is
+ * where a readable measure belongs; the page does not.
+ */
+.page {
+  padding: 1.125rem 1.5rem 1.75rem;
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 0.875rem 0.875rem 1.5rem;
+  }
+}
 
 .dash {
   display: flex;
   flex-direction: column;
   gap: 1.125rem;
-  padding: 1.125rem 1.5rem 1.75rem;
-  /* Wide enough for the chart to be worth drawing, bounded so the table does
-     not stretch across a 4K panel. */
-  max-width: 1240px;
 }
 
 @media (max-width: 640px) {
   .dash {
     gap: 0.875rem;
-    padding: 0.875rem 0.875rem 1.5rem;
+  }
+}
+
+/*
+ * The settings sections, as cards.
+ *
+ * One column of forms is right on a phone and wasteful on a panel, so the
+ * cards flow into columns once there is room for a second at a measure a form
+ * is still comfortable in — about 30rem. Capped at three: past that the page
+ * stops being a list of settings and becomes a wall of them.
+ *
+ * `align-items: start` so a short card (Grid, one field) keeps its own height
+ * instead of stretching to match the tall one beside it.
+ */
+.settings-grid {
+  display: grid;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (min-width: 992px) {
+  .settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1500px) {
+  .settings-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -276,6 +331,26 @@ input {
 }
 
 /*
+ * On a wide panel the extra width would otherwise all land in the one flexible
+ * column — a 900px-wide chart beside a 300px column of figures. These give it
+ * to the fixed columns instead, where a longer decision line and a wider set
+ * of figures are worth more than more chart.
+ */
+@media (min-width: 1500px) {
+  .dash-price {
+    grid-template-columns: 360px minmax(0, 1fr);
+  }
+
+  .dash-grid {
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) 260px;
+  }
+
+  .dash-rail {
+    grid-template-columns: minmax(0, 1fr) 420px;
+  }
+}
+
+/*
  * A strategy's number and bar sit in a fixed column beside its description on a
  * wide row, and go full width underneath it once that column would squeeze the
  * sentence into a ladder of two-word lines.
@@ -296,7 +371,16 @@ input {
  * least likely reason anyone opened it — the question there is what the price
  * is doing and whether the add-on is acting, not what it logged eight ticks
  * ago. Three lines and the link to the rest.
+ *
+ * The row's `display` is set here rather than inline with the rest of its
+ * styles, because that is the declaration the media query below has to be able
+ * to override — and an inline style outranks a stylesheet rule no matter how
+ * specific the selector. With `display: grid` inline, this hid nothing.
  */
+.dash-feed > li {
+  display: grid;
+}
+
 @media (max-width: 640px) {
   .dash-feed > li:nth-child(n + 4) {
     display: none;

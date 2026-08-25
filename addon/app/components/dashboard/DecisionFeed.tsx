@@ -127,9 +127,12 @@ function Row({ entry }: { entry: DiagnosticEntry }) {
   const badge = BADGE[entry.origin];
 
   return (
+    // `display: grid` is in app.css rather than here, alone among this row's
+    // styles: the phone breakpoint hides all but the first three rows, and an
+    // inline `display` outranks any stylesheet rule trying to. Everything else
+    // about the row stays inline, as the rest of the dashboard does.
     <li
       style={{
-        display: "grid",
         gridTemplateColumns: "auto 3.25rem minmax(0, 1fr)",
         gap: "0.625rem",
         alignItems: "baseline",

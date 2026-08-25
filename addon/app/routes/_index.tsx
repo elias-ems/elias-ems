@@ -213,8 +213,9 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   return (
     // The column, its gaps and its padding are in app.css with the rest of the
     // dashboard's layout, because the padding tightens on a phone and an inline
-    // style has nowhere to put a media query.
-    <main className="dash">
+    // style has nowhere to put a media query. `page` is the shell every route
+    // shares; `dash` is what this one stacks inside it.
+    <main className="page dash">
       {/* The page's own name is in the top bar, which is the only thing above
           this. A visible "Home" heading would say it a second time. */}
       <h1 className="visually-hidden">Home</h1>

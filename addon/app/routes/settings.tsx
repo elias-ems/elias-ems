@@ -1,4 +1,5 @@
 import { data } from "react-router";
+import { pageTitleStyle } from "../components/form";
 import BatteriesSection from "../components/settings/BatteriesSection";
 import ControlSection from "../components/settings/ControlSection";
 import CurtailmentSection from "../components/settings/CurtailmentSection";
@@ -325,35 +326,39 @@ export default function Settings({
   } = loaderData;
 
   return (
-    <main style={{ padding: "2rem", maxWidth: 640 }}>
-      <h1>Settings</h1>
+    <main className="page">
+      <h1 style={pageTitleStyle}>Settings</h1>
 
-      <PvSection pvEntities={pvEntities} actionData={actionData} />
-      <GridSection grid={grid} actionData={actionData} />
-      <BatteriesSection batteries={batteries} actionData={actionData} />
-      <PricesSection
-        config={prices}
-        summary={priceSummary}
-        actionData={actionData}
-      />
-      <ControlSection
-        config={control}
-        ready={{
-          grid: isGridConfigured(grid),
-          batteries: batteries.length > 0,
-          steerable: batteries.some(isSteerable),
-        }}
-        actionData={actionData}
-      />
-      <CurtailmentSection
-        config={curtailment}
-        ready={{
-          grid: isGridConfigured(grid),
-          arrays: pvEntities.some(isCurtailable),
-          prices: isPriceConfigured(prices),
-        }}
-        actionData={actionData}
-      />
+      {/* The cards flow into two or three columns once the panel has room for
+          them; app.css owns where that happens and why. */}
+      <div className="settings-grid" style={{ marginTop: "1.5rem" }}>
+        <PvSection pvEntities={pvEntities} actionData={actionData} />
+        <GridSection grid={grid} actionData={actionData} />
+        <BatteriesSection batteries={batteries} actionData={actionData} />
+        <PricesSection
+          config={prices}
+          summary={priceSummary}
+          actionData={actionData}
+        />
+        <ControlSection
+          config={control}
+          ready={{
+            grid: isGridConfigured(grid),
+            batteries: batteries.length > 0,
+            steerable: batteries.some(isSteerable),
+          }}
+          actionData={actionData}
+        />
+        <CurtailmentSection
+          config={curtailment}
+          ready={{
+            grid: isGridConfigured(grid),
+            arrays: pvEntities.some(isCurtailable),
+            prices: isPriceConfigured(prices),
+          }}
+          actionData={actionData}
+        />
+      </div>
     </main>
   );
 }

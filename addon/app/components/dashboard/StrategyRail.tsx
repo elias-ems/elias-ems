@@ -111,7 +111,15 @@ function StrategyRow({
         {icon}
       </span>
 
-      <div style={{ flexGrow: 1, minWidth: 200 }}>
+      {/*
+        `flexBasis: 0` rather than the default `auto`: a wrapping flex line
+        places its items by their *content* width, and this one holds a whole
+        sentence — so at anything under about 1100px the row broke into three
+        stacked lines, icon alone on the first. From zero it shares the line and
+        shrinks, down to the 200px below which the sentence becomes a ladder and
+        wrapping is genuinely the right answer.
+      */}
+      <div style={{ flexGrow: 1, flexBasis: 0, minWidth: 200 }}>
         <div
           style={{ display: "flex", alignItems: "center", gap: "0.5625rem" }}
         >

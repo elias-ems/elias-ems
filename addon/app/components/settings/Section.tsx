@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { hintStyle } from "../form";
+import { cardStyle, headingStyle, hintStyle } from "../form";
 
 type SectionProps = {
   title: string;
@@ -20,7 +20,10 @@ export default function Section({
   children,
 }: SectionProps) {
   return (
-    <section style={{ marginTop: "2rem" }}>
+    // A card rather than a run of headings: the sections sit side by side
+    // once the panel is wide enough, and columns of text with nothing drawn
+    // around them read as one column that has lost its way.
+    <section style={cardStyle}>
       <div
         style={{
           display: "flex",
@@ -29,7 +32,7 @@ export default function Section({
           gap: "1rem",
         }}
       >
-        <h2 style={{ margin: 0, fontSize: "1.1rem" }}>{title}</h2>
+        <h2 style={headingStyle}>{title}</h2>
         {add && (
           <button
             type="button"
@@ -56,7 +59,11 @@ export default function Section({
         )}
       </div>
       {description && (
-        <p style={{ ...hintStyle, marginTop: "0.35rem" }}>{description}</p>
+        // A card can be wider than a paragraph wants to be, so the sentence
+        // stops at a readable measure instead of running the card's width.
+        <p style={{ ...hintStyle, marginTop: "0.35rem", maxWidth: "62ch" }}>
+          {description}
+        </p>
       )}
       {children}
     </section>

@@ -15,6 +15,7 @@
  * bucketed and already expressed as minutes past local midnight, so nothing
  * here asks what time it is or where the reader lives.
  */
+import { useEffect, useRef, useState } from "react";
 import type { PriceCurvePoint } from "../../lib/dashboard";
 import { captionStyle } from "./chrome";
 
@@ -59,6 +60,77 @@ const WIDE: Geometry = {
 };
 
 /**
+ * How wide the plot is allowed to get, in user units — which are CSS pixels,
+ * because the chart is drawn at whatever width it is given rather than scaled
+ * into it (see `useMeasuredWidth`).
+ *
+ * The floor is where the wide plot stops being readable and the compact one
+ * takes over anyway. The ceiling is a guard rather than a target: past it the
+ * chart goes back to being scaled up, which on a panel that wide is a fraction
+ * of a percent and much better than the alternative — a hard cap leaves the
+ * card two thirds chart and one third nothing.
+ */
+const MIN_WIDE = 480;
+const MAX_WIDE = 2000;
+
+/** Once there is room, the axis names every second hour instead of every third. */
+const DENSE_HOURS = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24];
+
+/** The gutter to the right of the plot: half a bar, so the last one is not clipped. */
+const PAD_RIGHT = 12;
+
+/**
+ * The wide plot, redrawn for the width it actually has.
+ *
+ * An SVG with a fixed viewBox and `width: 100%` scales its labels along with
+ * its plot, so a chart in a full-width card renders 10px axis text at 25px and
+ * a 212-unit-tall card at 500px. Recomputing the geometry instead keeps every
+ * label, bar height and stroke at its nominal size at any width; only the
+ * number of bars' worth of horizontal room changes, which is the one dimension
+ * that should change.
+ */
+function wideGeometry(width: number | null): Geometry {
+  if (width === null) return WIDE;
+
+  const total = Math.min(Math.max(width, MIN_WIDE), MAX_WIDE);
+  const w = total - WIDE.padLeft - PAD_RIGHT;
+
+  return {
+    ...WIDE,
+    w,
+    barWidth: (w / 24) * 0.8,
+    hours: w >= 800 ? DENSE_HOURS : WIDE.hours,
+  };
+}
+
+/**
+ * The element's own width, once there is a browser to ask.
+ *
+ * `null` until then — on the server, and on the client's first render, which
+ * is what keeps hydration quiet: both produce the default geometry, and the
+ * measured one only arrives in an effect afterwards.
+ */
+function useMeasuredWidth(ref: React.RefObject<HTMLDivElement | null>) {
+  const [width, setWidth] = useState<number | null>(null);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
+
+    const observer = new ResizeObserver(([entry]) => {
+      // Rounded, so a fractional layout width does not rewrite the whole
+      // viewBox on every scrollbar-sized reflow.
+      setWidth(Math.round(entry.contentRect.width));
+    });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return width;
+}
+
+/**
  * Sized so that the whole viewBox — 322 units — lands at roughly the 300 css px
  * a phone card has to spare, which puts this chart at about 1:1 and its labels
  * at their nominal size. The gutter is 40 rather than 38 because an 11-unit
@@ -93,9 +165,14 @@ export default function PriceChart({
   /** The narrower plot, for a column a phone can spare. */
   compact?: boolean;
 }) {
+  // Both hooks run before the empty-curve exit below, as they must: a
+  // component cannot call fewer of them on one render than on another.
+  const box = useRef<HTMLDivElement>(null);
+  const measured = useMeasuredWidth(box);
+
   if (curve.length === 0) return null;
 
-  const g = compact ? COMPACT : WIDE;
+  const g = compact ? COMPACT : wideGeometry(measured);
   const values = curve.map((point) => point.sellingPerKwh);
   const scale = buildScale(values, thresholdPerKwh, g.h);
   const thresholdY = scale.y(thresholdPerKwh);
@@ -104,9 +181,14 @@ export default function PriceChart({
   const halfChip = g.nowChip / 2;
 
   return (
-    <div>
+    // The wrapper is what gets measured, not the svg: the svg's width is
+    // `100%` of exactly this box, so asking it would be asking the answer to
+    // describe itself.
+    <div ref={box}>
       <svg
-        viewBox={`0 0 ${g.padLeft + g.w + 12} ${g.padTop + g.h + g.padBottom}`}
+        viewBox={`0 0 ${g.padLeft + g.w + PAD_RIGHT} ${
+          g.padTop + g.h + g.padBottom
+        }`}
         width="100%"
         role="img"
         aria-label={describe(curve, thresholdPerKwh, currency)}
