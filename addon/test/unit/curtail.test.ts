@@ -11,7 +11,10 @@ import {
   type PvArraySnapshot,
   planCurtailment,
 } from "../../app/lib/curtail";
-import { DEFAULT_CURTAILMENT_CONFIG } from "../../app/lib/curtailment";
+import {
+  type CurtailmentConfig,
+  DEFAULT_CURTAILMENT_CONFIG,
+} from "../../app/lib/curtailment";
 
 function array(overrides: Partial<PvArraySnapshot> = {}): PvArraySnapshot {
   return {
@@ -430,5 +433,285 @@ describe("arrays that cannot take part", () => {
       reason: "no rated power configured",
     });
     expect(plan.decisions[1].action).toBe("curtail");
+  });
+});
+
+/**
+ * The marginal region: prices above the threshold, where a kWh still earns
+ * something but not much. `threshold` has nothing to say there and releases;
+ * the other two each hold something back, by different means.
+ *
+ * The defaults are the bands under test throughout — 0.01/0.02/0.03 above the
+ * threshold, capping at 70/80/90% or letting 33/67/100% of the rating out.
+ */
+describe("the strategies above the threshold", () => {
+  const withStrategy = (
+    strategy: CurtailmentConfig["strategy"],
+    overrides: Partial<CurtailmentConfig> = {},
+  ): CurtailmentConfig => ({
+    ...DEFAULT_CURTAILMENT_CONFIG,
+    enabled: true,
+    strategy,
+    // Acting at once: these cases are about which rule applies, not about when
+    // it is allowed to. The settle rule has cases of its own above.
+    settleSeconds: 0,
+    ...overrides,
+  });
+
+  it("releases in the marginal region under the threshold strategy", () => {
+    // The regression guard for every existing installation: a price sitting
+    // squarely inside band one must still be released, because nobody asked
+    // for anything else.
+    const plan = planCurtailment(
+      input({
+        productionPricePerKwh: 0.005,
+        gridPowerW: -3000,
+        config: withStrategy("threshold"),
+      }),
+    );
+
+    expect(plan.curtailing).toBe(false);
+    expect(plan.decisions[0]).toMatchObject({
+      action: "release",
+      commandPercent: 100,
+      released: true,
+    });
+  });
+
+  describe("soft ceiling", () => {
+    it("caps at the band the price falls in", () => {
+      for (const [productionPricePerKwh, expected] of [
+        [0.005, 70],
+        [0.015, 80],
+        [0.025, 90],
+      ] as const) {
+        const plan = planCurtailment(
+          input({
+            productionPricePerKwh,
+            gridPowerW: -3000,
+            config: withStrategy("soft-ceiling"),
+          }),
+        );
+
+        expect(plan.decisions[0], `at ${productionPricePerKwh}`).toMatchObject({
+          action: "curtail",
+          limitPercent: expected,
+          commandPercent: expected,
+          limitW: expected * 50,
+          released: false,
+        });
+      }
+    });
+
+    it("puts a price sitting exactly on an edge in the band above it", () => {
+      // A band reaches *up to* its edge. Were the edge inclusive, the two
+      // neighbouring bands would both claim it and the first would always win,
+      // which is a coin toss dressed up as a rule.
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.01,
+          config: withStrategy("soft-ceiling"),
+        }),
+      );
+
+      expect(plan.decisions[0].limitPercent).toBe(80);
+    });
+
+    it("releases once the price is clear of the top band", () => {
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.035,
+          gridPowerW: -3000,
+          config: withStrategy("soft-ceiling"),
+        }),
+      );
+
+      expect(plan.curtailing).toBe(false);
+      expect(plan.decisions[0]).toMatchObject({
+        commandPercent: 100,
+        released: true,
+      });
+    });
+
+    it("ignores the meter entirely, including an unreadable one", () => {
+      // The character of the strategy, and the one thing it has over graded
+      // export: with nothing to balance against, there is nothing that can go
+      // wrong with the balancing.
+      for (const gridPowerW of [-9000, 0, 9000, null]) {
+        const plan = planCurtailment(
+          input({
+            productionPricePerKwh: 0.005,
+            gridPowerW,
+            config: withStrategy("soft-ceiling"),
+          }),
+        );
+
+        expect(plan.decisions[0], `grid ${gridPowerW}`).toMatchObject({
+          limitPercent: 70,
+        });
+        expect(plan.offTarget, `grid ${gridPowerW}`).toBe(false);
+      }
+    });
+
+    it("still honours the floor when a band is set below it", () => {
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.005,
+          config: withStrategy("soft-ceiling", { minLimitPercent: 80 }),
+        }),
+      );
+
+      expect(plan.decisions[0].limitPercent).toBe(80);
+    });
+
+    it("releases an array whose own power reading is missing", () => {
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.005,
+          arrays: [array({ powerW: null })],
+          config: withStrategy("soft-ceiling"),
+        }),
+      );
+
+      expect(plan.decisions[0]).toMatchObject({
+        action: "release",
+        reason: "power reading unavailable",
+      });
+    });
+
+    it("leaves what happens below the threshold exactly as it was", () => {
+      const plan = planCurtailment(
+        input({
+          gridPowerW: -2000,
+          config: withStrategy("soft-ceiling"),
+        }),
+      );
+
+      // 4000 W generated, 2000 W exported, so 2000 W is what the house can
+      // take — the feedback law, untouched by the strategy above it.
+      expect(plan.decisions[0]).toMatchObject({
+        action: "curtail",
+        commandPercent: 40,
+      });
+    });
+  });
+
+  describe("graded export", () => {
+    it("lets the band's share of the rating cross the meter", () => {
+      // Band one allows 33% of the 5000 W rating out, so the target moves to
+      // -1650 W. The meter is 1350 W past it, and 4000 - 1350 is 2650 W — 53%.
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.005,
+          gridPowerW: -3000,
+          config: withStrategy("graded-export"),
+        }),
+      );
+
+      expect(plan.decisions[0]).toMatchObject({
+        action: "curtail",
+        commandPercent: 53,
+      });
+      expect(plan.summary).toMatch(/up to 1650 W may cross the meter/);
+    });
+
+    it("holds nothing back when the whole rating may be exported", () => {
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.025,
+          gridPowerW: -3000,
+          config: withStrategy("graded-export"),
+        }),
+      );
+
+      expect(plan.decisions[0]).toMatchObject({
+        commandPercent: 100,
+        released: true,
+      });
+    });
+
+    it("shares the allowance over the combined rating, and splits by output", () => {
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.005,
+          gridPowerW: -4000,
+          arrays: [
+            array({ powerW: 4000, ratedPowerW: 5000 }),
+            array({
+              id: "a2",
+              title: "Garage",
+              powerW: 2000,
+              ratedPowerW: 5000,
+            }),
+          ],
+          config: withStrategy("graded-export"),
+        }),
+      );
+
+      // 33% of the combined 10 kW is 3300 W, leaving the meter 700 W past the
+      // target, so 6000 - 700 = 5300 W is shared out — and shared in proportion
+      // to what each array is making, not to what it is rated for.
+      expect(plan.decisions[0].commandPercent).toBe(71);
+      expect(plan.decisions[1].commandPercent).toBe(35);
+    });
+
+    it("counts the meter as balanced once it sits on the allowance", () => {
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.005,
+          gridPowerW: -1650,
+          config: withStrategy("graded-export"),
+        }),
+      );
+
+      // Exporting 1650 W is exactly what this band permits, so there is nothing
+      // to correct — the deadband applies to the moved target, not to zero.
+      expect(plan.offTarget).toBe(false);
+      expect(plan.decisions[0]).toMatchObject({
+        action: "hold",
+        commandPercent: null,
+      });
+    });
+
+    it("still floors an array the allowance cannot save", () => {
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.005,
+          gridPowerW: -9000,
+          config: withStrategy("graded-export"),
+        }),
+      );
+
+      expect(plan.decisions[0].commandPercent).toBe(
+        DEFAULT_CURTAILMENT_CONFIG.minLimitPercent,
+      );
+    });
+
+    it("releases once the price is clear of the top band", () => {
+      const plan = planCurtailment(
+        input({
+          productionPricePerKwh: 0.035,
+          gridPowerW: -3000,
+          config: withStrategy("graded-export"),
+        }),
+      );
+
+      expect(plan.curtailing).toBe(false);
+      expect(plan.decisions[0]).toMatchObject({ released: true });
+    });
+
+    it("leaves what happens below the threshold exactly as it was", () => {
+      const plan = planCurtailment(
+        input({
+          gridPowerW: -2000,
+          config: withStrategy("graded-export"),
+        }),
+      );
+
+      expect(plan.decisions[0]).toMatchObject({
+        action: "curtail",
+        commandPercent: 40,
+      });
+    });
   });
 });

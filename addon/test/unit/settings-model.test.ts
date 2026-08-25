@@ -620,7 +620,26 @@ describe("normalizeCurtailmentConfig", () => {
 });
 
 describe("parseCurtailmentConfig", () => {
+  /**
+   * The bands as the form always posts them — visible under the two band
+   * strategies, hidden under `threshold`, but present either way so that a save
+   * with the strategy off does not erase whatever was tuned for the others.
+   */
+  const validBands = {
+    "bands.0.abovePerKwh": "0.01",
+    "bands.0.ceilingPercent": "70",
+    "bands.0.exportPercent": "33",
+    "bands.1.abovePerKwh": "0.02",
+    "bands.1.ceilingPercent": "80",
+    "bands.1.exportPercent": "67",
+    "bands.2.abovePerKwh": "0.03",
+    "bands.2.ceilingPercent": "90",
+    "bands.2.exportPercent": "100",
+  };
+
   const valid = {
+    ...validBands,
+    strategy: "threshold",
     priceThresholdPerKwh: "0",
     gridTargetW: "0",
     deadbandW: "50",
@@ -674,5 +693,151 @@ describe("parseCurtailmentConfig", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.errors.priceThresholdPerKwh).toBeTruthy();
+  });
+});
+
+describe("the curtailment bands", () => {
+  const validBands = {
+    "bands.0.abovePerKwh": "0.01",
+    "bands.0.ceilingPercent": "70",
+    "bands.0.exportPercent": "33",
+    "bands.1.abovePerKwh": "0.02",
+    "bands.1.ceilingPercent": "80",
+    "bands.1.exportPercent": "67",
+    "bands.2.abovePerKwh": "0.03",
+    "bands.2.ceilingPercent": "90",
+    "bands.2.exportPercent": "100",
+  };
+
+  const valid = {
+    ...validBands,
+    strategy: "graded-export",
+    priceThresholdPerKwh: "0",
+    gridTargetW: "0",
+    deadbandW: "50",
+    minLimitPercent: "5",
+    settleSeconds: "30",
+  };
+
+  it("fills them in for a config stored before strategies existed", () => {
+    // The upgrade path, and the case that matters most: every `curtailment.json`
+    // written until now has no `bands` key at all, and an installation that
+    // reads one must come up working rather than with nothing to plan against.
+    const normalized = normalizeCurtailmentConfig({ enabled: true });
+
+    expect(normalized.strategy).toBe("threshold");
+    expect(normalized.bands).toEqual(DEFAULT_CURTAILMENT_CONFIG.bands);
+  });
+
+  it("fills in the gaps in a partial or nonsense stored set", () => {
+    const normalized = normalizeCurtailmentConfig({
+      bands: [{ ceilingPercent: 400 }, { abovePerKwh: 0.05 }],
+    });
+
+    expect(normalized.bands).toHaveLength(3);
+    // Clamped, not rejected — this runs on a file, not on a form.
+    expect(normalized.bands[0].ceilingPercent).toBe(100);
+    expect(normalized.bands[0].abovePerKwh).toBe(0.01);
+    expect(normalized.bands[1].abovePerKwh).toBe(0.05);
+    // The third band's default edge is below the second's stored 0.05, so the
+    // running maximum drags it up to meet it. That empties the third band,
+    // which is the honest outcome: the file asked for a second band reaching
+    // further than the third, and there is no reading of that where all three
+    // survive.
+    expect(normalized.bands[2].abovePerKwh).toBe(0.05);
+    expect(normalized.bands[2].ceilingPercent).toBe(
+      DEFAULT_CURTAILMENT_CONFIG.bands[2].ceilingPercent,
+    );
+  });
+
+  it("drags a stored edge up rather than leaving its band unreachable", () => {
+    // A price falls in the first band it is under, so an edge below the one
+    // before it can never be reached — silently, and in a way nothing
+    // downstream could report.
+    const normalized = normalizeCurtailmentConfig({
+      bands: [
+        { abovePerKwh: 0.02, ceilingPercent: 70, exportPercent: 33 },
+        { abovePerKwh: 0.01, ceilingPercent: 80, exportPercent: 67 },
+        { abovePerKwh: 0.03, ceilingPercent: 90, exportPercent: 100 },
+      ],
+    });
+
+    expect(normalized.bands.map((band) => band.abovePerKwh)).toEqual([
+      0.02, 0.02, 0.03,
+    ]);
+  });
+
+  it("falls back to the shipped strategy for an id it does not know", () => {
+    expect(
+      normalizeCurtailmentConfig({ strategy: "clairvoyance" as never })
+        .strategy,
+    ).toBe("threshold");
+  });
+
+  it("accepts a filled-in band form", () => {
+    const parsed = parseCurtailmentConfig(form(valid));
+
+    expect(parsed).toMatchObject({
+      ok: true,
+      config: {
+        strategy: "graded-export",
+        bands: DEFAULT_CURTAILMENT_CONFIG.bands,
+      },
+    });
+  });
+
+  it("rejects edges that do not climb", () => {
+    const parsed = parseCurtailmentConfig(
+      form({ ...valid, "bands.1.abovePerKwh": "0.01" }),
+    );
+
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.bands?.[1]?.abovePerKwh).toBeTruthy();
+    // And says so on the row that is wrong, rather than once above the group.
+    expect(parsed.errors.bands?.[0]?.abovePerKwh).toBeUndefined();
+  });
+
+  it("rejects an edge at or below the threshold itself", () => {
+    for (const abovePerKwh of ["0", "-0.01", "abc", ""]) {
+      const parsed = parseCurtailmentConfig(
+        form({ ...valid, "bands.0.abovePerKwh": abovePerKwh }),
+      );
+      expect(parsed.ok, `abovePerKwh=${abovePerKwh}`).toBe(false);
+    }
+  });
+
+  it("rejects a band percentage outside 0-100", () => {
+    for (const value of ["-1", "101", "70.5", "abc", ""]) {
+      expect(
+        parseCurtailmentConfig(
+          form({ ...valid, "bands.2.exportPercent": value }),
+        ).ok,
+        `exportPercent=${value}`,
+      ).toBe(false);
+      expect(
+        parseCurtailmentConfig(
+          form({ ...valid, "bands.2.ceilingPercent": value }),
+        ).ok,
+        `ceilingPercent=${value}`,
+      ).toBe(false);
+    }
+  });
+
+  it("keeps the value the chosen strategy does not read", () => {
+    // The form posts it as a hidden input for exactly this reason: trying the
+    // other strategy for an afternoon must not reset what was tuned for this
+    // one.
+    const parsed = parseCurtailmentConfig(
+      form({
+        ...valid,
+        strategy: "soft-ceiling",
+        "bands.0.exportPercent": "42",
+      }),
+    );
+
+    expect(parsed).toMatchObject({ ok: true });
+    if (!parsed.ok) return;
+    expect(parsed.config.bands[0].exportPercent).toBe(42);
   });
 });

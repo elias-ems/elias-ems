@@ -1,7 +1,9 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { Form, useNavigation } from "react-router";
 import type { CurtailmentConfig } from "../../lib/curtailment";
 import {
+  bandFieldName,
+  CURTAILMENT_STRATEGIES,
   MAX_DEADBAND_W,
   MAX_GRID_TARGET_W,
   MAX_SETTLE_SECONDS,
@@ -13,7 +15,13 @@ import {
 import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
 import Field from "../Field";
-import { errorStyle, formStyle, hintStyle, labelStyle } from "../form";
+import {
+  errorStyle,
+  formStyle,
+  hintStyle,
+  inputStyle,
+  labelStyle,
+} from "../form";
 import Section from "./Section";
 
 export default function CurtailmentSection({
@@ -39,6 +47,23 @@ export default function CurtailmentSection({
     navigation.formData?.get("intent") === "curtailment-save";
 
   const enabledId = useId();
+  const strategyId = useId();
+  // Held in state so the band rows and the strategy description can follow the
+  // selection without a round trip.
+  const [strategy, setStrategy] = useState(config.strategy);
+  const selected = CURTAILMENT_STRATEGIES.find(
+    (option) => option.id === strategy,
+  );
+  const bandErrors = errors.bands ?? [];
+
+  /**
+   * Which of a band's two values this strategy actually reads. The other is
+   * still posted, as a hidden input, so that switching strategy does not erase
+   * the tuning belonging to the one being switched away from.
+   */
+  const shown =
+    strategy === "graded-export" ? "exportPercent" : "ceilingPercent";
+  const hidden = shown === "exportPercent" ? "ceilingPercent" : "exportPercent";
 
   // Left interactive while curtailment is already on, so that an array that
   // stopped being curtailable afterwards leaves a box that can still be
@@ -93,6 +118,106 @@ export default function CurtailmentSection({
           hint="Applied to what a kWh put on the grid earns, with your injection formula already applied — not the raw exchange price. 0 means “curtail only when exporting costs money”. Raise it if your contract charges a fee per exported kWh."
         />
 
+        <div>
+          <label htmlFor={strategyId} style={labelStyle}>
+            Above the threshold
+          </label>
+          <select
+            id={strategyId}
+            name="strategy"
+            value={strategy}
+            onChange={(event) =>
+              setStrategy(event.target.value as CurtailmentConfig["strategy"])
+            }
+            style={inputStyle()}
+          >
+            {CURTAILMENT_STRATEGIES.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          {selected && <p style={hintStyle}>{selected.description}</p>}
+        </div>
+
+        {strategy === "threshold" ? (
+          // Posted even though nothing reads them, so that trying this strategy
+          // for an afternoon does not quietly reset the other two to defaults.
+          config.bands.flatMap((band, index) =>
+            (["abovePerKwh", "ceilingPercent", "exportPercent"] as const).map(
+              (key) => (
+                <input
+                  key={bandFieldName(index, key)}
+                  type="hidden"
+                  name={bandFieldName(index, key)}
+                  value={band[key]}
+                />
+              ),
+            ),
+          )
+        ) : (
+          <fieldset
+            style={{
+              border: "1px solid var(--color-border)",
+              borderRadius: "0.5rem",
+              padding: "0.75rem 1rem 1rem",
+              display: "grid",
+              gap: "0.75rem",
+            }}
+          >
+            <legend style={labelStyle}>Bands</legend>
+            <p style={hintStyle}>
+              Each band reaches this far above the threshold, and the first one
+              a price falls under is the one that applies. Past the last edge
+              the arrays are released outright. Edges have to climb.
+            </p>
+
+            {config.bands.map((band, index) => (
+              <div
+                // Keyed on the value being shown as well as the row, so that
+                // switching strategy remounts the input rather than leaving the
+                // other strategy's number sitting under this one's label.
+                //
+                // biome-ignore lint/suspicious/noArrayIndexKey: the bands are a fixed-length ordered tuple, so position is the identity — rows are never added, removed or reordered.
+                key={`band-${index}-${shown}`}
+                style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}
+              >
+                <Field
+                  name={bandFieldName(index, "abovePerKwh")}
+                  label={`Band ${index + 1} up to (+currency/kWh)`}
+                  type="number"
+                  step="any"
+                  defaultValue={band.abovePerKwh}
+                  error={bandErrors[index]?.abovePerKwh}
+                />
+                <Field
+                  name={bandFieldName(index, shown)}
+                  label={
+                    shown === "exportPercent" ? "Allowed export (%)" : "Cap (%)"
+                  }
+                  type="number"
+                  step={1}
+                  min={0}
+                  max={100}
+                  defaultValue={band[shown]}
+                  error={bandErrors[index]?.[shown]}
+                />
+                <input
+                  type="hidden"
+                  name={bandFieldName(index, hidden)}
+                  value={band[hidden]}
+                />
+              </div>
+            ))}
+
+            <p style={hintStyle}>
+              {shown === "exportPercent"
+                ? "A percentage of the combined rating of the arrays being curtailed — how much of what they could make is allowed to cross the meter. 100% is the same as not holding them back."
+                : "A percentage of each inverter's own rating. Remember this is a ceiling and not a cut: 70% binds around noon and does nothing at dusk."}
+            </p>
+          </fieldset>
+        )}
+
         <Field
           name="gridTargetW"
           label="Grid target (W)"
@@ -102,7 +227,11 @@ export default function CurtailmentSection({
           max={MAX_GRID_TARGET_W}
           defaultValue={config.gridTargetW}
           error={errors.gridTargetW}
-          hint="Where to aim the meter while curtailing, signed the way the grid reading is: positive importing, negative exporting. 0 is balanced. A negative value keeps a little export as insurance against dipping into import; a positive value does the opposite."
+          hint={`Where to aim the meter while curtailing, signed the way the grid reading is: positive importing, negative exporting. 0 is balanced. A negative value keeps a little export as insurance against dipping into import; a positive value does the opposite.${
+            strategy === "soft-ceiling"
+              ? " The soft ceiling never reads the meter, so this only applies below the threshold."
+              : ""
+          }`}
         />
 
         <Field
@@ -114,7 +243,11 @@ export default function CurtailmentSection({
           max={MAX_DEADBAND_W}
           defaultValue={config.deadbandW}
           error={errors.deadbandW}
-          hint={`How far the meter may sit from the target before the limit is moved. ${MIN_DEADBAND_W}–${MAX_DEADBAND_W} W. Below one percent of an inverter's rating this does nothing the rounding was not already doing.`}
+          hint={`How far the meter may sit from the target before the limit is moved. ${MIN_DEADBAND_W}–${MAX_DEADBAND_W} W. Below one percent of an inverter's rating this does nothing the rounding was not already doing.${
+            strategy === "soft-ceiling"
+              ? " Below the threshold only, for the same reason as the grid target."
+              : ""
+          }`}
         />
 
         <Field

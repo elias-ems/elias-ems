@@ -25,6 +25,7 @@ export default function PriceCard({
   prices,
   thresholdPerKwh,
   thresholdDisplay,
+  strategyLabel,
   curtailing,
 }: {
   prices: DashboardPrices;
@@ -32,6 +33,11 @@ export default function PriceCard({
   thresholdPerKwh: number;
   /** The same, formatted the way every other price on the page is. */
   thresholdDisplay: string;
+  /**
+   * What happens in the band above the threshold, or null when the answer is
+   * "nothing" — which is what the threshold on its own already says.
+   */
+  strategyLabel: string | null;
   /** Whether curtailment is switched on, which is what makes the line mean anything. */
   curtailing: boolean;
 }) {
@@ -109,6 +115,9 @@ export default function PriceCard({
                 value={stripUnit(thresholdDisplay)}
                 muted
               />
+              {curtailing && strategyLabel && (
+                <Figure label="Above it" value={strategyLabel} muted />
+              )}
             </div>
 
             {curtailing && below && (
