@@ -1,7 +1,12 @@
 import type { CSSProperties } from "react";
 import { useHref } from "react-router";
 import DiagnosticsBox from "../components/DiagnosticsBox";
-import { headingStyle, hintStyle } from "../components/form";
+import {
+  cardStyle,
+  headingStyle,
+  hintStyle,
+  pageTitleStyle,
+} from "../components/form";
 import { readDiagnostics } from "../lib/diagnostics.server";
 import type { Route } from "./+types/tools";
 
@@ -19,10 +24,10 @@ export default function Tools({ loaderData }: Route.ComponentProps) {
   const downloadHref = useHref("/api/diagnostics.txt");
 
   return (
-    <main style={{ padding: "2rem", maxWidth: 640 }}>
-      <h1>Tools</h1>
+    <main className="page">
+      <h1 style={pageTitleStyle}>Tools</h1>
 
-      <section style={{ marginTop: "2rem" }}>
+      <section style={{ ...cardStyle, marginTop: "1.5rem" }}>
         <div style={sectionHeaderStyle}>
           <h2 style={headingStyle}>Diagnostics</h2>
           {/* A plain anchor, not a Link: the point is a real request, so the
@@ -33,7 +38,7 @@ export default function Tools({ loaderData }: Route.ComponentProps) {
           </a>
         </div>
 
-        <p style={{ ...hintStyle, marginTop: "0.35rem" }}>
+        <p style={{ ...hintStyle, marginTop: "0.35rem", maxWidth: "62ch" }}>
           What every feature has logged since the add-on last started. Held in
           memory only — a restart clears it, so download it before restarting if
           you need to keep it.

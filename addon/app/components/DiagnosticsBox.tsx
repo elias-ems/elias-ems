@@ -114,7 +114,13 @@ export default function DiagnosticsBox({
             listStyle: "none",
             margin: 0,
             padding: 0,
-            maxHeight: 260,
+            // Grows with the window rather than sitting at a fixed 260px:
+            // this box is the whole of the Tools page, and a log that stops a
+            // third of the way down a 1400px-tall panel wastes the room the
+            // one thing on the page could be using. Floored so a short window
+            // still shows a few lines, capped so a very tall one does not
+            // scroll the page instead of the list.
+            maxHeight: "clamp(14rem, 62vh, 46rem)",
             overflowY: "auto",
             fontFamily: "ui-monospace, monospace",
             fontSize: "0.75rem",
