@@ -122,6 +122,18 @@ what breaks that cycle.
 Some inverters also shut their MPPT down entirely at 0% and take minutes to
 restart, which is a second reason to leave a few percent in.
 
+**The floor will not hold your array above what your house is using, though.**
+On a sunny negative-price morning with nobody home, 5% of a 10 kW inverter is
+500 W against a house drawing 80 W — and sitting there would export the
+difference at a price you pay, which is the thing you turned this on to avoid.
+So the limit comes down below the floor when the meter can justify it, and the
+floor applies only when the arithmetic asks for less than nothing.
+
+If your inverter genuinely cannot run that low, that is a hardware limit this
+setting cannot enforce for you — see [One fixed
+step](#if-your-inverter-writes-every-limit-to-permanent-memory), which sits
+outside this loop.
+
 ### Settle time
 
 How long the meter has to stay off target before anything moves, in either
@@ -211,6 +223,29 @@ it balances around your fridge.
   to offer. Above the threshold it simply generates.
 - **It is not released when its own power sensor goes quiet.** A sensor blip
   would otherwise cost a write on exactly the hardware this is protecting.
+
+## What happens overnight
+
+Curtailment keeps running — negative prices come from wind as readily as from
+sun, and there is no "it's dark, stop bothering" switch. What that means for you
+depends on which kind of inverter you have:
+
+- **Follows the house.** It is given a ceiling that tracks whatever your house is
+  drawing. While the array is dark that ceiling does nothing, and when the sun
+  reaches it the number is already right — so there is no burst of export at
+  dawn.
+- **One fixed step.** Nothing is sent at all. Your house is importing overnight,
+  so there is no export to prevent. A negative-price night that ends before
+  sunrise costs your Huawei **no writes whatever**, and one that outlasts sunrise
+  costs it one — sent the moment export actually shows on the meter.
+
+If your inverter drops offline overnight, as many do, it reports no power and the
+add-on treats that as [it does any missing
+reading](#when-it-stops-curtailing) — released if it follows the house, left
+alone if it is stepped.
+
+And yes: when the sun comes up, a fresh limit is worked out on the very next tick
+from whatever the meter is then saying. Nothing needs resetting.
 
 ## Connecting the event to your inverter
 

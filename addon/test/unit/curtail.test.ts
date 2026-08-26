@@ -870,3 +870,101 @@ describe("stepped inverters", () => {
     expect(plan.decisions[1]).toMatchObject({ limitPercent: 70 });
   });
 });
+
+describe("through the night and back", () => {
+  it("keeps deciding after dark, tracking what the house is drawing", () => {
+    // Negative prices happen at night — wind, not sun. The array is dark, so
+    // the limit it is given is a ceiling on nothing; what matters is that the
+    // loop is still deciding and the number is sane when the sun arrives.
+    const plan = planCurtailment(
+      input({ gridPowerW: 300, arrays: [array({ powerW: 0 })] }),
+    );
+
+    expect(plan.combinedAllowedW).toBe(300);
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 6, limitW: 300 });
+  });
+
+  it("raises the limit as the house wakes up", () => {
+    // Dawn, array capped at 300 W from overnight, and the house starts drawing
+    // 2 kW. The ceiling has to follow in one tick, not creep.
+    const plan = planCurtailment(
+      input({ gridPowerW: 1700, arrays: [array({ powerW: 300 })] }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 40, limitW: 2000 });
+  });
+
+  it("does not command a stepped array while there is no export to prevent", () => {
+    // The whole night, for a Huawei: the meter is importing the house load, so
+    // there is nothing being sold at a loss and nothing worth a write.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: 300,
+        arrays: [
+          array({ powerW: 0, controlMode: "stepped", stepLimitPercent: 0 }),
+        ],
+      }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "hold",
+      commandPercent: null,
+    });
+  });
+
+  it("steps a stepped array the moment the sun puts export on the meter", () => {
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -2000,
+        arrays: [
+          array({ powerW: 4000, controlMode: "stepped", stepLimitPercent: 0 }),
+        ],
+      }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "curtail",
+      commandPercent: 0,
+    });
+  });
+});
+
+describe("the floor against a quiet house", () => {
+  it("comes down to what the house can absorb rather than sitting on the floor", () => {
+    // A sunny negative-price morning with nobody home. 5% of a 5 kW inverter is
+    // 250 W; a house drawing 50 W would otherwise export the other 200 W for as
+    // long as the sun was up, with every tick recomputing the same floor and
+    // calling it settled. The economics have to win that argument.
+    const plan = planCurtailment(
+      input({ gridPowerW: -200, arrays: [array({ powerW: 250 })] }),
+    );
+
+    expect(plan.combinedAllowedW).toBe(50);
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 1, limitW: 50 });
+  });
+
+  it("settles there instead of oscillating", () => {
+    // At 50 W the house is balanced, so the next tick is inside the deadband
+    // and says nothing at all — which is what leaves the 1% standing.
+    const plan = planCurtailment(
+      input({ gridPowerW: 0, arrays: [array({ powerW: 50 })] }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "hold",
+      commandPercent: null,
+    });
+  });
+
+  it("still holds the floor when the arithmetic asks for less than nothing", () => {
+    // Even switching the array off would leave the meter past the target, so
+    // the number says nothing about what the house could absorb. That is the
+    // case the floor was written for, and it keeps it.
+    const plan = planCurtailment(
+      input({ gridPowerW: -100, arrays: [array({ powerW: 0 })] }),
+    );
+
+    expect(plan.combinedAllowedW).toBe(-100);
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 5, limitW: 250 });
+  });
+});

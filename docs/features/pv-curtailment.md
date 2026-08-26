@@ -394,16 +394,58 @@ When nothing is generating at all — at night, or with every array already at t
 floor — that split would be 0/0, and the fallback is rating-proportional
 instead.
 
-## The fixed point at zero
+## The fixed point at zero, and what the floor may not cost
 
-`C_allowed = C + (G - G_target)` has a trap. A dark array, an idle house and a
-meter reading zero give `C_allowed = 0`, so the limit goes to 0%, so the array
-stays dark, so the meter stays at zero. Nothing in the arithmetic ever lifts it
-out again, and at dawn the array would simply not come back.
+`C_allowed = C + (G - G_target)` has a trap. When the arithmetic asks for less
+than nothing — even switching the array off would leave the meter past the target
+— the number carries no information about what the house could absorb, and a
+limit taken to 0% on the strength of it keeps the array dark, which keeps the
+meter where it is, which asks for 0% again. Nothing lifts it out.
 
-`minLimitPercent` is what breaks the cycle, which is why its default is not
+`minLimitPercent` is what breaks that cycle, which is why its default is not
 zero. It is independently a hardware requirement on inverters whose MPPT drops
 out entirely at 0% and takes minutes to restart.
+
+**But the floor is not allowed to become a minimum export.** Applied
+unconditionally it does exactly that, and the case is not exotic — it is a sunny
+negative-price morning with nobody home:
+
+| | | |
+| --- | --- | --- |
+| 5 kW inverter, floor 5% | pinned at | 250 W |
+| House drawing | | 50 W |
+| Meter | | −200 W, exported at a price you pay |
+
+Every tick recomputes the same floor and calls it settled. The house exports for
+as long as the sun is up, which is the one outcome the whole feature exists to
+prevent.
+
+So the floor **yields to any request the meter can justify** and holds only when
+the request is below zero. A quiet house comes down to 1% and balances; the
+genuinely uninformative case still gets the floor. Where the two collide — an
+inverter that cannot run below 5% in a house that cannot absorb 5% — the
+economics win, and an installer who needs the hardware protected should say so
+with a [stepped inverter's fixed limit](#inverters-that-cannot-be-written-to-often)
+instead, which is not part of this loop at all.
+
+## After dark
+
+Curtailment keeps deciding at night — negative prices come from wind as readily
+as from sun, and the loop has no notion of daylight. What each kind of array does
+falls out of the rules already stated rather than needing a guard of its own:
+
+- **A modulating array** is given a ceiling that tracks the house draw. It is a
+  ceiling on nothing while the array is dark, and it is the right number the
+  moment the sun reaches it — which is also why there is no export spike at
+  dawn during an episode.
+- **A stepped array** is not commanded at all. The meter is importing the house
+  load, so there is no export to prevent, and the "export, not off-target either
+  way" test holds it. A negative-price night that ends before sunrise therefore
+  costs a stepped inverter **no writes at all**, and one that outlasts sunrise
+  costs it one, taken the moment export actually appears.
+- **An inverter that goes offline overnight** — many do — reports no reading, so
+  a modulating array is released and a stepped one is held. Both are the
+  documented behaviour for a missing reading; see [Failing open](#failing-open).
 
 ## Failing open
 

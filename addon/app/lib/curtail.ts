@@ -684,16 +684,30 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
           : (combinedAllowedW * rated) / ratedTotal;
 
       const requestedPercent = (share / rated) * 100;
-      const limitPercent = Math.min(
-        100,
-        Math.max(minLimitPercent, Math.round(requestedPercent)),
-      );
+
+      // The floor yields to any request the meter can actually justify, and
+      // holds only when the arithmetic asks for less than nothing.
+      //
+      // Applied unconditionally it becomes a *minimum export* on a quiet house,
+      // which is the one outcome this feature exists to prevent. A 5 kW inverter
+      // at the default 5% is pinned to 250 W; a house drawing 50 W on a sunny
+      // negative-price morning then exports the other 200 W for as long as the
+      // sun is up, and every tick recomputes the same floor and calls it done.
+      // The economics have to win that argument.
+      //
+      // A request below zero is different in kind: it means even switching the
+      // array off would leave the meter past the target, so the number carries
+      // no information about what the house could absorb. That is the case the
+      // floor was written for — see `the fixed point at zero` — and it keeps it.
+      const flooredPercent =
+        requestedPercent >= 0
+          ? Math.max(0, Math.round(requestedPercent))
+          : minLimitPercent;
+      const limitPercent = Math.min(100, flooredPercent);
       const limitW = Math.round((limitPercent * rated) / 100);
 
       const floored =
-        requestedPercent < minLimitPercent
-          ? `, floored at ${minLimitPercent}%`
-          : "";
+        requestedPercent < 0 ? `, floored at ${minLimitPercent}%` : "";
       const reason = `limit ${limitPercent}% (${limitW} W of ${rated} W${floored}, now ${magnitude(powerW)})`;
 
       return {
