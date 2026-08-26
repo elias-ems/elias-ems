@@ -147,6 +147,71 @@ generating.
 Note that the percentage is **of the rating, not of what the array could make
 right now**. 70% at noon is a real cut; 70% at dusk does nothing.
 
+## If your inverter writes every limit to permanent memory
+
+Check this before you turn curtailment on, because it is about your hardware's
+lifetime rather than about how well it works.
+
+Some inverters keep their limit in memory. An **SMA Sunny Boy** will take a new
+one every few seconds indefinitely, which is what lets the array follow your
+house minute by minute.
+
+Others write **every** limit to permanent memory. A **Huawei SUN2000** is the
+one people hit most often. Those writes are finite, and following the house
+would spend a real slice of them on a handful of negative-price afternoons a
+year.
+
+So each array has a setting — *While curtailing, this inverter* — with two
+choices:
+
+| | Follows the house | One fixed step |
+| --- | --- | --- |
+| What it does | recalculated every few seconds | one number, held for the whole episode |
+| Writes per negative-price window | as many as your house moves | **two** — one going in, one coming out |
+| For | SMA and most others | Huawei SUN2000 and anything else with the same problem |
+
+### Picking the fixed limit
+
+Choose *Fixed limit while curtailing (%)* by asking what should cover the house
+while this array is held down:
+
+- **0%** if another array can cover it. Your other inverters pick up the house
+  automatically — see below.
+- **Roughly your baseline load** if this is your only array. Stopping it entirely
+  would mean importing everything at the buying price, which is usually worse
+  than making what you use.
+
+::: warning Don't assume 0% is safe on every inverter
+Some shut their MPPT down completely at 0% and take minutes to come back. If
+yours does, leave a few percent in.
+:::
+
+### The other arrays cover the difference on their own
+
+This is the part that needs no configuring. Say a 5 kW Huawei is stepped to 0%
+and a 4 kW SMA follows the house, which is using 1.5 kW:
+
+1. Prices go negative. The Huawei gets **one** event — 0% — and stops.
+2. The meter swings, because 4 kW of generation just disappeared.
+3. The SMA sees that on the next tick and rises to cover the house — 1.5 kW.
+4. Prices recover. The Huawei gets **one** event — 100% — and everything is back.
+
+The add-on never needs telling that the Huawei stopped. Whatever it is making is
+already inside the grid meter reading, so the SMA balances around it the same way
+it balances around your fridge.
+
+### What a stepped array does *not* do
+
+- **It does not come back mid-episode.** If your EV starts charging while the
+  array is held at 0%, it stays at 0% until prices recover. Handing it back and
+  taking it away again would be two more writes. If that trade is wrong for your
+  house, raise the fixed limit.
+- **It does not follow the price bands.** [Strategies](#the-settings) that relax
+  the limit as the price climbs need gradations, and a stepped inverter has none
+  to offer. Above the threshold it simply generates.
+- **It is not released when its own power sensor goes quiet.** A sensor blip
+  would otherwise cost a write on exactly the hardware this is protecting.
+
 ## Connecting the event to your inverter
 
 Nothing happens until an automation listens. Each curtailable array publishes

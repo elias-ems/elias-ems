@@ -1,11 +1,21 @@
-import { useId } from "react";
-import type { PvEntity, PvEntityErrors } from "../../lib/pv-entities";
-import { isCurtailable, pvLimitEventType, pvSlug } from "../../lib/pv-entities";
+import { useId, useState } from "react";
+import type {
+  PvControlMode,
+  PvEntity,
+  PvEntityErrors,
+} from "../../lib/pv-entities";
+import {
+  isCurtailable,
+  isStepped,
+  PV_CONTROL_MODES,
+  pvLimitEventType,
+  pvSlug,
+} from "../../lib/pv-entities";
 import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
 import EntityAutocomplete from "../EntityAutocomplete";
 import Field from "../Field";
-import { hintStyle, labelStyle } from "../form";
+import { hintStyle, inputStyle, labelStyle } from "../form";
 import EditableList from "./EditableList";
 import EventNameField from "./EventNameField";
 import Section from "./Section";
@@ -54,8 +64,10 @@ export default function PvSection({
             <div style={{ fontSize: "0.875rem" }}>
               {isCurtailable(entity) ? (
                 <>
-                  Curtailable at {entity.ratedPowerW} W —{" "}
-                  <code>{pvLimitEventType(pvSlug(entity))}</code>
+                  {isStepped(entity)
+                    ? `Stepped to ${entity.stepLimitPercent}% of ${entity.ratedPowerW} W`
+                    : `Curtailable at ${entity.ratedPowerW} W`}{" "}
+                  — <code>{pvLimitEventType(pvSlug(entity))}</code>
                 </>
               ) : (
                 "Not curtailable — watched only"
@@ -91,6 +103,11 @@ export default function PvSection({
                 error={errors.energyEntityId}
               />
               <CurtailableField defaultChecked={entity?.curtailable ?? false} />
+              <ControlModeFields
+                mode={entity?.controlMode ?? "modulating"}
+                stepLimitPercent={entity?.stepLimitPercent ?? null}
+                error={errors.stepLimitPercent}
+              />
               <Field
                 name="ratedPowerW"
                 label="Inverter rated power (W)"
@@ -144,5 +161,67 @@ function CurtailableField({ defaultChecked }: { defaultChecked: boolean }) {
         is generating.
       </p>
     </div>
+  );
+}
+
+/**
+ * How often this inverter may be written to, and — when the answer is "rarely" —
+ * the one number it is held at while curtailing.
+ *
+ * The two are one control because the second only means anything under the
+ * second mode, and a field that silently does nothing under the other would be
+ * worse than no field. Controlled, so the step appears the moment the mode is
+ * chosen rather than after a save.
+ */
+function ControlModeFields({
+  mode: savedMode,
+  stepLimitPercent,
+  error,
+}: {
+  mode: PvControlMode;
+  stepLimitPercent: number | null;
+  error?: string;
+}) {
+  const selectId = useId();
+  const [mode, setMode] = useState<PvControlMode>(savedMode);
+  const selected = PV_CONTROL_MODES.find((option) => option.id === mode);
+
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+        <label htmlFor={selectId} style={labelStyle}>
+          While curtailing, this inverter
+        </label>
+        <select
+          id={selectId}
+          name="controlMode"
+          value={mode}
+          onChange={(event) => setMode(event.target.value as PvControlMode)}
+          style={inputStyle()}
+        >
+          {PV_CONTROL_MODES.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {selected && <p style={hintStyle}>{selected.description}</p>}
+      </div>
+
+      {mode === "stepped" && (
+        <Field
+          name="stepLimitPercent"
+          label="Fixed limit while curtailing (%)"
+          type="number"
+          min={0}
+          max={100}
+          step={1}
+          placeholder="e.g. 0"
+          defaultValue={stepLimitPercent ?? ""}
+          error={error}
+          hint="Where this inverter sits for the whole time injection prices are below the threshold. 0 stops it entirely, which is right when another array can cover the house; pick roughly your baseline load instead if this is your only one. Some inverters shut their MPPT down at 0% and take minutes to restart."
+        />
+      )}
+    </>
   );
 }

@@ -41,7 +41,64 @@ export type PvEntityFields = {
    * installation starts being curtailed by an upgrade.
    */
   curtailable: boolean;
+  /**
+   * How often this inverter may be commanded — which decides what it is
+   * commanded *with*.
+   *
+   * `modulating` is the ordinary case: the limit lives in RAM, so it can be
+   * rewritten every few seconds and the array follows the house continuously.
+   *
+   * `stepped` is for an inverter that commits **every** write to non-volatile
+   * memory — a Huawei SUN2000 and others like it. Following the house would
+   * spend its write endurance on a handful of negative-price afternoons a year,
+   * so it is told one fixed limit when curtailment starts and handed back when
+   * it ends, and nothing in between. See `stepLimitPercent`.
+   *
+   * A string rather than a boolean for the reason `CurtailmentStrategyId` and
+   * `PriceSourceKind` are: an inverter that can only be switched rather than
+   * limited, or one that takes limits in coarse steps of its own, should be one
+   * more entry here rather than a second flag to reason about alongside this one.
+   */
+  controlMode: PvControlMode;
+  /**
+   * `stepped` only: the limit to hold this array at while curtailing, in
+   * percent of its rating. Null when nobody has said.
+   *
+   * Deliberately **not** clamped to `minLimitPercent`. That floor exists to keep
+   * the modulating feedback law out of its fixed point at zero, and a stepped
+   * array is not in that loop — it is set to this number and left there. The
+   * separate hardware reason for the floor, an MPPT that drops out at 0%, is
+   * real but is the installer's call, so the settings page warns rather than
+   * silently raising what was typed.
+   */
+  stepLimitPercent: number | null;
 };
+
+/** See `PvEntityFields.controlMode`. */
+export type PvControlMode = "modulating" | "stepped";
+
+export const PV_CONTROL_MODES: Array<{
+  id: PvControlMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "modulating",
+    label: "Follows the house",
+    description:
+      "The limit is recalculated every few seconds so the array makes what the house can absorb. Right for any inverter that keeps its limit in memory — an SMA Sunny Boy and most others.",
+  },
+  {
+    id: "stepped",
+    label: "One fixed step",
+    description:
+      "One command when curtailment starts, one when it ends, and nothing in between. For an inverter that writes every limit to permanent memory — a Huawei SUN2000 and similar — where following the house would wear it out. The other arrays balance the house around this one.",
+  },
+];
+
+export function isPvControlMode(value: unknown): value is PvControlMode {
+  return PV_CONTROL_MODES.some((mode) => mode.id === value);
+}
 
 export type PvEntity = PvEntityFields & { id: string };
 
@@ -72,6 +129,10 @@ function toOptionalPowerW(value: unknown): number | null {
  * `ratedPowerW` and `curtailable` were added later still, and both read as
  * "not configured" when missing — so an installation that predates curtailment
  * keeps behaving exactly as it did.
+ *
+ * `controlMode` and `stepLimitPercent` came last, and read as "modulating, no
+ * step configured". That is the behaviour every existing array already had, so
+ * an upgrade changes nothing about how any of them are commanded.
  */
 export function normalizePvEntity(entity: PvEntity): PvEntity {
   return {
@@ -79,7 +140,28 @@ export function normalizePvEntity(entity: PvEntity): PvEntity {
     title: entity.title?.trim() || entity.powerEntityId,
     ratedPowerW: toOptionalPowerW(entity.ratedPowerW),
     curtailable: entity.curtailable === true,
+    controlMode: isPvControlMode(entity.controlMode)
+      ? entity.controlMode
+      : "modulating",
+    stepLimitPercent: toOptionalPercent(entity.stepLimitPercent),
   };
+}
+
+/**
+ * A whole percentage in 0–100, or null for "not configured".
+ *
+ * Zero is kept here, unlike `toOptionalPowerW` where it collapses to null: a
+ * rating of 0 W makes every percentage meaningless, but a *step* of 0% is the
+ * most obvious thing somebody would want — stop this array entirely while
+ * prices are negative.
+ */
+function toOptionalPercent(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.min(100, Math.max(0, Math.round(parsed)));
 }
 
 /**
@@ -94,6 +176,19 @@ export function isCurtailable<
   TEntity extends Pick<PvEntityFields, "curtailable" | "ratedPowerW">,
 >(entity: TEntity): entity is TEntity & { ratedPowerW: number } {
   return entity.curtailable === true && (entity.ratedPowerW ?? 0) > 0;
+}
+
+/**
+ * Whether this array is commanded once per episode rather than continuously.
+ *
+ * Both conditions again, and for the same shape of reason as `isCurtailable`:
+ * a stepped array with no step configured has nothing to be commanded *with*,
+ * and guessing a number for it would be guessing about somebody's hardware.
+ */
+export function isStepped<
+  TEntity extends Pick<PvEntityFields, "controlMode" | "stepLimitPercent">,
+>(entity: TEntity): entity is TEntity & { stepLimitPercent: number } {
+  return entity.controlMode === "stepped" && entity.stepLimitPercent !== null;
 }
 
 /** The array's slug, with a last-resort fallback so it is never empty. */
@@ -139,6 +234,25 @@ export const DUPLICATE_PV_SLUG_ERROR =
  * a mistyped rating through as "no rating" — which silently makes the array
  * uncurtailable rather than saying what is wrong with it.
  */
+/**
+ * An optional whole percentage. Separate from `readOptionalPowerW` because 0 is
+ * a meaningful answer here — "stop this array entirely" — where a rating of 0 W
+ * is not.
+ */
+function readOptionalPercent(
+  formData: FormData,
+  name: string,
+): { ok: true; value: number | null } | { ok: false } {
+  const raw = formData.get(name)?.toString().trim();
+  if (!raw) return { ok: true, value: null };
+
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    return { ok: false };
+  }
+  return { ok: true, value };
+}
+
 function readOptionalPowerW(
   formData: FormData,
   name: string,
@@ -164,6 +278,11 @@ export function parsePvEntity(
   // case mean "watched, not curtailed".
   const curtailable = formData.get("curtailable") === "on";
   const ratedPowerW = readOptionalPowerW(formData, "ratedPowerW");
+  const rawMode = formData.get("controlMode")?.toString();
+  const controlMode: PvControlMode = isPvControlMode(rawMode)
+    ? rawMode
+    : "modulating";
+  const stepLimitPercent = readOptionalPercent(formData, "stepLimitPercent");
 
   const errors: PvEntityErrors = {};
 
@@ -191,6 +310,21 @@ export function parsePvEntity(
       "Curtailment needs the inverter's rated power — the limit is a percentage of it.";
   }
 
+  if (!stepLimitPercent.ok) {
+    errors.stepLimitPercent =
+      "The fixed limit must be a whole percentage between 0 and 100.";
+  } else if (
+    controlMode === "stepped" &&
+    curtailable &&
+    stepLimitPercent.value === null
+  ) {
+    // Required only where it is actually used. A stepped array that nobody is
+    // curtailing is never commanded at all, so demanding a number for it would
+    // be asking about a decision that is not being made.
+    errors.stepLimitPercent =
+      "A stepped inverter is held at one fixed limit while curtailing — say which.";
+  }
+
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   return {
@@ -202,6 +336,8 @@ export function parsePvEntity(
       // Known good here: an unparseable one is an error above.
       ratedPowerW: ratedPowerW.ok ? ratedPowerW.value : null,
       curtailable,
+      controlMode,
+      stepLimitPercent: stepLimitPercent.ok ? stepLimitPercent.value : null,
     },
   };
 }

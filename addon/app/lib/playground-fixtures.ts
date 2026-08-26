@@ -380,6 +380,8 @@ export function playgroundFixtures(now: number) {
           energyEntityId: "sensor.inverter_energy_total",
           ratedPowerW: 5000,
           curtailable: true,
+          controlMode: "modulating",
+          stepLimitPercent: null,
         },
         {
           id: "carport",
@@ -389,6 +391,8 @@ export function playgroundFixtures(now: number) {
           // Watched but not steerable, which the summary line spells out.
           ratedPowerW: null,
           curtailable: false,
+          controlMode: "modulating",
+          stepLimitPercent: null,
         },
       ] satisfies PvEntity[],
       batteries: [
