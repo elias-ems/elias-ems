@@ -23,6 +23,8 @@ import {
   describePvLimitPublishes,
   forgetPublishedLimit,
   forgetPublishedLimits,
+  isIgnoringItsLimit,
+  MAX_STEPPED_REASSERTS,
   type PvLimitCommand,
   publishPvLimits,
   REASSERT_MS,
@@ -44,6 +46,9 @@ function command(overrides: Partial<PvLimitCommand> = {}): PvLimitCommand {
     released: false,
     // Obeying its 40% limit (2000 W of 5000 W) unless a case says otherwise.
     measuredW: 1900,
+    // Modulating unless a case says otherwise: only a stepped inverter caps
+    // how often a limit it is ignoring may be re-asserted.
+    controlMode: "modulating",
     ...overrides,
   };
 }
@@ -98,6 +103,7 @@ describe("publishPvLimits", () => {
         // keeps it out of an automation, where it is easy to get wrong.
         limit_w: 2000,
         rated_power_w: 5000,
+        control_mode: "modulating",
         released: false,
       },
     ]);
@@ -347,5 +353,76 @@ describe("describePvLimitPublishes", () => {
     ]);
 
     expect(line).toContain("South roof: event failed (connect ECONNREFUSED)");
+  });
+});
+
+describe("a stepped inverter's write budget", () => {
+  /** Ignoring its 40% limit: 4800 W against 2000 W of a 5000 W inverter. */
+  const ignoring = (overrides: Partial<PvLimitCommand> = {}) =>
+    command({ controlMode: "stepped", measuredW: 4800, ...overrides });
+
+  /** How many events a command produced across `rounds` re-assert windows. */
+  async function overWindows(
+    make: () => PvLimitCommand,
+    rounds: number,
+  ): Promise<number> {
+    vi.useFakeTimers();
+    await publishPvLimits([make()]);
+    for (let round = 0; round < rounds; round++) {
+      await vi.advanceTimersByTimeAsync(REASSERT_MS);
+      await publishPvLimits([make()]);
+    }
+    return ha.events.length;
+  }
+
+  it("stops writing after a couple of re-assertions", async () => {
+    // Every one of these is a write to permanent memory. Two is enough to cover
+    // an automation that was merely reloading; past that the cause is something
+    // no number of retries will fix, and continuing would spend the endurance
+    // this mode exists to protect.
+    const events = await overWindows(ignoring, 6);
+
+    expect(events).toBe(1 + MAX_STEPPED_REASSERTS);
+  });
+
+  it("keeps re-asserting for a modulating inverter, whose writes are free", async () => {
+    const events = await overWindows(
+      () => ignoring({ controlMode: "modulating" }),
+      6,
+    );
+
+    expect(events).toBe(7);
+  });
+
+  it("still reports the fault after it has stopped writing", async () => {
+    await overWindows(ignoring, 6);
+
+    // The add-on gives up on fixing it; the log must not give up on saying so,
+    // or a broken automation would go quiet at exactly the wrong moment.
+    expect(isIgnoringItsLimit(ignoring())).toBe(true);
+  });
+
+  it("starts the count again once a genuinely new limit goes out", async () => {
+    vi.useFakeTimers();
+    await publishPvLimits([ignoring()]);
+    await vi.advanceTimersByTimeAsync(REASSERT_MS);
+    await publishPvLimits([ignoring()]);
+    await vi.advanceTimersByTimeAsync(REASSERT_MS);
+    await publishPvLimits([ignoring()]);
+    ha.events.length = 0;
+
+    // Prices moved, so this is a new instruction rather than the same one
+    // repeated — and it deserves its own retries.
+    await publishPvLimits([ignoring({ commandPercent: 30 })]);
+    await vi.advanceTimersByTimeAsync(REASSERT_MS);
+    await publishPvLimits([ignoring({ commandPercent: 30 })]);
+
+    expect(ha.events).toHaveLength(2);
+  });
+
+  it("says nothing about an array that is obeying", async () => {
+    await publishPvLimits([command({ controlMode: "stepped" })]);
+
+    expect(isIgnoringItsLimit(command({ controlMode: "stepped" }))).toBe(false);
   });
 });

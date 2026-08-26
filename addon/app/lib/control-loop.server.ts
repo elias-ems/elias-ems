@@ -62,6 +62,7 @@ import {
   describePvLimitPublishes,
   forgetPublishedLimit,
   forgetPublishedLimits,
+  isIgnoringItsLimit,
   publishPvLimits,
 } from "./pv-limits.server";
 import { toNumber } from "./readings.server";
@@ -293,6 +294,8 @@ async function readSnapshots(config: TickConfig): Promise<Snapshots> {
       powerW: toNumber(stateOf(entity.powerEntityId)),
       ratedPowerW: entity.ratedPowerW,
       curtailable: entity.curtailable,
+      controlMode: entity.controlMode,
+      stepLimitPercent: entity.stepLimitPercent,
     })),
     productionPricePerKwh: priceRead.now?.productionPerKwh ?? null,
     currency: priceRead.forecast?.currency ?? "EUR",
@@ -415,29 +418,37 @@ async function tickCurtailment(
   if (!plan.offTarget) state.offTargetSinceMs = null;
   else if (state.offTargetSinceMs === null) state.offTargetSinceMs = nowMs;
 
-  const publishes = await publishPvLimits(
-    plan.decisions.flatMap((decision) => {
-      const slug = inputs.pvSlugs.get(decision.arrayId);
-      const array = inputs.arrays.find(
-        (candidate) => candidate.id === decision.arrayId,
-      );
-      if (!slug || !array?.ratedPowerW) return [];
-      return [
-        {
-          arrayId: decision.arrayId,
-          title: decision.title,
-          slug,
-          ratedPowerW: array.ratedPowerW,
-          commandPercent: decision.commandPercent,
-          released: decision.released,
-          // The one piece of feedback the publish layer gets: without it, an
-          // inverter that quietly dropped its limit would never be corrected,
-          // because the plan computes the same percent either way.
-          measuredW: array.powerW,
-        },
-      ];
-    }),
-  );
+  const commands = plan.decisions.flatMap((decision) => {
+    const slug = inputs.pvSlugs.get(decision.arrayId);
+    const array = inputs.arrays.find(
+      (candidate) => candidate.id === decision.arrayId,
+    );
+    if (!slug || !array?.ratedPowerW) return [];
+    return [
+      {
+        arrayId: decision.arrayId,
+        title: decision.title,
+        slug,
+        ratedPowerW: array.ratedPowerW,
+        commandPercent: decision.commandPercent,
+        released: decision.released,
+        controlMode: array.controlMode,
+        // The one piece of feedback the publish layer gets: without it, an
+        // inverter that quietly dropped its limit would never be corrected,
+        // because the plan computes the same percent either way.
+        measuredW: array.powerW,
+      },
+    ];
+  });
+
+  // Asked before publishing, because publishing is what updates the memory this
+  // reads. Kept separate from the publish outcome on purpose: a stepped
+  // inverter stops being *written* to after a couple of re-assertions, and the
+  // fault has to stay visible for as long as it lasts rather than disappearing
+  // from the log at the same moment the add-on gives up on fixing it.
+  const ignoring = commands.filter(isIgnoringItsLimit).map((c) => c.title);
+
+  const publishes = await publishPvLimits(commands);
 
   // Restart the settle clock whenever a *new* number has gone to the hardware,
   // so that `settleSeconds` is the shortest time between two moves and not
@@ -470,17 +481,30 @@ async function tickCurtailment(
     `${plan.summary} (${inputs.provenance})`,
     ...plan.warnings.map((warning) => `! ${warning}`),
     ...plan.decisions.map((decision) => decision.message),
+    ...(ignoring.length > 0
+      ? [
+          `! ${ignoring.join(", ")} generating well above the limit given — check the automation is running and that the inverter accepts it.`,
+        ]
+      : []),
     ...(sent ? [sent] : []),
   ];
 
   const troubled = publishes.some((publish) => publish.status === "failed");
-  // A limit that had to be restated because the array is ignoring it is a
-  // warning, not routine traffic: it means an automation is missing, listening
-  // for an old name, or an inverter is not honouring what it was sent — the
-  // one failure this feature otherwise cannot see.
+  // An array ignoring its limit is a warning, not routine traffic: it means an
+  // automation is missing, listening for an old name, or an inverter is not
+  // honouring what it was sent — the one failure this feature otherwise cannot
+  // see.
+  //
+  // Driven by `ignoring` rather than by what was published, and the difference
+  // matters for a stepped inverter: the add-on stops *writing* to one after a
+  // couple of re-assertions, and the fault must not vanish from the log at the
+  // same moment it gives up trying to fix it.
   log(
     "pv-curtailment",
-    plan.warnings.length > 0 || troubled || anyNotInForce(publishes)
+    plan.warnings.length > 0 ||
+      troubled ||
+      ignoring.length > 0 ||
+      anyNotInForce(publishes)
       ? "warn"
       : "info",
     lines.join("\n"),
@@ -591,6 +615,7 @@ export async function releasePvArrays(): Promise<void> {
       ratedPowerW: array.ratedPowerW,
       commandPercent: 100,
       released: true,
+      controlMode: array.controlMode,
       // Nothing to check against at full output; `force` is what carries this.
       measuredW: null,
       // Past the "nothing changed" check, for the same reason a battery's
@@ -642,6 +667,7 @@ export async function releasePvArray(array: PvEntity): Promise<void> {
       ratedPowerW: array.ratedPowerW,
       commandPercent: 100,
       released: true,
+      controlMode: array.controlMode,
       // Nothing to check against at full output; `force` is what carries this.
       measuredW: null,
       force: true,

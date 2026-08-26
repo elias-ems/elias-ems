@@ -22,7 +22,7 @@
  * is different. See `notInForce`.
  */
 import { fireHaEvent } from "./ha.server";
-import { pvLimitEventType } from "./pv-entities";
+import { type PvControlMode, pvLimitEventType } from "./pv-entities";
 
 /**
  * A limit goes out when it is **new, when it changes, and when the array is
@@ -53,6 +53,17 @@ import { pvLimitEventType } from "./pv-entities";
  * with an explanation attached rather than an event every tick.
  */
 export const REASSERT_MS = 5 * 60_000;
+
+/**
+ * How many times a **stepped** inverter's limit may be re-asserted before the
+ * add-on stops writing and settles for saying so in the log.
+ *
+ * Two, because the plausible innocent explanations — an automation reloading,
+ * Home Assistant restarting mid-tick — are gone within a few minutes, and past
+ * that the cause is something no number of retries will fix. A modulating
+ * inverter has no such cap: its writes are free.
+ */
+export const MAX_STEPPED_REASSERTS = 2;
 
 /**
  * How far above its limit an array may measure before the limit counts as not
@@ -118,6 +129,12 @@ export type PvLimitCommand = {
   /** Whether this is the add-on letting go rather than steering. */
   released: boolean;
   /**
+   * How often this inverter may be written to. Decides whether a limit it is
+   * ignoring is re-asserted indefinitely or only a couple of times; see
+   * `MAX_STEPPED_REASSERTS`.
+   */
+  controlMode: PvControlMode;
+  /**
    * What the array is actually generating right now, in W, or null when its
    * sensor has no number. The one piece of feedback this module gets, and what
    * `notInForce` is built on.
@@ -143,7 +160,24 @@ export type PvLimitCommand = {
  * and publishing on the first tick is the right recovery rather than a lost
  * optimisation.
  */
-const published = new Map<string, { percent: number; at: number }>();
+const published = new Map<
+  string,
+  {
+    percent: number;
+    at: number;
+    /**
+     * How many times this exact limit has been re-asserted because the array
+     * was ignoring it. Reset whenever a genuinely new limit goes out.
+     *
+     * Only meaningful for a stepped inverter, and there it is the whole
+     * safeguard: re-asserting into a house where nothing is listening would
+     * otherwise write to permanent memory every `REASSERT_MS` for as long as
+     * the price stayed negative — a few hundred writes across an afternoon,
+     * spent on an automation that is not going to start working on its own.
+     */
+    reasserts: number;
+  }
+>();
 
 /** Test-only, and used by a release: forget what every array was last told. */
 export function forgetPublishedLimits(): void {
@@ -225,10 +259,36 @@ function publishReason(
   // house where nothing is listening gets a slow drip rather than an event per
   // tick — which would be worse than the timer this replaced.
   if (notInForce(command, percent) && now - last.at >= REASSERT_MS) {
+    // For an inverter that commits every write to permanent memory, a drip is
+    // still a leak. Say it a couple of times in case the automation was merely
+    // reloading, then stop *writing* — the tick keeps logging the warning
+    // every time it sees it, so the fault stays visible without costing
+    // anything. Observe always, write rarely.
+    if (
+      command.controlMode === "stepped" &&
+      last.reasserts >= MAX_STEPPED_REASSERTS
+    ) {
+      return null;
+    }
     return "not-in-force";
   }
 
   return null;
+}
+
+/**
+ * Whether this array is ignoring its limit, regardless of whether anything is
+ * going to be written about it.
+ *
+ * Separate from `publishReason` because the two questions genuinely differ for
+ * a stepped inverter: the log should say so on every tick, and the bus should
+ * hear about it at most twice.
+ */
+export function isIgnoringItsLimit(command: PvLimitCommand): boolean {
+  if (command.commandPercent === null) return false;
+  const percent = Math.round(command.commandPercent);
+  const last = published.get(command.arrayId);
+  return last?.percent === percent && notInForce(command, percent);
 }
 
 async function publishOne(command: PvLimitCommand): Promise<PvLimitPublish> {
@@ -260,6 +320,11 @@ async function publishOne(command: PvLimitCommand): Promise<PvLimitPublish> {
       limit_percent: percent,
       limit_w: Math.round((percent * command.ratedPowerW) / 100),
       rated_power_w: command.ratedPowerW,
+      // Which kind of inverter this is for. An automation does not usually need
+      // it — every event it receives is already a real transition — but it makes
+      // a trace readable, and it lets one automation serve both kinds if
+      // somebody writes it that way.
+      control_mode: command.controlMode,
       // True when the add-on is stepping out of the way rather than steering.
       // The percentage is 100 either way, but an automation that has to clear
       // a limit register — rather than write 100 into it — needs to tell
@@ -267,7 +332,16 @@ async function publishOne(command: PvLimitCommand): Promise<PvLimitPublish> {
       released: command.released,
     });
 
-    published.set(command.arrayId, { percent, at: now });
+    // A re-assertion is the *same* limit said again, so it carries the count
+    // forward; anything else is a new limit and starts it over.
+    published.set(command.arrayId, {
+      percent,
+      at: now,
+      reasserts:
+        reason === "not-in-force"
+          ? (published.get(command.arrayId)?.reasserts ?? 0) + 1
+          : 0,
+    });
     return { ...base, percent, status: "published", reason };
   } catch (error) {
     // Deliberately not recorded: an event that never made it onto the bus must

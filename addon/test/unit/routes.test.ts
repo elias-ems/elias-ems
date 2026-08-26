@@ -191,7 +191,13 @@ describe("GET / (dashboard)", () => {
     const { addPvEntity } = await import("../../app/lib/pv-entities.server");
     // Uncurtailable and unrated: these cases are about what the dashboard
     // shows, and curtailment has its own suites.
-    return addPvEntity({ ...fields, ratedPowerW: null, curtailable: false });
+    return addPvEntity({
+      ...fields,
+      ratedPowerW: null,
+      curtailable: false,
+      controlMode: "modulating",
+      stepLimitPercent: null,
+    });
   }
 
   beforeEach(async () => {

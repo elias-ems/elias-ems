@@ -25,6 +25,10 @@ function array(overrides: Partial<PvArraySnapshot> = {}): PvArraySnapshot {
     // Curtailable unless a case says otherwise: these are about the
     // arithmetic, and an array nothing can command sits out of all of it.
     curtailable: true,
+    // Modulating unless a case says otherwise: stepped arrays leave the
+    // feedback law entirely and have a describe block of their own.
+    controlMode: "modulating",
+    stepLimitPercent: null,
     ...overrides,
   };
 }
@@ -713,5 +717,156 @@ describe("the strategies above the threshold", () => {
         commandPercent: 40,
       });
     });
+  });
+});
+
+describe("stepped inverters", () => {
+  /** A Huawei-shaped array: written to permanently, so held at one number. */
+  const stepped = (overrides: Partial<PvArraySnapshot> = {}) =>
+    array({
+      id: "huawei",
+      title: "Huawei",
+      ratedPowerW: 5000,
+      controlMode: "stepped",
+      stepLimitPercent: 20,
+      ...overrides,
+    });
+
+  it("takes its step once there is export to prevent", () => {
+    const plan = planCurtailment(
+      input({ gridPowerW: -2000, arrays: [stepped({ powerW: 4000 })] }),
+    );
+
+    // No arithmetic — 20% of 5000 W is the number that was typed in, and it is
+    // the same number whatever the meter says.
+    expect(plan.decisions[0]).toMatchObject({
+      action: "curtail",
+      limitPercent: 20,
+      limitW: 1000,
+      commandPercent: 20,
+    });
+  });
+
+  it("stays where it is when the house swallows everything", () => {
+    // An EV starts charging mid-episode. Handing the array back would cost a
+    // write, and taking it away again when the EV stops would cost another.
+    const plan = planCurtailment(
+      input({ gridPowerW: 3000, arrays: [stepped({ powerW: 1000 })] }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "hold",
+      commandPercent: null,
+    });
+    expect(plan.decisions[0].reason).toMatch(/no export to prevent/);
+  });
+
+  it("leaves the modulating arrays to balance the house around it", () => {
+    // The Huawei is already stepped to 1000 W. The house is using 2500 W, so
+    // the SMA should make the remaining 1500 W — not 2500 W, which is what
+    // counting the Huawei into the feedback law would ask for.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -1500,
+        arrays: [
+          stepped({ powerW: 1000 }),
+          array({
+            id: "sma",
+            title: "SMA",
+            powerW: 3000,
+            ratedPowerW: 4000,
+          }),
+        ],
+      }),
+    );
+
+    expect(plan.curtailablePvW).toBe(3000);
+    expect(plan.combinedAllowedW).toBe(1500);
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 20 });
+    expect(plan.decisions[1]).toMatchObject({ limitPercent: 38, limitW: 1520 });
+  });
+
+  it("is commanded even when its own power sensor is quiet", () => {
+    // A modulating array is released on a missing reading, because assuming a
+    // number would corrupt the feedback law. A stepped array is commanded with
+    // a number that was typed in, so the reading is not in the way — and
+    // releasing it over a sensor blip would spend a write on the very hardware
+    // this mode exists to protect.
+    const plan = planCurtailment(
+      input({ gridPowerW: -2000, arrays: [stepped({ powerW: null })] }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "curtail",
+      commandPercent: 20,
+    });
+  });
+
+  it("is never modulated when no step has been configured", () => {
+    // A hand-edited file. Falling back to the feedback law would do the one
+    // thing the mode exists to prevent.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -2000,
+        arrays: [stepped({ powerW: 4000, stepLimitPercent: null })],
+      }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "hold",
+      commandPercent: null,
+    });
+    expect(plan.decisions[0].reason).toMatch(/no fixed limit configured/);
+  });
+
+  it("still steps when it is the only curtailable array", () => {
+    // Nothing to modulate is not the same as nothing to do — a house whose one
+    // curtailable inverter is stepped has no feedback loop and still has a step.
+    const plan = planCurtailment(
+      input({ gridPowerW: -3000, arrays: [stepped({ powerW: 4000 })] }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({ commandPercent: 20 });
+    expect(plan.summary).not.toMatch(/releasing/);
+  });
+
+  it("is not raised to the minimum limit", () => {
+    // `minLimitPercent` keeps the feedback law out of its fixed point at zero,
+    // and a stepped array is not in that loop. Somebody asking for 0% means it.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -2000,
+        arrays: [stepped({ powerW: 4000, stepLimitPercent: 0 })],
+      }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 0, limitW: 0 });
+  });
+
+  it("generates freely in the marginal region above the threshold", () => {
+    // A band is a gradation and a stepped inverter has none to offer, so
+    // holding it back for a kWh that still earns something is the worse trade.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -3000,
+        productionPricePerKwh: 0.005,
+        arrays: [
+          stepped({ powerW: 4000 }),
+          array({ id: "sma", title: "SMA", powerW: 3000, ratedPowerW: 4000 }),
+        ],
+        config: {
+          ...DEFAULT_CURTAILMENT_CONFIG,
+          enabled: true,
+          strategy: "soft-ceiling",
+        },
+      }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "release",
+      commandPercent: 100,
+    });
+    // The modulating array still takes the band's ceiling.
+    expect(plan.decisions[1]).toMatchObject({ limitPercent: 70 });
   });
 });

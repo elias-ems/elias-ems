@@ -144,10 +144,15 @@ array back.
 | **Total energy generated (kWh)** | Cumulative production counter. |
 | **Current power (W)** | Instantaneous production. |
 | **Allow curtailing this array** | Whether the add-on may ever hold it back. Off by default. |
+| **While curtailing, this inverter** | Whether it follows the house continuously, or takes one fixed step. |
 | **Inverter rated power (W)** | The inverter's rated AC output. Required once the box above is ticked. |
+| **Fixed limit while curtailing (%)** | Only for a stepped inverter: the one limit it is held at. |
 
 Curtailment is commanded as a percentage of that rating, which is why it has to
-be typed in — a power sensor does not publish one. Leave the box unticked for an
+be typed in — a power sensor does not publish one. Pick **One fixed step** if
+your inverter writes every limit to permanent memory, as a Huawei SUN2000 does;
+[PV curtailment](/guide/pv-curtailment#if-your-inverter-writes-every-limit-to-permanent-memory)
+explains what changes and how to choose the limit. Leave the box unticked for an
 array you want on the dashboard but never curtailed; it still counts towards what
 the house is generating.
 

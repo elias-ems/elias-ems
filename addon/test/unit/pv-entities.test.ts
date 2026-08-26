@@ -26,6 +26,8 @@ function fields(overrides: Partial<PvEntityFields> = {}): PvEntityFields {
     energyEntityId: "sensor.e",
     ratedPowerW: null,
     curtailable: false,
+    controlMode: "modulating",
+    stepLimitPercent: null,
     ...overrides,
   };
 }
@@ -93,6 +95,8 @@ describe("listPvEntities", () => {
         energyEntityId: "sensor.e",
         ratedPowerW: null,
         curtailable: false,
+        controlMode: "modulating",
+        stepLimitPercent: null,
       },
     ]);
   });

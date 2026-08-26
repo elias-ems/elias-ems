@@ -80,6 +80,8 @@ const PV_ARRAY = {
   energyEntityId: "sensor.inverter_energy_total",
   ratedPowerW: 5000,
   curtailable: true,
+  controlMode: "modulating" as const,
+  stepLimitPercent: null,
 };
 
 /**

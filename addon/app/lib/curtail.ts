@@ -73,6 +73,7 @@
  */
 
 import type { CurtailmentBand, CurtailmentConfig } from "./curtailment";
+import type { PvControlMode } from "./pv-entities";
 
 export type PvArraySnapshot = {
   id: string;
@@ -87,7 +88,28 @@ export type PvArraySnapshot = {
    * reading — but it is not part of the plan.
    */
   curtailable: boolean;
+  /** How often this inverter may be written to. See `PvEntityFields`. */
+  controlMode: PvControlMode;
+  /** `stepped` only: the fixed limit to hold it at, in percent of its rating. */
+  stepLimitPercent: number | null;
 };
+
+/**
+ * An array that is commanded once per episode rather than continuously, with
+ * both of the numbers that takes.
+ */
+type SteppedSnapshot = PvArraySnapshot & {
+  ratedPowerW: number;
+  stepLimitPercent: number;
+};
+
+function isStepped(array: PvArraySnapshot): array is SteppedSnapshot {
+  return (
+    array.controlMode === "stepped" &&
+    array.stepLimitPercent !== null &&
+    (array.ratedPowerW ?? 0) > 0
+  );
+}
 
 export type PvAction =
   /** Hold this array below its rating. */
@@ -316,8 +338,44 @@ export const NOT_CURTAILABLE_REASON = "not curtailable";
  */
 function participates(array: PvArraySnapshot): boolean {
   return (
-    array.curtailable && (array.ratedPowerW ?? 0) > 0 && array.powerW !== null
+    array.curtailable &&
+    (array.ratedPowerW ?? 0) > 0 &&
+    array.powerW !== null &&
+    // A stepped array is held at a number somebody typed in, so it is not part
+    // of the feedback law at all. It cancels out of it exactly the way an
+    // uncurtailable array does — it is generating something, that something is
+    // already inside the grid reading, and nothing here is going to move it.
+    // Counting it into `C` would ask the modulating arrays to give up what it
+    // is producing on top of what the meter already shows.
+    array.controlMode !== "stepped"
   );
+}
+
+/**
+ * A stepped array taking its step: the one command it gets per episode.
+ *
+ * No arithmetic, because that is the point. The number was typed in against
+ * this inverter's rating, and it does not move while the price stays below the
+ * threshold — which is what keeps the write count at one going in and one
+ * coming out.
+ */
+function step(array: SteppedSnapshot, note = ""): PvArrayDecision {
+  const percent = array.stepLimitPercent;
+  const limitW = Math.round((percent * array.ratedPowerW) / 100);
+  const reason = `step ${percent}% (${limitW} W of ${array.ratedPowerW} W)${note}`;
+
+  return {
+    arrayId: array.id,
+    title: array.title,
+    action: percent >= 100 ? ("release" as const) : ("curtail" as const),
+    limitPercent: percent,
+    limitW,
+    commandPercent: percent,
+    released: percent >= 100,
+    currentW: array.powerW,
+    reason,
+    message: `${array.title}: ${reason}`,
+  };
 }
 
 export function planCurtailment(input: CurtailInput): CurtailPlan {
@@ -349,14 +407,45 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     );
   }
 
+  /**
+   * Every path below goes through here, which is what keeps the two kinds of
+   * array from drifting apart: one place decides what a stepped inverter does
+   * under each rule, rather than each rule remembering to ask.
+   *
+   * A stepped array holds by default. "Say nothing" leaves whatever it was last
+   * told standing, which is precisely what it should do between the one command
+   * that starts an episode and the one that ends it.
+   */
   const decide = (
     reasonFor: (array: PvArraySnapshot) => PvArrayDecision,
+    steppedReasonFor: (array: SteppedSnapshot) => PvArrayDecision = (array) =>
+      hold(
+        array,
+        "stepped — leaving its step where it is",
+        array.stepLimitPercent,
+      ),
   ): PvArrayDecision[] =>
     arrays.map((array) => {
       if (!array.curtailable) return hold(array, NOT_CURTAILABLE_REASON);
       if ((array.ratedPowerW ?? 0) <= 0) {
         return hold(array, "no rated power configured");
       }
+
+      // Deliberately before the power-reading guard below. A stepped array is
+      // commanded with a number that was typed in rather than derived from a
+      // reading, so its own sensor going quiet is no reason to touch it — and
+      // releasing it over a sensor blip would spend a write on the very
+      // hardware this mode exists to protect.
+      if (array.controlMode === "stepped") {
+        // Somebody said this inverter must not be written to continuously but
+        // never said what to hold it at. Modulating it anyway would do the one
+        // thing the mode exists to prevent, so it is left alone entirely.
+        if (!isStepped(array)) {
+          return hold(array, "stepped, but no fixed limit configured");
+        }
+        return steppedReasonFor(array);
+      }
+
       if (array.powerW === null) {
         return release(array, "power reading unavailable");
       }
@@ -410,26 +499,36 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
       // stays cleared. A ceiling moves when the price moves into another band,
       // which is its own pacing and does not want a second one on top.
       offTarget: false,
-      decisions: decide((array) => {
-        const rated = array.ratedPowerW as number;
-        const limitW = Math.round((ceilingPercent * rated) / 100);
-        const reason = `ceiling ${ceilingPercent}% (${limitW} W of ${rated} W, now ${magnitude(array.powerW as number)})`;
+      decisions: decide(
+        (array) => {
+          const rated = array.ratedPowerW as number;
+          const limitW = Math.round((ceilingPercent * rated) / 100);
+          const reason = `ceiling ${ceilingPercent}% (${limitW} W of ${rated} W, now ${magnitude(array.powerW as number)})`;
 
-        return {
-          arrayId: array.id,
-          title: array.title,
-          action:
-            ceilingPercent >= 100 ? ("release" as const) : ("curtail" as const),
-          limitPercent: ceilingPercent,
-          limitW,
-          commandPercent: ceilingPercent,
-          released: ceilingPercent >= 100,
-          currentW: array.powerW,
-          reason,
-          message: `${array.title}: ${reason}`,
-        };
-      }),
-      summary: `${priceClause}. Soft ceiling — holding every array at ${ceilingPercent}% of its rating.`,
+          return {
+            arrayId: array.id,
+            title: array.title,
+            action:
+              ceilingPercent >= 100
+                ? ("release" as const)
+                : ("curtail" as const),
+            limitPercent: ceilingPercent,
+            limitW,
+            commandPercent: ceilingPercent,
+            released: ceilingPercent >= 100,
+            currentW: array.powerW,
+            reason,
+            message: `${array.title}: ${reason}`,
+          };
+        },
+        // The marginal region is exactly where a fixed step is the wrong tool:
+        // the whole point of a band is a gradation, and a stepped inverter has
+        // no gradations to offer. Spending a write to hold it back for a kWh
+        // that still earns something is the worse trade, so it generates.
+        (array) =>
+          release(array, "stepped — not worth a write above the threshold"),
+      ),
+      summary: `${priceClause}. Soft ceiling — holding every modulating array at ${ceilingPercent}% of its rating.`,
       warnings: [],
     };
   }
@@ -462,7 +561,17 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     0,
   );
 
-  if (participating.length === 0) {
+  /**
+   * Arrays that take a step rather than following the meter. Counted here
+   * because "nothing to modulate" and "nothing to do" are different states: a
+   * house whose only curtailable inverter is a stepped one has no feedback loop
+   * to run and still has a step to take.
+   */
+  const steppedCount = configured.filter(
+    (array) => array.controlMode === "stepped",
+  ).length;
+
+  if (participating.length === 0 && steppedCount === 0) {
     return releaseAll(
       input,
       `${priceClause}, but no curtailable array has a usable power reading — releasing them.`,
@@ -560,48 +669,71 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     0,
   );
 
-  const decisions = decide((array) => {
-    const rated = array.ratedPowerW as number;
-    const powerW = array.powerW as number;
+  const decisions = decide(
+    (array) => {
+      const rated = array.ratedPowerW as number;
+      const powerW = array.powerW as number;
 
-    // Rating-proportional only when nothing is generating at all — at night, or
-    // with every array already pinned at the floor. Without the fallback the
-    // split would be 0/0; with it as the *primary* rule the shape of the array
-    // would be ignored whenever it mattered most.
-    const share =
-      generating > 0
-        ? (combinedAllowedW * Math.max(0, powerW)) / generating
-        : (combinedAllowedW * rated) / ratedTotal;
+      // Rating-proportional only when nothing is generating at all — at night, or
+      // with every array already pinned at the floor. Without the fallback the
+      // split would be 0/0; with it as the *primary* rule the shape of the array
+      // would be ignored whenever it mattered most.
+      const share =
+        generating > 0
+          ? (combinedAllowedW * Math.max(0, powerW)) / generating
+          : (combinedAllowedW * rated) / ratedTotal;
 
-    const requestedPercent = (share / rated) * 100;
-    const limitPercent = Math.min(
-      100,
-      Math.max(minLimitPercent, Math.round(requestedPercent)),
-    );
-    const limitW = Math.round((limitPercent * rated) / 100);
+      const requestedPercent = (share / rated) * 100;
+      const limitPercent = Math.min(
+        100,
+        Math.max(minLimitPercent, Math.round(requestedPercent)),
+      );
+      const limitW = Math.round((limitPercent * rated) / 100);
 
-    const floored =
-      requestedPercent < minLimitPercent
-        ? `, floored at ${minLimitPercent}%`
-        : "";
-    const reason = `limit ${limitPercent}% (${limitW} W of ${rated} W${floored}, now ${magnitude(powerW)})`;
+      const floored =
+        requestedPercent < minLimitPercent
+          ? `, floored at ${minLimitPercent}%`
+          : "";
+      const reason = `limit ${limitPercent}% (${limitW} W of ${rated} W${floored}, now ${magnitude(powerW)})`;
 
-    return {
-      arrayId: array.id,
-      title: array.title,
-      action: limitPercent >= 100 ? ("release" as const) : ("curtail" as const),
-      limitPercent,
-      limitW,
-      commandPercent: limitPercent,
-      // A limit that has come back to 100% is the add-on stepping out of the
-      // way, and an automation clearing a register needs to hear that as
-      // clearly as it heard the limit going on.
-      released: limitPercent >= 100,
-      currentW: powerW,
-      reason,
-      message: `${array.title}: ${reason}`,
-    };
-  });
+      return {
+        arrayId: array.id,
+        title: array.title,
+        action:
+          limitPercent >= 100 ? ("release" as const) : ("curtail" as const),
+        limitPercent,
+        limitW,
+        commandPercent: limitPercent,
+        // A limit that has come back to 100% is the add-on stepping out of the
+        // way, and an automation clearing a register needs to hear that as
+        // clearly as it heard the limit going on.
+        released: limitPercent >= 100,
+        currentW: powerW,
+        reason,
+        message: `${array.title}: ${reason}`,
+      };
+    },
+    // The step is taken only against **export**, not against being off target in
+    // either direction. Two consequences, and both are the point of the mode:
+    //
+    // Importing past the target means the house is swallowing everything the
+    // arrays make, so there is nothing being sold at a loss and nothing to hold
+    // back — and once stepped, this branch holding is what leaves the array where
+    // it is rather than handing it back the moment a load switches on. It stays
+    // down until the price recovers, which is one write in and one write out.
+    //
+    // On the way in, the same test means a surplus the battery is quietly
+    // absorbing never costs a write at all: the meter is inside the deadband, so
+    // this is never reached.
+    (array) =>
+      offBy <= -deadbandW
+        ? step(array)
+        : hold(
+            array,
+            "stepped — no export to prevent, holding its step",
+            array.stepLimitPercent,
+          ),
+  );
 
   return {
     curtailing: true,

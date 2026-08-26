@@ -18,13 +18,15 @@ Tracked in [issue #2](https://github.com/elias-ems/elias-ems/issues/2).
 
 ### The arrays — `pv-entities.json`
 
-Curtailment adds two fields to a PV array. The rest of the record is what the
+Curtailment adds four fields to a PV array. The rest of the record is what the
 dashboard already used.
 
 | Field | Label in the UI | Meaning |
 | --- | --- | --- |
 | `curtailable` | Allow curtailing this array | Whether a limit may ever be published for it |
 | `ratedPowerW` | Inverter rated power (W) | The inverter's rated AC output |
+| `controlMode` | While curtailing, this inverter | `modulating` or `stepped` — see [Inverters that cannot be written to often](#inverters-that-cannot-be-written-to-often) |
+| `stepLimitPercent` | Fixed limit while curtailing (%) | `stepped` only: the one limit it is held at |
 
 **The rating has to be typed in, because there is nowhere to read it from.** A
 power sensor publishes no rating, and taking the highest value ever observed
@@ -45,6 +47,112 @@ Titles now have to be unique after slugification, for the reason [battery
 titles do](battery-control.md): the title is what the event type is built from,
 so "South roof" and "south-roof" would be two arrays taking each other's limits
 with nothing anywhere reporting a problem.
+
+## Inverters that cannot be written to often
+
+Some inverters keep their limit in RAM. An SMA Sunny Boy will take a new one
+every few seconds for as long as you like, and `modulating` — the default — does
+exactly that: the array follows the house continuously.
+
+Others commit **every** write to non-volatile memory. A Huawei SUN2000 is the
+common example. Following the house there would spend a real hardware budget on
+a handful of negative-price afternoons a year, and there is no way to ask the
+inverter for its remaining write cycles back.
+
+So the mode is not really "may I dim this array". It is **how often may I write
+to it**, and the fixed setpoint is the consequence rather than the point.
+
+`stepped` gives such an array one command when curtailment starts and one when
+it ends, and nothing at all in between:
+
+| | modulating | stepped |
+| --- | --- | --- |
+| Value | recomputed every tick from the meter | `stepLimitPercent`, typed in |
+| Writes per episode | as many as the house moves | **two** |
+| In the feedback law | yes | no — it cancels out |
+| Bands above the threshold | followed | ignored, released instead |
+
+### Why it needs no new arithmetic
+
+A stepped array is set to a fixed value and then left alone, which from the
+modulating arrays' point of view is **exactly what an uncurtailable array already
+is**: it is generating something, that something is already inside the grid
+reading, and nothing is going to move it in response to the meter. So it drops
+out of `C` and cancels, precisely like the `N` term:
+
+    C_allowed = C_modulating + (G - G_target)
+
+Worked through — a 5 kW Huawei stepped to 0%, a 4 kW SMA modulating, house
+using 1.5 kW:
+
+| | Huawei | SMA | meter |
+| --- | --- | --- | --- |
+| Before | 4000 W | 3000 W | −5500 W |
+| After the one dim write | 0 W | 3000 W | −1500 W |
+| Next tick: `3000 + (−1500)` = 1500 W → SMA to 38% | 0 W | 1500 W | ≈ 0 W |
+
+The SMA absorbs the Huawei's disappearance automatically, because the Huawei was
+never anything to it but a number inside `G`.
+
+### Where the writes are kept down
+
+Four things would otherwise spend them, and each is handled:
+
+- **The value moving.** It cannot: the step is a number that was typed in, and
+  it does not depend on the meter.
+- **The bands.** `soft-ceiling` and `graded-export` move their target as the
+  price crosses a band edge, which would be several writes a day. A stepped
+  array therefore **ignores bands entirely and behaves as `threshold`**,
+  whatever the house strategy is — it takes its step below the threshold and is
+  released above it. A band is a gradation and a stepped inverter has none to
+  offer, so holding it back for a kWh that still earns something is the worse
+  trade.
+- **Being off target in the wrong direction.** The step is taken against
+  **export**, not against being off target either way. Importing past the target
+  means the house is swallowing everything, so there is nothing being sold at a
+  loss — and once stepped, that same test is what leaves the array down rather
+  than handing it back the moment a load switches on. It stays down until the
+  price recovers.
+- **Re-assertion.** An array visibly ignoring its limit is normally restated
+  every `REASSERT_MS` for as long as it keeps ignoring it. For a stepped
+  inverter that is a few hundred writes across an afternoon, spent on an
+  automation that is not going to start working on its own — so it is said at
+  most `MAX_STEPPED_REASSERTS` times and then only *logged*. The warning
+  continues on every tick. **Observe always, write rarely.**
+
+A surplus the battery is quietly absorbing never costs a write either: the meter
+stays inside the deadband, so the decision is never reached.
+
+### What it costs
+
+Two things, both accepted deliberately.
+
+**Self-consumption during an episode.** A stepped array stays down for the whole
+negative-price window even if a large load arrives that could have used it. Since
+the value is one number on the settings page, somebody who knows their afternoons
+can simply set it higher.
+
+**A write per add-on restart.** Nothing about what was published is persisted —
+see the note on the `published` map — so a restart republishes on the first
+tick. One write per restart is nothing against an endurance budget, and the
+alternative is a persisted state that a crash could quietly turn into a lie.
+
+### Two ways it is deliberately unlike a modulating array
+
+- **A missing power reading does not release it.** A modulating array is released
+  when its own sensor goes quiet, because assuming a number would corrupt the
+  feedback law. A stepped array is commanded with a number that was typed in, so
+  the reading is not in the way — and releasing it over a sensor blip would spend
+  a write on the very hardware the mode exists to protect.
+- **`minLimitPercent` does not clamp the step.** That floor keeps the feedback
+  law out of [its fixed point at zero](#the-fixed-point-at-zero), and a stepped
+  array is not in that loop. The separate hardware reason — an MPPT that drops
+  out at 0% — is real, so the settings page warns rather than silently raising
+  what was typed.
+
+A stepped array marked curtailable with no step configured is **held and never
+commanded**. Falling back to modulating it would do the one thing the mode exists
+to prevent.
 
 ### The feature — `curtailment.json`
 
