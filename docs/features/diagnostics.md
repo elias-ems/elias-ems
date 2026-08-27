@@ -17,7 +17,7 @@ which is pure and shared with the browser bundle.
 
 | Field | Meaning |
 | --- | --- |
-| `origin` | which feature logged it — `battery-control` so far |
+| `origin` | which feature logged it — `battery-control`, `pv-curtailment` or `prices` |
 | `message` | the text; may be several lines |
 | `at` | ISO timestamp, for the downloaded file |
 | `time` | `HH:MM:SS` local, for the box |
@@ -77,14 +77,22 @@ buffer made durable.
 
 ## Reading it
 
+Two components read it, one per page.
+
 ### The box
 
-[DiagnosticsBox.tsx](../../addon/app/components/DiagnosticsBox.tsx), used twice:
+[DiagnosticsBox.tsx](../../addon/app/components/DiagnosticsBox.tsx), on the
+**Tools** page: every origin's entries merged, open by default, and the only
+reader that shows all three at once.
 
-| Where | `origin` | Shows |
-| --- | --- | --- |
-| Home, under **Battery control** | `battery-control` | that feature's entries, collapsed by default |
-| **Tools** | none | every feature's entries merged, open by default |
+It still takes an `origin` rather than being one component per feature. The home
+page used to mount a filtered copy under each strategy's heading, and that
+parameter is what kept two boxes from being two components; the dashboard
+redesign replaced those copies with the decision feed below, so Tools is now the
+only page that mounts it and it mounts it unfiltered. The parameter stays
+because the argument for it hasn't changed — the next feature that wants a log
+under its own heading needs it back, and the playground still exercises both
+shapes.
 
 `origin` is both the filter and the switch for whether each line says where it
 came from: under a feature's own heading that would be the same word on every
@@ -98,6 +106,19 @@ much work to repeat every couple of seconds, and its cadence is far too slow to
 watch a five-second loop with. Closed, the box costs nothing.
 
 Newest first, because that is the end anyone opening a box wants to read.
+
+### The decision feed
+
+[DecisionFeed.tsx](../../addon/app/components/dashboard/DecisionFeed.tsx), on
+**Home**, inside the strategy rail: the two loops' entries merged into one list,
+open and polling rather than collapsed. The strategies correct against the same
+grid meter within milliseconds of each other, and the pair of decisions is the
+thing worth seeing — a box each would have hidden the one relationship anyone
+comes to the page for.
+
+It asks the same route for two origins at once, rather than for none: an
+unfiltered feed would fold in `prices`, which says nothing about what the house
+just did and would push off the bottom the lines that do.
 
 An entry from the control loop looks like this:
 
@@ -142,9 +163,12 @@ mojibake.
 ## The Tools page
 
 [tools.tsx](../../addon/app/routes/tools.tsx), sitting between Home and Settings
-in the top bar. Diagnostics is all it holds so far; it exists as the place for
-the things you do *to* an installation rather than the things you configure on
-it, which is why the download lives here and not on the home page.
+in the top bar. It exists as the place for the things you do *to* an
+installation rather than the things you configure on it, which is why the
+download lives here and not on the home page. Diagnostics is the first of its
+two sections; the second is **Debug**, holding nothing but a link to the
+component playground, and sitting below rather than beside because a page
+anyone can reach should not put a developer's page at eye level.
 
 ## Tests
 
@@ -154,12 +178,13 @@ it, which is why the download lives here and not on the home page.
 | `test/unit/control-loop.test.ts` | that the loop's own lines land under the `battery-control` origin, and collapse |
 | `test/unit/routes.test.ts` | `/api/diagnostics` with and without a filter, an unknown origin falling back to no filter, the Tools loader, and the download's headers |
 | `test/integration/ingress.test.ts` | both routes reached over HTTP through the ingress proxy — including that `/api/diagnostics.txt` really does come back as a text file rather than as a page |
-| `test/e2e/app.spec.ts` | watching the box fill on the home page, then the Tools page showing labelled entries and the button producing a file with them in it |
+| `test/e2e/app.spec.ts` | watching the decision feed fill on the home page, then the Tools page showing labelled entries and the button producing a file with them in it |
 
 ## Not done yet
 
-- **Anything other than battery control logging.** The shape is ready for it;
-  no second feature writes to it yet.
-- **Filtering or searching in the UI.** With one origin there is nothing to
-  filter by, and 300 entries fit in a scroll.
+- **Filtering or searching in the UI.** The two filters that exist are both
+  fixed in code — the decision feed's pair of origins, the Tools box's none —
+  and nothing lets a reader narrow the log themselves. Three origins and 300
+  entries still fit in a scroll; a fourth writer, or a longer buffer, is what
+  would change that.
 - **Persistence and retention**, deliberately — see above.
