@@ -35,7 +35,14 @@
   and the battery emptying to cover them. What happens in the marginal band
   *above* the threshold is now a choice of three strategies — release everything,
   cap each inverter, or allow a price-graded share of export — see
-  [Strategies](features/pv-curtailment.md#strategies). An array generating more
+  [Strategies](features/pv-curtailment.md#strategies). How hard an array is
+  pressed is a per-inverter choice as well: a `modulating` one follows the house
+  every tick, while a `stepped` one — an inverter that commits every write to
+  non-volatile memory, a Huawei SUN2000 being the common case — takes one
+  command when curtailment starts and one when it ends, held at a limit that was
+  typed in rather than computed, see
+  [Inverters that cannot be written to often](features/pv-curtailment.md#inverters-that-cannot-be-written-to-often).
+  An array generating more
   than its limit plus a margin is now noticed rather than believed: the limit is
   re-asserted and logged as a warning, which is the one place the add-on can
   currently tell that nothing acted on what it sent. A charger following the
@@ -44,10 +51,12 @@
   a "a car wants charge" sensor and the charger's power now holds the arrays
   open for it, and brings a stepped inverter up with them when the charger
   outreaches the modulating ones. Still to do: that check only
-  reaches a limit that binds. An array generating under its limit cannot be
-  checked and does not need to be, but a *release* cannot be checked at all — an
-  array wrongly left curtailed generates less than it might, and how much it
-  might is what nothing here can know.
+  reaches a limit that binds — and on a stepped array the re-assertions are
+  capped, past which the fault is only logged. An
+  array generating under its limit cannot be checked and does not need to be,
+  but a *release* cannot be checked at all — an array wrongly left curtailed
+  generates less than it might, and how much it might is what nothing here can
+  know.
 
 ## Future
 
