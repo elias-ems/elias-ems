@@ -649,11 +649,18 @@ to converge rather than chase each other.
 
 Every line the loop produces goes to **diagnostics** under the
 `battery-control` origin — see [diagnostics.md](diagnostics.md) for the entry
-shape, the buffer and the download. Two places show it: the collapsed
-**Diagnostics** box under Battery control on the home page, filtered to this
-origin, and the **Tools** page, where it is merged with every other feature's.
+shape, the buffer and the download. Two places show it, neither of them this
+feature's alone: the **decision feed** on the home page, which merges this
+origin with PV curtailment's and is open and polling rather than collapsed,
+and the **Tools** page, where it is merged with every other feature's. The
+feed is deliberately not one box per strategy — the two correct against the
+same grid meter within milliseconds of each other, and the pair of decisions
+is the thing worth reading. It shows each entry's **first line only**, since a
+tick's summary is what a glance wants and the per-battery detail below it
+would push the other loop off the bottom; Tools keeps the whole entry, and so
+does the download.
 
-A tick looks like this:
+A whole tick looks like this:
 
 ```
 22:50:57 Grid net +842 W (importing), batteries at 0 W → discharge 842 W total. (via live cache, oldest reading 3s)
@@ -695,6 +702,8 @@ model module and a `.server` module that reads and writes it:
 | Batteries | `batteries.ts` | `batteries.server.ts` |
 | Control config and loop status | `control.ts` | `control-config.server.ts` |
 | PV entities | `pv-entities.ts` | `pv-entities.server.ts` |
+| Curtailment config | `curtailment.ts` | `curtailment-config.server.ts` |
+| Prices | `prices.ts` | `prices.server.ts` |
 
 The split is what lets the settings UI share the types, the validation, and
 constants like `STRATEGIES` without pulling a server-only module into the client
@@ -716,7 +725,7 @@ concatenation.
 | `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/entities` offering readings only, that two batteries may not have names that make the same event while a battery keeps its own name across an edit, and that control refuses to switch on with no steerable battery but can always be switched off |
 | `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy — including the target event leaving that process over the Supervisor proxy, and the release landing, flagged as one, when control is switched off |
 | `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves. What it reads is the diagnostics entry `syncControlLoop()` writes when it starts an interval: nothing in that process has posted the settings form, so only the boot-time call can have produced it |
-| `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the diagnostics box fill |
+| `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the decision feed fill with the tick's summary line |
 
 The loop tests run on two clocks on purpose. The event-driven cases use the real
 one, because they turn on a WebSocket message arriving and no fake timer can
