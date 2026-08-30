@@ -43,9 +43,16 @@ import { appendDiagnostic } from "./diagnostics.server";
 appendDiagnostic("battery-control", "warn", "The grid sensor is not configured.");
 ```
 
-Battery control wraps it in a one-line `logControl()` helper in
-[control-loop.server.ts](../../addon/app/lib/control-loop.server.ts), because
-everything that module logs has the same origin.
+The control loop wraps it in a `log()` helper in
+[control-loop.server.ts](../../addon/app/lib/control-loop.server.ts), which
+still takes the origin: that module drives both strategies, so its lines are
+not all one feature's. Beside it, `logLoop()` is for a line about the *loop*
+itself rather than about either decision — a tick that failed, or one that
+overlapped — and writes it to **every enabled feature's log**. Each feature's
+reader is where somebody would go to find out why its decisions stopped
+arriving, so sending those to battery control alone would leave a house
+running curtailment on its own with no way to tell a dead loop from a quiet
+one.
 
 Two things to know before adding calls:
 
