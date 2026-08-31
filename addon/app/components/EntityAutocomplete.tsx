@@ -1,5 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { EntitiesData } from "../lib/entities";
+import {
+  DEFAULT_OFFERABLE_DOMAIN,
+  type EntitiesData,
+  type OfferableDomain,
+} from "../lib/entities";
 import { useFetchedJson } from "../lib/json-fetch";
 import {
   errorStyle,
@@ -25,6 +29,12 @@ type EntityAutocompleteProps = {
    * feedback no longer describes what's in the field.
    */
   onValueChange?: (value: string) => void;
+  /**
+   * Which Home Assistant domain to suggest from. Nearly every field is picking
+   * a reading and wants the default; the exception is a field picking a state,
+   * which wants `binary_sensor`.
+   */
+  domain?: OfferableDomain;
 };
 
 /** Long enough that typing a sensor name isn't one request per letter. */
@@ -38,6 +48,7 @@ export default function EntityAutocomplete({
   hint,
   defaultValue = "",
   onValueChange,
+  domain = DEFAULT_OFFERABLE_DOMAIN,
 }: EntityAutocompleteProps) {
   const [query, setQuery] = useState(defaultValue);
   const [selected, setSelected] = useState(defaultValue);
@@ -80,7 +91,7 @@ export default function EntityAutocomplete({
   // error, and a route error would replace the settings page — and everything
   // typed into it — with an error page. See `lib/json-fetch.ts`.
   const { data, failing } = useFetchedJson<EntitiesData>(
-    `/api/entities?${new URLSearchParams({ q: debounced })}`,
+    `/api/entities?${new URLSearchParams({ q: debounced, domain })}`,
     { enabled: open },
   );
 

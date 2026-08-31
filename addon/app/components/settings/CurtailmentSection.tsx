@@ -297,6 +297,7 @@ export default function CurtailmentSection({
 
           <EntityAutocomplete
             name="carChargingEntityId"
+            domain="binary_sensor"
             label="A car wants to charge (binary sensor)"
             placeholder="e.g. binary_sensor.evcc_charging"
             defaultValue={config.carChargingEntityId}

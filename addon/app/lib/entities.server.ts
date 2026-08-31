@@ -7,7 +7,12 @@
  * the domain, not about serving one request. The route is left holding the
  * query string and nothing else.
  */
-import type { EntitiesData, EntityOption } from "./entities";
+import {
+  DEFAULT_OFFERABLE_DOMAIN,
+  type EntitiesData,
+  type EntityOption,
+  type OfferableDomain,
+} from "./entities";
 import { fetchHaStates, type HaState } from "./ha.server";
 
 /**
@@ -16,18 +21,6 @@ import { fetchHaStates, type HaState } from "./ha.server";
  * something has to cap it.
  */
 const MAX_OPTIONS = 25;
-
-/**
- * Every entity these forms pick is a reading, so `sensor` is the whole list.
- * A switch or a binary sensor is not a reading, and nothing here is picked to
- * be written to: a target leaves as an event, not as a value set on an
- * entity, so there is no writable field to offer other domains to.
- */
-const OFFERED_DOMAINS = ["sensor"];
-
-function isOfferable(state: HaState, prefixes: string[]): boolean {
-  return prefixes.some((prefix) => state.entity_id.startsWith(prefix));
-}
 
 function toOption(state: HaState): EntityOption {
   return {
@@ -53,11 +46,19 @@ function matches(entity: EntityOption, query: string): boolean {
 }
 
 /**
- * The entities matching `query`, or the reason Home Assistant could not be
+ * The entities in `domain` matching `query`, or the reason Home Assistant could not be
  * asked. Never throws: the caller is a dropdown, and a field that fails to open
  * says less than one that explains itself.
  */
-export async function listEntityOptions(query: string): Promise<EntitiesData> {
+export async function listEntityOptions(
+  query: string,
+  /**
+   * Which domain the asking field wants. Defaulted rather than required, so
+   * that a reading picker — which is nearly all of them — reads the same as it
+   * did before there was a choice to make.
+   */
+  domain: OfferableDomain = DEFAULT_OFFERABLE_DOMAIN,
+): Promise<EntitiesData> {
   let states: HaState[];
   try {
     states = await fetchHaStates();
@@ -66,10 +67,13 @@ export async function listEntityOptions(query: string): Promise<EntitiesData> {
     return { entities: [], error: message };
   }
 
-  const prefixes = OFFERED_DOMAINS.map((domain) => `${domain}.`);
+  // Exactly one domain, not a prefix set: `binary_sensor.x` does not start with
+  // `sensor.`, so the two lists are disjoint and a field never has to explain
+  // which kind of entity a suggestion is.
+  const prefix = `${domain}.`;
   const needle = query.trim().toLowerCase();
   const entities = states
-    .filter((state) => isOfferable(state, prefixes))
+    .filter((state) => state.entity_id.startsWith(prefix))
     .map(toOption)
     .filter((entity) => matches(entity, needle))
     .slice(0, MAX_OPTIONS);

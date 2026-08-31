@@ -130,6 +130,39 @@ test("a PV entity can be added, appears on the dashboard, and removed", async ({
 });
 
 /**
+ * The one field that picks a state rather than a reading, and the only place the
+ * component and the route can be caught disagreeing about which domain to offer
+ * — a mismatch leaves the field suggesting entities it cannot accept, which
+ * looks from the browser exactly like a Home Assistant with nothing in it.
+ */
+test("the car sensor suggests binary sensors and the readings do not", async ({
+  page,
+}) => {
+  await page.goto("./settings");
+
+  const carSensor = page.getByLabel("A car wants to charge (binary sensor)");
+  await carSensor.click();
+  await carSensor.fill("grid");
+  await expect(
+    page.getByRole("option", { name: /binary_sensor\.grid_connected/ }),
+  ).toBeVisible();
+
+  // The same query in a reading field offers the sensor and not the state.
+  // Clicked rather than merely filled, so the suggestions above close on the
+  // mousedown — two open listboxes would leave the assertion below matching the
+  // other field's options.
+  const gridPower = page.getByLabel(/^Power — net grid/);
+  await gridPower.click();
+  await gridPower.fill("grid");
+  await expect(
+    page.getByRole("option", { name: /sensor\.grid_power/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("option", { name: /binary_sensor\.grid_connected/ }),
+  ).toHaveCount(0);
+});
+
+/**
  * The whole feature end to end: configure it the way a user would, switch it on,
  * and check that the loop running inside server.js actually says something. Put
  * last, because it leaves a control loop running for the rest of the run.

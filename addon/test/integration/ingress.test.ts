@@ -144,6 +144,24 @@ describe("Home Assistant data", () => {
       "sensor.inverter_power",
     );
   });
+
+  it("offers binary sensors to the one field that picks a state", async () => {
+    // Curtailment's car sensor. Checked through the real server because the
+    // failure mode is the component and the route disagreeing about the
+    // parameter, which neither side's own tests can see.
+    const response = await fetch(
+      `${stack.baseUrl}api/entities?domain=binary_sensor`,
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      entities: Array<{ entityId: string }>;
+    };
+
+    expect(body.entities.map((entity) => entity.entityId)).toContain(
+      "binary_sensor.grid_connected",
+    );
+  });
 });
 
 describe("battery control", () => {
