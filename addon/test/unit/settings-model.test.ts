@@ -21,6 +21,7 @@ import {
 } from "../../app/lib/control";
 import {
   DEFAULT_CURTAILMENT_CONFIG,
+  MAX_CHARGER_POWER_W,
   MAX_GRID_TARGET_W,
   MAX_SETTLE_SECONDS,
   normalizeCurtailmentConfig,
@@ -617,6 +618,25 @@ describe("normalizeCurtailmentConfig", () => {
         .priceThresholdPerKwh,
     ).toBe(-0.05);
   });
+
+  it("reads a file written before there was a car to make room for", () => {
+    // Every curtailment.json on disk predates these two fields, so the absent
+    // case is the upgrade path rather than an error: no sensor, no charger, and
+    // a feature that behaves exactly as it did.
+    const config = normalizeCurtailmentConfig({ enabled: true });
+
+    expect(config.carChargingEntityId).toBe("");
+    expect(config.chargerPowerW).toBe(0);
+  });
+
+  it("clamps a hand-edited charger power", () => {
+    expect(
+      normalizeCurtailmentConfig({ chargerPowerW: -1 }).chargerPowerW,
+    ).toBe(0);
+    expect(
+      normalizeCurtailmentConfig({ chargerPowerW: 10_000_000 }).chargerPowerW,
+    ).toBe(MAX_CHARGER_POWER_W);
+  });
 });
 
 describe("parseCurtailmentConfig", () => {
@@ -681,6 +701,62 @@ describe("parseCurtailmentConfig", () => {
       const parsed = parseCurtailmentConfig(form({ ...valid, settleSeconds }));
       expect(parsed.ok, `settleSeconds=${settleSeconds}`).toBe(false);
     }
+  });
+
+  it("takes a car-charging sensor with a charger power beside it", () => {
+    const parsed = parseCurtailmentConfig(
+      form({
+        ...valid,
+        carChargingEntityId: " binary_sensor.evcc_charging ",
+        chargerPowerW: "11000",
+      }),
+    );
+
+    expect(parsed).toMatchObject({
+      ok: true,
+      config: {
+        carChargingEntityId: "binary_sensor.evcc_charging",
+        chargerPowerW: 11000,
+      },
+    });
+  });
+
+  it("rejects a car-charging sensor with no charger power to go with it", () => {
+    // The pair is the setting. On its own the sensor would open onto a floor of
+    // zero watts and change nothing — an installation that looks configured and
+    // behaves exactly as though it were not.
+    for (const chargerPowerW of ["", "0", "-1", "abc", "100001"]) {
+      const parsed = parseCurtailmentConfig(
+        form({
+          ...valid,
+          carChargingEntityId: "binary_sensor.evcc_charging",
+          chargerPowerW,
+        }),
+      );
+      expect(parsed.ok, `chargerPowerW=${chargerPowerW}`).toBe(false);
+    }
+  });
+
+  it("saves without either, which is every house with no charger", () => {
+    const parsed = parseCurtailmentConfig(form(valid));
+
+    expect(parsed).toMatchObject({
+      ok: true,
+      config: { carChargingEntityId: "", chargerPowerW: 0 },
+    });
+  });
+
+  it("keeps a charger power left behind by a sensor that has been cleared", () => {
+    // Rejecting it would make removing the sensor a two-step operation, and
+    // nothing reads the number while there is no sensor to gate on.
+    const parsed = parseCurtailmentConfig(
+      form({ ...valid, carChargingEntityId: "", chargerPowerW: "11000" }),
+    );
+
+    expect(parsed).toMatchObject({
+      ok: true,
+      config: { chargerPowerW: 11000 },
+    });
   });
 
   it("rejects a threshold that is not a number at all", () => {

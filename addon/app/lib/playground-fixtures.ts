@@ -24,7 +24,10 @@
 import type { Battery } from "./batteries";
 import type { ControlConfig } from "./control";
 import type { CurtailmentConfig } from "./curtailment";
-import { DEFAULT_CURTAILMENT_CONFIG } from "./curtailment";
+import {
+  CHARGER_POWER_REQUIRED_ERROR,
+  DEFAULT_CURTAILMENT_CONFIG,
+} from "./curtailment";
 import type {
   DashboardArray,
   DashboardBattery,
@@ -432,6 +435,10 @@ export function playgroundFixtures(now: number) {
         ...DEFAULT_CURTAILMENT_CONFIG,
         enabled: true,
         strategy: "graded-export",
+        // Filled in, so the specimen shows the state a working installation is
+        // actually in rather than an empty pair of fields.
+        carChargingEntityId: "binary_sensor.evcc_charging",
+        chargerPowerW: 11000,
       } satisfies CurtailmentConfig,
       prices: {
         source: "home-assistant",
@@ -508,7 +515,10 @@ export function playgroundFixtures(now: number) {
       curtailment: {
         section: "curtailment",
         recordId: null,
-        errors: { settleSeconds: "Pick something between 5 and 600 s." },
+        errors: {
+          settleSeconds: "Pick something between 5 and 600 s.",
+          chargerPowerW: CHARGER_POWER_REQUIRED_ERROR,
+        },
       },
       prices: {
         section: "prices",

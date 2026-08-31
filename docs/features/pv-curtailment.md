@@ -172,6 +172,8 @@ to prevent.
 | `deadbandW` | `50` | How far off target before the limit is moved |
 | `minLimitPercent` | `5` | The lowest an array is ever taken to |
 | `settleSeconds` | `30` | How long the meter must stay off target first, and the shortest time between two moves after that |
+| `carChargingEntityId` | — | A binary sensor that is on while a car wants charge — see [A car charging on solar](#a-car-charging-on-solar) |
+| `chargerPowerW` | `0` | What that charger can take at full rate |
 
 Two of those need saying out loud.
 
@@ -352,6 +354,120 @@ the same watts. Left that way it dithered a percent at a time while the house
 was quiet, and swung by tens of percent while it was not — the overshoot the
 feedback form is otherwise not supposed to have.
 
+### A car charging on solar
+
+A charger steered by evcc in solar mode is a **meter-following load**.
+Curtailment is a meter-following source limiter. Both drive the meter to their
+own target, and whichever arrives first leaves the other with nothing to see.
+
+That is curtailment, because `settleSeconds` is shorter than any charger's ramp
+— and what it arrives at is not a transient but a stable equilibrium:
+
+| What acts | What follows | The meter then |
+| --- | --- | --- |
+| Curtailment cuts the arrays | the surplus disappears | comes back to target |
+| evcc sees no surplus | the car never enables | stays on target |
+| Curtailment sees a balanced meter | nothing to correct | **and the limit never moves again** |
+
+It is the same fixed point as [the discharging
+battery](#the-battery-free-when-it-charges-not-when-it-discharges), with the
+flexible thing on the load side of the meter. It is a one-way ratchet even when
+the car *is* charging: every downward nudge is permanent, because raising the
+limit again requires seeing import, and preventing import is exactly evcc's job.
+
+**The battery case was fixable inside the arithmetic and this one is not.** A
+discharging battery's contribution can be measured, so it can be added back. A
+load throttled to nothing cannot: it is indistinguishable from a load that was
+never there, in the same way [an array pinned at 1 kW](#percent-not-watts) is
+indistinguishable from one that could make 5 kW. No term added to `C_allowed`
+recovers it, so the fact that a car wants the surplus has to arrive from outside
+the loop. That is what `carChargingEntityId` is.
+
+**It has to say that a car *wants* charge, not that one is charging.** A sensor
+of the second kind cannot open this at all, because curtailment is precisely
+what stops the charging from starting. In evcc's terms that is a vehicle
+connected and below its target, not the loadpoint's charging flag.
+
+#### A floor, not an allowance
+
+While the sensor is on, the combined limit gets a floor under it:
+
+```
+C_allowed >= chargerPowerW - (everything generating that we are not modulating)
+```
+
+The subtraction is what keeps it honest. An uncurtailable array, or a stepped
+one holding its step, is already feeding the charger, and asking the modulating
+arrays for the charger's whole appetite on top of that would export the
+difference at the price this feature exists to avoid.
+
+A floor rather than an allowance on the *target* for the same reason. The car's
+current draw is already inside the grid reading, so moving the target by the
+full `chargerPowerW` would ask the arrays for it a second time — and a house
+whose car is drawing its full rate with the meter balanced would end up
+exporting exactly what the car consumes.
+
+It is applied as a **moved target**, the same rearrangement
+[`graded-export`](#graded-export) makes, so the deadband, the settle rule, the
+generation-proportional split and `minLimitPercent` all keep working with
+nothing downstream needing to know. And it is only ever taken when it is *lower*
+than the target already in force, which makes the direction one-way: a car can
+release generation and can never be the reason any is held back.
+
+Two properties worth being explicit about:
+
+- **It under-allows by the house load, deliberately.** The charger's appetite is
+  a number somebody typed in; the house's is not. The error is in the direction
+  of exporting less than it might, which is the cheap direction here.
+- **A charger bigger than the arrays means no curtailment at all**, and that
+  falls out rather than being special-cased: the floor lands above anything the
+  arrays could make, so every one of them is released.
+
+#### Stepped inverters, and why the test is on the ratings
+
+A stepped array is not in the feedback law, so the floor cannot reach it. It is
+released outright while a car is charging — but only when the charger can take
+more than the **combined rating of the modulating arrays**.
+
+That test is made from the ratings alone, with no reading anywhere in it, and
+that is the point rather than an approximation. A test built on generation would
+flip a write-averse inverter every time a cloud crossed the boundary, which is
+the budget [`stepped`](#inverters-that-cannot-be-written-to-often) exists to
+protect. This one can only change when somebody edits the settings page, which
+makes it **two writes per car** — one to release, one to take the step back —
+and it is answerable in a sentence on that page: *your charger can take more
+than the modulating arrays can make, so the stepped ones come up too.*
+
+When it is false the stepped arrays keep their step and the modulating ones
+carry the charger, which is the right trade the other way round: releasing a
+5 kW inverter to feed a 3.7 kW charger exports the difference and spends two
+writes doing it.
+
+#### Under a soft ceiling
+
+[`soft-ceiling`](#soft-ceiling) never reads the meter, so it has no target for a
+charger's appetite to move and no way to hand a car *just enough*. The only
+thing it can do for one is get out of the way, and it does: while the sensor is
+on, its bands release rather than cap. In the marginal band that is the easy
+trade — the choice is between selling a kWh for very little and putting it in a
+car for nothing.
+
+#### Worked through
+
+Two 5 kW inverters, one modulating and one stepped to 0%, an 11 kW charger, and
+the house pinned at its 500 W load with the meter balanced — the fixed point
+above, exactly where nothing would ever move again:
+
+| | modulating | stepped | meter |
+| --- | --- | --- | --- |
+| Pinned | 500 W | 0 W | 0 W |
+| Floor: `11000 - 0` = 11000 W | | | |
+| Target: `0 + 500 - 11000` | | | −10500 W |
+| `C_allowed = 500 + 10500` = 11000 W → 220% → **100%** | 5000 W | released, **100%** | −9500 W |
+
+Both inverters go to 100%, the surplus appears, and evcc has something to chase.
+`11000 > 5000` is what brings the stepped one up with it.
+
 ## Strategies
 
 The threshold splits the day in two, and everything above says *"a kWh put on
@@ -510,6 +626,14 @@ So the arrays are released — 100%, with `released: true` — when:
 | Curtailment is switched off | |
 | An array stops being curtailable, or is removed | Nothing will ever decide for it again |
 | The add-on is asked to stop (`SIGTERM`/`SIGINT`) | |
+| A car wants the surplus | See [A car charging on solar](#a-car-charging-on-solar) — the arrays are released outright once the charger outreaches them |
+
+**One reading is deliberately *not* failed open**: a `carChargingEntityId` that
+cannot be read counts as no car, and the tick warns. Releasing on it would be
+the usual rule, but it is the wrong rule here — a sensor that goes quiet would
+switch curtailment off for as long as it stayed quiet, which costs money in the
+one direction the feature exists to prevent. Every other unknown here loses
+generation; this one would spend it.
 
 One case is finer-grained: **an array whose own power reading is missing is
 released, and the others carry on correctly.** Assuming zero for it would not

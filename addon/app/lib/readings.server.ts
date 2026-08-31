@@ -37,3 +37,23 @@ export function toNumber(state: HaState | null): number | null {
   const value = Number(state.state);
   return Number.isFinite(value) ? value : null;
 }
+
+/**
+ * The boolean behind a state, or null when there isn't one.
+ *
+ * Deliberately narrow: `on` and `off` and nothing else. Home Assistant's own
+ * `unavailable` and `unknown` fall through to null, as does a numeric or textual
+ * state that happens to be truthy — a sensor that reads `charging` is not a
+ * binary sensor, and quietly agreeing that it is would let a decision rest on a
+ * string nobody checked.
+ *
+ * Null rather than false for the same reason `toNumber` returns null rather than
+ * 0: a caller has to be able to tell "no car" from "we have no idea", and the
+ * two do not lead to the same decision.
+ */
+export function toBoolean(state: HaState | null): boolean | null {
+  if (!state) return null;
+  if (state.state === "on") return true;
+  if (state.state === "off") return false;
+  return null;
+}

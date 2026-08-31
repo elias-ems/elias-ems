@@ -4,6 +4,7 @@ import type { CurtailmentConfig } from "../../lib/curtailment";
 import {
   bandFieldName,
   CURTAILMENT_STRATEGIES,
+  MAX_CHARGER_POWER_W,
   MAX_DEADBAND_W,
   MAX_GRID_TARGET_W,
   MAX_SETTLE_SECONDS,
@@ -14,6 +15,7 @@ import {
 } from "../../lib/curtailment";
 import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
+import EntityAutocomplete from "../EntityAutocomplete";
 import Field from "../Field";
 import {
   errorStyle,
@@ -273,6 +275,47 @@ export default function CurtailmentSection({
           error={errors.settleSeconds}
           hint={`How long the meter must stay off target before the limit moves. ${MIN_SETTLE_SECONDS}–${MAX_SETTLE_SECONDS}s. This is what gives the battery time to soak up a surplus before any of it is thrown away.`}
         />
+
+        <fieldset
+          style={{
+            border: "1px solid var(--color-border)",
+            borderRadius: "0.5rem",
+            padding: "0.75rem 1rem 1rem",
+            display: "grid",
+            gap: "0.75rem",
+          }}
+        >
+          <legend style={labelStyle}>A car charging on solar</legend>
+          <p style={{ ...hintStyle, maxWidth: "60ch" }}>
+            A charger following the meter and curtailment following the meter
+            cannot both have it. Curtailment gets there first, so the arrays are
+            cut back to the house before the car ever starts — and then nothing
+            moves again, because the meter reads balanced. Naming the sensor
+            here is what breaks that: while it is on, the arrays are allowed to
+            keep making what the charger could take.
+          </p>
+
+          <EntityAutocomplete
+            name="carChargingEntityId"
+            label="A car wants to charge (binary sensor)"
+            placeholder="e.g. binary_sensor.evcc_charging"
+            defaultValue={config.carChargingEntityId}
+            error={errors.carChargingEntityId}
+            hint="Use a sensor that is on while a car is connected and still wants charge — not one that is on only while it is already charging. The second kind cannot open this, because curtailment is exactly what stops the charging from starting. Leave empty if there is no charger."
+          />
+
+          <Field
+            name="chargerPowerW"
+            label="Charger power (W)"
+            type="number"
+            step={1}
+            min={0}
+            max={MAX_CHARGER_POWER_W}
+            defaultValue={config.chargerPowerW}
+            error={errors.chargerPowerW}
+            hint="What the charger can take at full rate. The arrays are held open for this much, less whatever is already generating that curtailment is not modulating. Set it higher than your arrays combined and they are simply never held back while a car is charging."
+          />
+        </fieldset>
 
         <div>
           <button type="submit" disabled={isSaving}>

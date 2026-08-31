@@ -55,6 +55,9 @@ function input(overrides: Partial<CurtailInput> = {}): CurtailInput {
     // case is specifically about the price.
     productionPricePerKwh: -0.05,
     currency: "EUR",
+    // No car unless a case brings one, which is the shape every case that
+    // predates the charger floor was written against.
+    carCharging: null,
     config: { ...DEFAULT_CURTAILMENT_CONFIG, enabled: true },
     nowMs: NOW,
     // Long settled, since most cases are about what is decided rather than
@@ -1138,5 +1141,251 @@ describe("stepped inverters", () => {
     });
     // The modulating array still takes the band's ceiling.
     expect(plan.decisions[1]).toMatchObject({ limitPercent: 70 });
+  });
+});
+
+describe("a car charging on solar", () => {
+  /** Both halves of the setting, since either alone is inert by design. */
+  function withCar(chargerPowerW: number): CurtailmentConfig {
+    return {
+      ...DEFAULT_CURTAILMENT_CONFIG,
+      enabled: true,
+      carChargingEntityId: "binary_sensor.car_wants_charge",
+      chargerPowerW,
+    };
+  }
+
+  const modulating = array({
+    id: "modulating",
+    title: "South roof",
+    ratedPowerW: 5000,
+  });
+  const stepped = array({
+    id: "stepped",
+    title: "East roof",
+    ratedPowerW: 5000,
+    controlMode: "stepped",
+    stepLimitPercent: 0,
+    powerW: 0,
+  });
+
+  it("lifts the arrays out of the fixed point a charger cannot escape on its own", () => {
+    // The state curtailment settles in without this: the arrays cut back to
+    // exactly the house, the meter balanced, and so nothing left for the
+    // charger to see. Every level of PV is an equilibrium here, which is why
+    // the way out cannot come from the meter.
+    const plan = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 500 }],
+        gridPowerW: 0,
+        carCharging: true,
+        config: withCar(11000),
+      }),
+    );
+
+    expect(plan.combinedAllowedW).toBe(11000);
+    expect(plan.decisions[0]).toMatchObject({
+      action: "release",
+      limitPercent: 100,
+    });
+  });
+
+  it("maxes a modulating and a stepped inverter when the charger outreaches both", () => {
+    // Two 5 kW arrays against an 11 kW charger: nothing they can make between
+    // them is worth holding back, and the stepped one has to be told so
+    // explicitly, because a step is not something the feedback law can move.
+    const plan = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 500 }, stepped],
+        gridPowerW: 0,
+        carCharging: true,
+        config: withCar(11000),
+      }),
+    );
+
+    expect(plan.decisions).toMatchObject([
+      { title: "South roof", action: "release", commandPercent: 100 },
+      { title: "East roof", action: "release", commandPercent: 100 },
+    ]);
+  });
+
+  it("leaves a stepped array on its step when the modulating ones can feed the charger", () => {
+    // The other way round is the worse trade: releasing a 5 kW inverter for a
+    // 3.7 kW charger exports the difference, and spends two writes to do it.
+    const plan = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 500 }, stepped],
+        gridPowerW: 0,
+        carCharging: true,
+        config: withCar(3700),
+      }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      title: "South roof",
+      action: "curtail",
+      limitPercent: 74,
+    });
+    expect(plan.decisions[1]).toMatchObject({
+      title: "East roof",
+      action: "hold",
+      commandPercent: null,
+    });
+  });
+
+  it("decides that from the ratings alone, so a cloud cannot cost a write", () => {
+    // Same house as above with the modulating array making nothing at all. The
+    // answer must not change: a test built on generation would flip the stepped
+    // inverter every time a cloud crossed the boundary, which is precisely the
+    // budget `stepped` exists to protect.
+    const dark = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 0 }, stepped],
+        gridPowerW: 500,
+        carCharging: true,
+        config: withCar(3700),
+      }),
+    );
+
+    expect(dark.decisions[1]).toMatchObject({
+      title: "East roof",
+      action: "hold",
+    });
+  });
+
+  it("subtracts what it is not modulating from the charger's appetite", () => {
+    // An uncurtailable array making 3 kW is already feeding the charger. Asking
+    // the modulating one for the whole 3.7 kW on top would export the
+    // difference at the very price this exists to avoid.
+    const plan = planCurtailment(
+      input({
+        arrays: [
+          { ...modulating, powerW: 500 },
+          array({
+            id: "uncurtailable",
+            title: "Garage",
+            curtailable: false,
+            powerW: 3000,
+            ratedPowerW: 4000,
+          }),
+        ],
+        gridPowerW: -3000,
+        carCharging: true,
+        config: withCar(3700),
+      }),
+    );
+
+    expect(plan.combinedAllowedW).toBe(700);
+    expect(plan.decisions[0]).toMatchObject({
+      action: "curtail",
+      limitPercent: 14,
+    });
+  });
+
+  it("is a floor under the limit and not an allowance on top of the car's own draw", () => {
+    // A car already taking its full 3.7 kW with the meter balanced. The
+    // charger's draw is inside the grid reading, so a target moved by the whole
+    // 3.7 kW would ask the arrays for it a second time and export exactly what
+    // the car consumes.
+    const plan = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 4200 }],
+        gridPowerW: 0,
+        carCharging: true,
+        config: withCar(3700),
+      }),
+    );
+
+    expect(plan.offTarget).toBe(false);
+    expect(plan.decisions[0].action).toBe("hold");
+  });
+
+  it("never holds an array back that it would otherwise have released", () => {
+    // The target only ever moves down. A house importing past its target is
+    // swallowing everything already, and a car is no reason to revisit that.
+    const withoutCar = planCurtailment(
+      input({ arrays: [{ ...modulating, powerW: 4000 }], gridPowerW: 2000 }),
+    );
+    const withACar = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 4000 }],
+        gridPowerW: 2000,
+        carCharging: true,
+        config: withCar(1000),
+      }),
+    );
+
+    expect(withACar.combinedAllowedW).toBe(withoutCar.combinedAllowedW);
+  });
+
+  it("releases everything under a soft ceiling, which has no room to make", () => {
+    const plan = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 4000 }],
+        gridPowerW: -3000,
+        productionPricePerKwh: 0.005,
+        carCharging: true,
+        config: { ...withCar(11000), strategy: "soft-ceiling" },
+      }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "release",
+      released: true,
+    });
+    expect(plan.summary).toContain("A car is charging");
+  });
+
+  it("curtails as though there were no car when the sensor is unreadable", () => {
+    // The one place the feature's usual "every way of not knowing ends with the
+    // arrays generating" is refused: a sensor that goes quiet would otherwise
+    // switch curtailment off for as long as it stayed quiet, which costs money
+    // in the direction the feature exists to prevent.
+    const plan = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 4000 }],
+        gridPowerW: -2000,
+        carCharging: null,
+        config: withCar(11000),
+      }),
+    );
+
+    expect(plan.decisions[0].action).toBe("curtail");
+    expect(plan.warnings).toContainEqual(
+      expect.stringContaining("binary_sensor.car_wants_charge is unreadable"),
+    );
+  });
+
+  it("says so when a sensor was configured without a charger power", () => {
+    const plan = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 4000 }],
+        gridPowerW: -2000,
+        carCharging: true,
+        config: withCar(0),
+      }),
+    );
+
+    expect(plan.decisions[0].action).toBe("curtail");
+    expect(plan.warnings).toContainEqual(
+      expect.stringContaining("the charger's power is not"),
+    );
+  });
+
+  it("takes the step back once the car stops wanting charge", () => {
+    const plan = planCurtailment(
+      input({
+        arrays: [{ ...modulating, powerW: 4000 }, stepped],
+        gridPowerW: -2000,
+        carCharging: false,
+        config: withCar(11000),
+      }),
+    );
+
+    expect(plan.decisions[1]).toMatchObject({
+      title: "East roof",
+      action: "curtail",
+      commandPercent: 0,
+    });
   });
 });

@@ -85,6 +85,54 @@
  * The gap is the few seconds before the battery ramps, where the surplus is on
  * the meter but about to be taken. That is what `settleSeconds` is for.
  *
+ * ## Why a car charging on solar needs telling about
+ *
+ * A charger steered by evcc in solar mode is a *meter-following load*, and this
+ * is a meter-following source limiter. Both drive `G` to their own target, and
+ * whichever arrives first leaves the other with nothing to see. That is this
+ * one: `settleSeconds` is shorter than a charger's ramp, so the arrays are cut
+ * back to the house before the car ever enables — and then the equilibrium
+ * holds, because with the meter on target `offBy` is zero every tick and the
+ * limit never moves again. It is the same fixed point as the discharging
+ * battery above, with the flexible thing on the load side of the meter.
+ *
+ * The battery case was fixable inside the arithmetic because a discharging
+ * battery's contribution is *measurable*. A load throttled to nothing is not:
+ * it is indistinguishable from a load that was never there, exactly as an array
+ * pinned at 1 kW is indistinguishable from one that could make 5 kW. So nothing
+ * added to `C_allowed` can recover it, and the fact that a car wants the surplus
+ * arrives from outside the loop instead — `carChargingEntityId` in
+ * `curtailment.ts`.
+ *
+ * What it does with it is put a **floor under the combined limit** rather than
+ * an allowance on top of it:
+ *
+ *     C_allowed >= chargerPowerW - (everything generating that we are not
+ *                                   modulating)
+ *
+ * The subtraction is what keeps it honest. An uncurtailable array, or a stepped
+ * one holding its step, is already feeding the charger, and asking the
+ * modulating arrays for the charger's full appetite on top of that would export
+ * the difference at the very price this exists to avoid.
+ *
+ * The floor is expressed as a **moved target**, exactly the way
+ * `graded-export`'s allowance is, so that the deadband, the settle rule, the
+ * generation-proportional split and the floor at `minLimitPercent` all keep
+ * working unchanged. Setting `C + (G - target) = floor` and solving gives the
+ * target that produces it, and it is only ever taken when it is *lower* than the
+ * one already in force — so a car can release generation and can never cause
+ * any to be held back.
+ *
+ * Two consequences worth being explicit about:
+ *
+ * - **It under-allows by the house load**, deliberately. The charger's appetite
+ *   is known and the house's is not, so the floor is the charger alone. The
+ *   error is in the direction of exporting less than it might, which is the
+ *   cheap direction here.
+ * - **A charger bigger than the arrays means no curtailment at all**, and that
+ *   falls out rather than being special-cased: the floor lands above what the
+ *   arrays could ever make, so every one of them is released.
+ *
  * ## Percent, not watts
  *
  * Inverters take curtailment as a percentage of their rated AC output, so that
@@ -267,6 +315,18 @@ export type CurtailInput = {
   /** The currency those prices are in, for the log. */
   currency: string;
   config: CurtailmentConfig;
+  /**
+   * Whether a car wants the surplus right now — `carChargingEntityId` read as a
+   * boolean — or **null when it cannot be read**, which includes there being no
+   * entity configured at all.
+   *
+   * Null is treated as "no car" rather than as "a car, to be safe": a sensor
+   * that has gone quiet would otherwise switch curtailment off for as long as it
+   * stayed quiet, and unlike everything in `Failing open` below, that failure
+   * costs money in the direction the feature exists to prevent. It is warned
+   * about instead.
+   */
+  carCharging: boolean | null;
   /** Now, in epoch milliseconds. Passed in so this stays a pure function. */
   nowMs: number;
   /**
@@ -422,6 +482,17 @@ function releaseAll(
 export const NOT_CURTAILABLE_REASON = "not curtailable";
 
 /**
+ * Why a write-averse inverter is brought back up for a car.
+ *
+ * Named rather than written inline because it is said on four paths — acting,
+ * holding inside the deadband, settling, and above the threshold — and a
+ * stepped array reading four different explanations for one decision would
+ * suggest four different decisions.
+ */
+export const CAR_STEPPED_REASON =
+  "stepped — a car is taking more than the modulating arrays can make";
+
+/**
  * Whether an array can take part in *this* tick's plan.
  *
  * A missing power reading takes the array out rather than being assumed to be
@@ -493,6 +564,40 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     );
   }
 
+  /**
+   * Whether a car is asking for the surplus. Both halves of the setting are
+   * needed: a sensor with no charger power would open onto a floor of zero and
+   * change nothing, which is an installation that looks configured and behaves
+   * exactly as though it were not.
+   */
+  const carWantsSurplus =
+    config.carChargingEntityId !== "" &&
+    config.chargerPowerW > 0 &&
+    input.carCharging === true;
+
+  /**
+   * Whether the stepped arrays are needed to feed the charger.
+   *
+   * **Decided from the ratings alone**, with no reading anywhere in it, and that
+   * is the point rather than an approximation. A stepped inverter commits every
+   * write to non-volatile memory, so a test built on generation would spend that
+   * budget every time a cloud moved it across the boundary. This one can only
+   * change when somebody edits the settings page, which makes it two writes per
+   * car — one to release, one to take the step back afterwards — and it is
+   * answerable in a sentence on that page: *your charger can take more than the
+   * modulating arrays can make, so the stepped ones come up too.*
+   *
+   * When it is false the stepped arrays keep their step and the modulating ones
+   * carry the charger, which is the right trade the other way round: releasing a
+   * 5 kW inverter to feed a 3.7 kW charger exports the difference and spends two
+   * writes to do it.
+   */
+  const modulatingRatedW = configured
+    .filter((array) => array.controlMode !== "stepped")
+    .reduce((total, array) => total + (array.ratedPowerW ?? 0), 0);
+  const releaseSteppedForCar =
+    carWantsSurplus && config.chargerPowerW > modulatingRatedW;
+
   // Fail open, and this is the rule the whole feature is built around: every
   // way of not knowing ends with the arrays generating. A price we cannot read
   // is not a negative price, and treating it as one would throw away generation
@@ -514,14 +619,20 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
    * told standing, which is precisely what it should do between the one command
    * that starts an episode and the one that ends it.
    */
+  const steppedDefault = (array: SteppedSnapshot): PvArrayDecision =>
+    releaseSteppedForCar
+      ? release(array, CAR_STEPPED_REASON)
+      : hold(
+          array,
+          "stepped — leaving its step where it is",
+          array.stepLimitPercent,
+        );
+
   const decide = (
     reasonFor: (array: PvArraySnapshot) => PvArrayDecision,
-    steppedReasonFor: (array: SteppedSnapshot) => PvArrayDecision = (array) =>
-      hold(
-        array,
-        "stepped — leaving its step where it is",
-        array.stepLimitPercent,
-      ),
+    steppedReasonFor: (
+      array: SteppedSnapshot,
+    ) => PvArrayDecision = steppedDefault,
   ): PvArrayDecision[] =>
     arrays.map((array) => {
       if (!array.curtailable) return hold(array, NOT_CURTAILABLE_REASON);
@@ -580,6 +691,20 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
   // The cost is that it is a *ceiling* and not a cut. 70% of nameplate binds
   // around noon and does nothing at dusk, and no amount of measuring afterwards
   // would tell it the difference.
+  // A ceiling has no feedback term, so there is no target for a charger's
+  // appetite to move and no way to hand the car *just enough*. The only thing it
+  // can do for one is get out of the way — and in the marginal band that is the
+  // easy trade to make: the choice is between selling a kWh for very little and
+  // putting it into a car for nothing.
+  if (band !== null && config.strategy === "soft-ceiling" && carWantsSurplus) {
+    return releaseAll(
+      input,
+      `${priceClause}. A car is charging — a ceiling cannot make room for it, so the arrays are released.`,
+      "a car is charging",
+      { curtailing: true },
+    );
+  }
+
   if (band !== null && config.strategy === "soft-ceiling") {
     const ceilingPercent = Math.min(
       100,
@@ -704,7 +829,7 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     band !== null && config.strategy === "graded-export"
       ? (Math.min(100, band.exportPercent) / 100) * ratedTotal
       : 0;
-  const effectiveTargetW = gridTargetW - exportAllowanceW;
+  const baseTargetW = gridTargetW - exportAllowanceW;
 
   const netW = gridPowerW;
 
@@ -729,6 +854,48 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
       );
     }
   }
+
+  if (config.carChargingEntityId !== "" && input.carCharging === null) {
+    warnings.push(
+      `${config.carChargingEntityId} is unreadable, so nothing is being held open for a car`,
+    );
+  }
+  if (config.carChargingEntityId !== "" && config.chargerPowerW <= 0) {
+    warnings.push(
+      "a car-charging sensor is configured but the charger's power is not, so nothing is being held open for a car",
+    );
+  }
+
+  /**
+   * What is generating that this tick is not modulating: the uncurtailable
+   * arrays, the stepped ones, and any array dropped for want of a reading.
+   *
+   * Subtracted from the charger's appetite below, because all of it is already
+   * feeding the charger. Asking the modulating arrays for the whole appetite on
+   * top would export the difference at exactly the price this exists to avoid.
+   */
+  const otherPvW =
+    arrays.reduce((total, array) => total + (array.powerW ?? 0), 0) -
+    curtailablePvW;
+
+  /** The lowest the combined limit may come out at while a car wants charge. */
+  const chargerFloorW = carWantsSurplus
+    ? Math.max(0, config.chargerPowerW - otherPvW)
+    : 0;
+
+  // The target that produces exactly that floor, from `C + (G - target) = floor`
+  // with the battery term in place — the same rearrangement `graded-export`
+  // makes, and the reason neither needed a second control law.
+  //
+  // `min`, so this can only ever move the target *down*: a car can release
+  // generation and can never be the reason any is held back.
+  const effectiveTargetW =
+    chargerFloorW > 0
+      ? Math.min(
+          baseTargetW,
+          netW + curtailablePvW + batteryDischargeW - chargerFloorW,
+        )
+      : baseTargetW;
 
   const meterOffBy = netW - effectiveTargetW;
   const offBy = meterOffBy + batteryDischargeW;
@@ -769,6 +936,17 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     batteryDischargeW > 0
       ? ` while the battery discharges ${magnitude(batteryDischargeW)}`
       : "";
+  /**
+   * Said on every path while it is true, for the same reason the battery is: a
+   * limit that stopped moving because a car is being fed reads, in a log that
+   * did not mention the car, exactly like a limit that stopped moving because
+   * something is broken.
+   */
+  const carClause = !carWantsSurplus
+    ? ""
+    : chargerFloorW > 0
+      ? ` A car is charging — the arrays may make ${magnitude(chargerFloorW)} before any of it is held back.`
+      : " A car is charging, and the arrays nothing here modulates already cover the charger.";
 
   if (!offTarget) {
     return {
@@ -781,7 +959,7 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
       decisions: decide((array) =>
         hold(array, `grid within the ${deadbandW} W deadband`),
       ),
-      summary: `${priceClause}. Grid net ${signed(netW)}${batteryClause} — ${target} within the ${deadbandW} W deadband, holding.`,
+      summary: `${priceClause}. Grid net ${signed(netW)}${batteryClause} — ${target} within the ${deadbandW} W deadband, holding.${carClause}`,
       warnings,
     };
   }
@@ -814,7 +992,7 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
           `waiting for the meter to settle (${waited}s of ${config.settleSeconds}s)`,
         ),
       ),
-      summary: `${priceClause}. Grid net ${signed(netW)} (${flow})${batteryClause} — settling, ${waited}s of ${config.settleSeconds}s.`,
+      summary: `${priceClause}. Grid net ${signed(netW)} (${flow})${batteryClause} — settling, ${waited}s of ${config.settleSeconds}s.${carClause}`,
       warnings,
     };
   }
@@ -892,13 +1070,15 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     // battery can empty in its place — is the trade this mode exists to avoid
     // making twice over.
     (array) =>
-      offBy <= -deadbandW
-        ? step(array)
-        : hold(
-            array,
-            "stepped — no export to prevent, holding its step",
-            array.stepLimitPercent,
-          ),
+      releaseSteppedForCar
+        ? release(array, CAR_STEPPED_REASON)
+        : offBy <= -deadbandW
+          ? step(array)
+          : hold(
+              array,
+              "stepped — no export to prevent, holding its step",
+              array.stepLimitPercent,
+            ),
   );
 
   return {
@@ -909,7 +1089,7 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     batteryDischargeW,
     offTarget: true,
     decisions,
-    summary: `${priceClause}.${exportAllowanceW > 0 ? ` Graded export — up to ${magnitude(exportAllowanceW)} may cross the meter.` : ""} Grid net ${signed(netW)} (${flow})${batteryClause}, arrays at ${magnitude(curtailablePvW)} → allow ${magnitude(combinedAllowedW)} total.`,
+    summary: `${priceClause}.${exportAllowanceW > 0 ? ` Graded export — up to ${magnitude(exportAllowanceW)} may cross the meter.` : ""} Grid net ${signed(netW)} (${flow})${batteryClause}, arrays at ${magnitude(curtailablePvW)} → allow ${magnitude(combinedAllowedW)} total.${carClause}`,
     warnings,
   };
 }
