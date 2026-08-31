@@ -127,6 +127,13 @@ It asks the same route for two origins at once, rather than for none: an
 unfiltered feed would fold in `prices`, which says nothing about what the house
 just did and would push off the bottom the lines that do.
 
+Which two is `DECISION_ORIGINS` in [diagnostics.ts](../../addon/app/lib/diagnostics.ts),
+not a literal in either place that needs it. The home loader seeds the feed with
+that filter and the feed's own poll re-sends it a couple of seconds later, so
+two copies could disagree — and nothing would say so, since either list on its
+own renders a perfectly plausible feed. Adding a third strategy is then one
+line, the same way adding an origin is.
+
 An entry from the control loop looks like this:
 
 ```
