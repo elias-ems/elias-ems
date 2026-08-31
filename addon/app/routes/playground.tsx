@@ -486,7 +486,9 @@ export default function Playground({
               The one specimen that talks to Home Assistant. It asks{" "}
               <code>/api/entities</code> as you type, so inside a real ingress
               panel it suggests your own sensors and outside one it shows the
-              load failure — both of which are states worth seeing.
+              load failure — both of which are states worth seeing. The{" "}
+              <code>domain</code> prop picks which half of the house it offers:
+              readings by default, binary sensors for a field picking a state.
             </>
           }
         >

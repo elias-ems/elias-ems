@@ -108,6 +108,32 @@ describe("GET /api/entities", () => {
     } as Parameters<typeof loader>[0]);
   }
 
+  it("offers binary sensors when a field asks for them", async () => {
+    // Curtailment's "a car wants to charge" picks a state rather than a
+    // reading. Without this it was the one field whose value could not be
+    // chosen from the list it was offering.
+    const { entities } = await loadEntities("?domain=binary_sensor");
+
+    const ids = entities.map((entity) => entity.entityId);
+    expect(ids).toContain("binary_sensor.grid_connected");
+    expect(ids).not.toContain("sensor.inverter_power");
+  });
+
+  it("falls back to sensors rather than widening on an unknown domain", async () => {
+    // Reachable by URL, so an unbounded domain would turn a reading picker into
+    // a way to enumerate the house.
+    for (const domain of ["person", "", "sensor.", "SENSOR"]) {
+      const { entities } = await loadEntities(
+        `?domain=${encodeURIComponent(domain)}`,
+      );
+      const ids = entities.map((entity) => entity.entityId);
+      expect(ids, `domain=${domain}`).toContain("sensor.inverter_power");
+      expect(ids, `domain=${domain}`).not.toContain(
+        "binary_sensor.grid_connected",
+      );
+    }
+  });
+
   it("offers only sensors — a switch is not a reading", async () => {
     const { entities, error } = await loadEntities("");
 
