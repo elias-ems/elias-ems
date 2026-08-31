@@ -24,10 +24,7 @@
 import type { Battery } from "./batteries";
 import type { ControlConfig } from "./control";
 import type { CurtailmentConfig } from "./curtailment";
-import {
-  CHARGER_POWER_REQUIRED_ERROR,
-  DEFAULT_CURTAILMENT_CONFIG,
-} from "./curtailment";
+import { CHARGER_POWER_ERROR, DEFAULT_CURTAILMENT_CONFIG } from "./curtailment";
 import type {
   DashboardArray,
   DashboardBattery,
@@ -517,7 +514,7 @@ export function playgroundFixtures(now: number) {
         recordId: null,
         errors: {
           settleSeconds: "Pick something between 5 and 600 s.",
-          chargerPowerW: CHARGER_POWER_REQUIRED_ERROR,
+          chargerPowerW: CHARGER_POWER_ERROR,
         },
       },
       prices: {

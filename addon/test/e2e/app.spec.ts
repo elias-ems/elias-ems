@@ -163,6 +163,33 @@ test("the car sensor suggests binary sensors and the readings do not", async ({
 });
 
 /**
+ * Neither car field may stand between somebody and a save. Checked in a browser
+ * rather than by posting the form, because a rejected save is not a page that
+ * says "no" — it is the section re-rendering with a message on one field, and
+ * only a real submission puts that distinction on screen.
+ */
+test("the curtailment form saves with the car fields left empty", async ({
+  page,
+}) => {
+  await page.goto("./settings");
+  await page.getByRole("button", { name: "Save PV curtailment" }).click();
+
+  await expect(page.getByText("Something went wrong")).toHaveCount(0);
+  await expect(page.getByText("Charger power must be")).toHaveCount(0);
+
+  // And with a sensor named but no rating typed yet, which is the order
+  // somebody configuring this for the first time will do it in.
+  const carSensor = page.getByLabel("A car wants to charge (binary sensor)");
+  await carSensor.click();
+  await carSensor.fill("binary_sensor.grid_connected");
+  await page.getByRole("button", { name: "Save PV curtailment" }).click();
+
+  await expect(page.getByText("Something went wrong")).toHaveCount(0);
+  await expect(page.getByText("Charger power must be")).toHaveCount(0);
+  await expect(carSensor).toHaveValue("binary_sensor.grid_connected");
+});
+
+/**
  * The whole feature end to end: configure it the way a user would, switch it on,
  * and check that the loop running inside server.js actually says something. Put
  * last, because it leaves a control loop running for the rest of the run.

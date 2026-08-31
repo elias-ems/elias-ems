@@ -424,15 +424,22 @@ export const NO_PRICES_ERROR =
   "Curtailment decides on the injection price, so dynamic prices have to be configured first.";
 
 /**
- * Why a car-charging sensor cannot be saved on its own.
+ * What a charger power has to be, when there is one at all.
  *
- * The pair is the setting: the sensor says a car wants the surplus and the
- * power says how much of it to hold open. With only the first, the gate would
- * open onto a floor of zero watts and change nothing — an installation that
- * looks configured and behaves exactly as though it were not, which is the
- * failure this whole feature is most careful about elsewhere.
+ * A range check and nothing more. The pair is the setting — the sensor says a
+ * car wants the surplus and the power says how much to hold open, and one
+ * without the other holds open nothing — but that is a reason to *say so*
+ * rather than to refuse the save. Somebody setting the sensor first and looking
+ * up the wallbox's rating afterwards is doing an ordinary thing, and a form that
+ * will not take a half-finished pair makes them do it in the other order or not
+ * at all.
+ *
+ * The half-finished state cannot pass unnoticed, which is what makes this safe
+ * to allow: `curtail.ts` warns on every tick that a sensor is configured with no
+ * power behind it, and the field below says the same thing while it is empty.
+ * Loudly inert is a different thing from silently inert.
  */
-export const CHARGER_POWER_REQUIRED_ERROR = `Charger power must be a whole number of watts between 1 and ${MAX_CHARGER_POWER_W} once a car-charging sensor is set.`;
+export const CHARGER_POWER_ERROR = `Charger power must be a whole number of watts between 0 and ${MAX_CHARGER_POWER_W}.`;
 
 function readNumber(formData: FormData, name: string): number | null {
   const raw = formData.get(name)?.toString().trim();
@@ -532,6 +539,11 @@ export function parseCurtailmentConfig(
   const minLimitPercent = readNumber(formData, "minLimitPercent");
   const settleSeconds = readNumber(formData, "settleSeconds");
 
+  // The raw string as well as the number, because `readNumber` answers null for
+  // "empty" and for "not a number" alike, and those are not the same thing here:
+  // one is a field nobody has filled in yet and the other is a typo.
+  const chargerPowerRaw =
+    formData.get("chargerPowerW")?.toString().trim() ?? "";
   const chargerPowerW = readNumber(formData, "chargerPowerW");
   const carChargingEntityId =
     formData.get("carChargingEntityId")?.toString().trim() ?? "";
@@ -581,17 +593,17 @@ export function parseCurtailmentConfig(
   ) {
     errors.settleSeconds = `Settle time must be a whole number of seconds between ${MIN_SETTLE_SECONDS} and ${MAX_SETTLE_SECONDS}.`;
   }
-  // Only demanded once the sensor is there. A charger power left behind by a
-  // sensor that has since been cleared is harmless — nothing reads it — and
-  // rejecting it would make removing the sensor a two-step operation.
+  // Checked only when something was typed. An empty box saves as zero — which
+  // is "no charger", the state every installation starts in — so neither of
+  // these two fields can block a save, in either order and in any combination.
   if (
-    carChargingEntityId !== "" &&
+    chargerPowerRaw !== "" &&
     (chargerPowerW === null ||
       !Number.isInteger(chargerPowerW) ||
-      chargerPowerW < 1 ||
+      chargerPowerW < 0 ||
       chargerPowerW > MAX_CHARGER_POWER_W)
   ) {
-    errors.chargerPowerW = CHARGER_POWER_REQUIRED_ERROR;
+    errors.chargerPowerW = CHARGER_POWER_ERROR;
   }
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
@@ -612,9 +624,9 @@ export function parseCurtailmentConfig(
       minLimitPercent: minLimitPercent as number,
       settleSeconds: settleSeconds as number,
       carChargingEntityId,
-      // Clamped rather than rejected when there is no sensor to go with it, so
-      // that a number left in the box does not block a save that has nothing to
-      // do with it.
+      // Clamped as well as validated, so that the one path into this type that
+      // is not a form — a hand-edited file — cannot put an out-of-range number
+      // in front of the strategy either.
       chargerPowerW: Math.max(
         0,
         Math.min(MAX_CHARGER_POWER_W, Math.round(chargerPowerW ?? 0)),

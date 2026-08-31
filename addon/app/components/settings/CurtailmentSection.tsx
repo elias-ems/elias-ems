@@ -314,7 +314,7 @@ export default function CurtailmentSection({
             max={MAX_CHARGER_POWER_W}
             defaultValue={config.chargerPowerW}
             error={errors.chargerPowerW}
-            hint="What the charger can take at full rate. The arrays are held open for this much, less whatever is already generating that curtailment is not modulating. Set it higher than your arrays combined and they are simply never held back while a car is charging."
+            hint="What the charger can take at full rate. The arrays are held open for this much, less whatever is already generating that curtailment is not modulating. Set it higher than your arrays combined and they are simply never held back while a car is charging. Left empty, a sensor above holds nothing open — the log says so on every tick until a number is here."
           />
         </fieldset>
 

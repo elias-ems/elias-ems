@@ -721,11 +721,33 @@ describe("parseCurtailmentConfig", () => {
     });
   });
 
-  it("rejects a car-charging sensor with no charger power to go with it", () => {
-    // The pair is the setting. On its own the sensor would open onto a floor of
-    // zero watts and change nothing — an installation that looks configured and
-    // behaves exactly as though it were not.
-    for (const chargerPowerW of ["", "0", "-1", "abc", "100001"]) {
+  it("saves a car-charging sensor that has no charger power yet", () => {
+    // Neither field may block a save, in either order. The pair is still the
+    // setting — a sensor with no power behind it holds nothing open — but that
+    // is for the tick log and the field's own hint to say, not for the form to
+    // refuse. Somebody setting the sensor first and looking up the wallbox's
+    // rating afterwards is doing an ordinary thing.
+    const parsed = parseCurtailmentConfig(
+      form({
+        ...valid,
+        carChargingEntityId: "binary_sensor.evcc_charging",
+        chargerPowerW: "",
+      }),
+    );
+
+    expect(parsed).toMatchObject({
+      ok: true,
+      config: {
+        carChargingEntityId: "binary_sensor.evcc_charging",
+        chargerPowerW: 0,
+      },
+    });
+  });
+
+  it("still rejects a charger power that was typed wrongly", () => {
+    // Empty is "no charger"; a number that cannot be one is a typo, and saving
+    // it as zero would look identical to never having filled it in.
+    for (const chargerPowerW of ["-1", "abc", "5.5", "100001"]) {
       const parsed = parseCurtailmentConfig(
         form({
           ...valid,
