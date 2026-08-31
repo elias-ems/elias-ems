@@ -67,6 +67,24 @@ export type DiagnosticEntry = {
 export type DiagnosticsData = { entries: DiagnosticEntry[] };
 
 /**
+ * Which origins the home page's decision feed asks for — the two strategies,
+ * and deliberately not `prices`, whose entries are parse failures rather than
+ * something the house just did. Passing no filter at all would fold those in;
+ * the Tools page is where the whole log belongs.
+ *
+ * Here for the same reason `DiagnosticsData` is, one step further: both ends of
+ * that request need the *filter* too, not just the response type. The loader
+ * seeds the feed with it and the poll that replaces that seed re-sends it, so
+ * two copies could disagree — and the failure would be silent, since either
+ * list on its own renders a perfectly plausible feed. What a reader would see
+ * is the first paint quietly swapping for a different log two seconds later.
+ */
+export const DECISION_ORIGINS: DiagnosticsOrigin[] = [
+  "pv-curtailment",
+  "battery-control",
+];
+
+/**
  * The downloaded file: one entry per block, newest last.
  *
  * Oldest first, which is the opposite of the box on screen. A box is read from

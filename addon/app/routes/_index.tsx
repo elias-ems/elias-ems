@@ -21,6 +21,7 @@ import {
   batteryControlSummary,
   curtailmentSummary,
 } from "../lib/dashboard-view";
+import { DECISION_ORIGINS } from "../lib/diagnostics";
 import { readDiagnostics } from "../lib/diagnostics.server";
 import { usePolledJson } from "../lib/json-fetch";
 import { formatPricePerKwh } from "../lib/price-format.server";
@@ -83,7 +84,7 @@ export async function loader() {
     // Both strategies in one list, newest first — what the rail's feed shows
     // until its first poll comes back.
     decisions: readDiagnostics({
-      origins: ["pv-curtailment", "battery-control"],
+      origins: DECISION_ORIGINS,
       limit: INITIAL_LOG_ENTRIES,
     }),
   };

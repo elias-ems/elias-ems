@@ -8,15 +8,17 @@
  * boxes, each closed by default, put those on opposite sides of the page and
  * made the reader open both and interleave the timestamps by eye.
  *
- * Only the two strategy origins. Passing no filter would fold in `prices`,
- * whose entries are parse failures rather than decisions — those belong on the
- * Tools page, which is where the link at the foot goes.
+ * Only the two strategy origins — `DECISION_ORIGINS`, shared with the loader
+ * that seeds this feed so the first paint and the first poll cannot disagree.
+ * Passing no filter would fold in `prices`, whose entries are parse failures
+ * rather than decisions — those belong on the Tools page, which is where the
+ * link at the foot goes.
  */
 import { Link } from "react-router";
-import type {
-  DiagnosticEntry,
-  DiagnosticsData,
-  DiagnosticsOrigin,
+import {
+  DECISION_ORIGINS,
+  type DiagnosticEntry,
+  type DiagnosticsData,
 } from "../../lib/diagnostics";
 import { usePolledJson } from "../../lib/json-fetch";
 import { captionStyle, cardLinkStyle, eyebrowStyle, monoStyle } from "./chrome";
@@ -27,9 +29,7 @@ const POLL_INTERVAL = 2_000;
 /** The same, while the browser says the page is hidden. */
 const HIDDEN_POLL_INTERVAL = 60_000;
 
-const ORIGINS: DiagnosticsOrigin[] = ["pv-curtailment", "battery-control"];
-
-const FEED_URL = `/api/diagnostics?${ORIGINS.map(
+const FEED_URL = `/api/diagnostics?${DECISION_ORIGINS.map(
   (origin) => `origin=${origin}`,
 ).join("&")}`;
 
