@@ -18,6 +18,13 @@ type EntityAutocompleteProps = {
   hint?: string;
   /** Pre-fills the field when editing an entity that already has one. */
   defaultValue?: string;
+  /**
+   * Called with the field's current value whenever it changes (typing or
+   * picking a suggestion), so a caller that shows extra feedback about the
+   * *saved* entity — a live reading, a validity check — can tell when that
+   * feedback no longer describes what's in the field.
+   */
+  onValueChange?: (value: string) => void;
 };
 
 /** Long enough that typing a sensor name isn't one request per letter. */
@@ -30,12 +37,35 @@ export default function EntityAutocomplete({
   error,
   hint,
   defaultValue = "",
+  onValueChange,
 }: EntityAutocompleteProps) {
   const [query, setQuery] = useState(defaultValue);
   const [selected, setSelected] = useState(defaultValue);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputId = useId();
+
+  const value = selected || query;
+  // `onValueChange` is a setter from the caller's own state (or omitted
+  // entirely), not something that should re-run this effect on its own —
+  // only a change to the field's value should notify the caller.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
+  useEffect(() => {
+    onValueChange?.(value);
+  }, [value]);
+
+  // `error` is whatever the last save attempt came back with, so it stays
+  // truthy across re-renders until the next submit resolves it — including
+  // the moment right after the user has already picked a different entity.
+  // Dismiss it locally the instant the value changes, and let a fresh `error`
+  // (a new save attempt) bring it back.
+  const [dismissed, setDismissed] = useState(false);
+  // This only needs to fire when `error` changes, not use its value.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
+  useEffect(() => {
+    setDismissed(false);
+  }, [error]);
+  const activeError = dismissed ? undefined : error;
 
   // The request is driven by the URL, so the debounce is on the query that
   // builds it rather than on the fetch itself: every keystroke re-renders,
@@ -76,6 +106,7 @@ export default function EntityAutocomplete({
     setSelected(entityId);
     setQuery(entityId);
     setOpen(false);
+    setDismissed(true);
   }
 
   return (
@@ -93,11 +124,12 @@ export default function EntityAutocomplete({
           setQuery(event.target.value);
           setSelected("");
           setOpen(true);
+          setDismissed(true);
         }}
         onFocus={() => setOpen(true)}
-        style={inputStyle(Boolean(error))}
+        style={inputStyle(Boolean(activeError))}
       />
-      <input type="hidden" name={name} value={selected || query} />
+      <input type="hidden" name={name} value={value} />
 
       {open && entities.length > 0 && (
         <ul
@@ -154,14 +186,14 @@ export default function EntityAutocomplete({
         </ul>
       )}
 
-      {error && <p style={errorStyle}>{error}</p>}
-      {!error && open && loadError && (
+      {activeError && <p style={errorStyle}>{activeError}</p>}
+      {!activeError && open && loadError && (
         <p style={hintStyle}>
           Couldn't load Home Assistant entities: {loadError}. You can still type
           an entity ID manually.
         </p>
       )}
-      {!error && !(open && loadError) && hint && (
+      {!activeError && !(open && loadError) && hint && (
         <p style={hintStyle}>{hint}</p>
       )}
     </div>
