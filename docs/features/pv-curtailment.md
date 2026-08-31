@@ -121,7 +121,13 @@ Four things would otherwise spend them, and each is handled:
   continues on every tick. **Observe always, write rarely.**
 
 A surplus the battery is quietly absorbing never costs a write either: the meter
-stays inside the deadband, so the decision is never reached.
+stays inside the deadband, so the decision is never reached. Nor does an export
+the battery's own **discharge** accounts for: the export test is on the same
+`offBy` the modulating arrays use, so [the battery
+term](#the-battery-free-when-it-charges-not-when-it-discharges) is in it here
+too. An export a battery is causing is that battery's to stop, and spending a
+write to hide it — by holding this array down so the battery can empty in its
+place — would make the wrong trade twice over.
 
 ### What it costs
 
@@ -190,7 +196,7 @@ changes nothing, which looks identical from the outside to one that is broken.
 
 Sign conventions as everywhere else: `G` is the grid reading (positive
 importing), `C` is what the **curtailable** arrays are generating, `N` is what
-every other array is generating, `L` is the load and `B` is the battery
+every other array is generating, `L` is the load and `B` is the batteries
 (positive charging).
 
 The house balances as
@@ -199,21 +205,21 @@ The house balances as
 G + C + N = L + B
 ```
 
-Leaving `L`, `B` and `N` exactly where they are, the curtailable generation that
-would put the meter at `gridTargetW` satisfies the same equation with
-`G_target` in place of `G`. Subtracting one from the other gives the whole
-strategy:
+Leaving `L` and `N` exactly where they are, the curtailable generation that
+would put the meter at `gridTargetW` with the batteries at `B_target` satisfies
+the same equation with `G_target` and `B_target` in place of `G` and `B`.
+Subtracting one from the other gives the whole strategy:
 
 ```
-C_allowed = C + (G - G_target)
+C_allowed = C + (G - G_target) + (B_target - B)
 ```
 
 *What the arrays we can command are making now, plus however far the meter is
-from where we want it.*
+from where we want it, plus whatever a battery is delivering that the sun could
+deliver instead.*
 
-**The load, the battery and the uncurtailable arrays all cancel out.** The
-add-on never measures the load and never reasons about what the battery is
-doing — both are already inside the grid reading. It is the same feedback form
+**The load and the uncurtailable arrays cancel out.** The add-on never measures
+the load — it is already inside the grid reading. It is the same feedback form
 as `S = C - net` in [net-zero.ts](../../addon/app/lib/net-zero.ts), with the
 same property: a wrong answer this tick is corrected on the next one instead of
 accumulating.
@@ -240,16 +246,93 @@ C_allowed = 2000 + (500 - 0) = 2500 W  →  50%
 
 The limit rises by exactly the shortfall the meter showed.
 
-### Why the battery gets first refusal, for free
+### The battery: free when it charges, not when it discharges
 
-If battery control is on and the battery has room, it soaks up the surplus and
-drives `G` towards zero — so curtailment computes `C_allowed ≈ C` and cuts
-nothing. Only once the battery is full or at its power limit does the export
-appear on the meter, and only then is anything thrown away.
+`B_target` is `min(B, 0)`. Never discharging, and never a *demand* to charge
+either — so the term is the net discharge, added back, and nothing else:
 
-Charging at a negative price before curtailing is the right order, and it falls
-out of the arithmetic rather than needing to be coordinated between the two
-features.
+```
+C_allowed = C + (G - G_target) + max(0, -B)
+```
+
+**A charging battery cancels out and gets the surplus for free.** If battery
+control is on and the battery has room, it soaks up the surplus and drives `G`
+towards zero — so curtailment computes `C_allowed ≈ C` and cuts nothing. Only
+once the battery is full or at its power limit does the export appear on the
+meter, and only then is anything thrown away. Charging at a negative price
+before curtailing is the right order, and it falls out of the arithmetic rather
+than needing to be coordinated between the two features.
+
+**A discharging battery does not cancel, and treating it as though it did hid a
+fixed point.** `G` is what crosses the meter *after* the battery has covered the
+house, so a battery stepping in makes the meter read balanced while the house is
+in fact short of exactly what the battery is delivering. The feedback term goes
+to zero, the limit stops rising, and the arrays stay pinned at whatever they were
+last cut to — while the battery empties into a house the sun was standing by to
+supply for nothing.
+
+The two features hold each other there indefinitely, and each is behaving
+correctly on its own terms:
+
+| What acts | What follows | The meter then |
+| --- | --- | --- |
+| Curtailment cuts the arrays | the house is short | swings to import |
+| Net-zero covers the import | the battery discharges | comes back to zero |
+| Curtailment sees a balanced meter | nothing to correct | **and the limit never moves again** |
+
+Once something else is holding the meter, *every* level of PV is an equilibrium.
+That is what makes it a fixed point rather than a slow drift, the same shape of
+trap as [the one at zero](#the-fixed-point-at-zero) — and it is exactly as
+invisible, because the dashboard shows a balanced house throughout.
+
+Adding the discharge back is what makes `G - G_target` mean the same thing
+whether or not a battery is in the way: it is the shortfall the meter *would*
+have shown had none stepped in. Worked through, with two arrays pinned at 424 W
+between them, the meter at −9 W and the battery giving out 1,959 W:
+
+```
+C_allowed = 424 + (-9 - 0) + 1959 = 2374 W  →  24% of 10 kW
+```
+
+The arrays take the house over, the battery stops being asked for anything, and
+nothing about the meter changed to prompt it.
+
+Four things about that term:
+
+- **Every configured battery counts, steered or not**, and they are netted
+  against each other rather than summed. This is physics rather than authority:
+  an inverter running its own self-consumption logic needs no automation to
+  start covering the load, and hides the same watts while it does. One battery
+  charging at 2 kW beside one discharging at 2 kW is contributing nothing
+  between them.
+- **Nothing is commanded to the battery.** This only stops the arrays being held
+  down, and a limit is a ceiling — raising one an array cannot reach does
+  nothing at all, which is why a dark array on a winter evening is left
+  undisturbed by the battery carrying the house.
+- **The battery yields on its own.** As the arrays take the house over, the
+  surplus reaches whatever is steering the battery — net-zero, or the inverter's
+  own self-consumption — and it stops discharging. Neither feature has to be
+  told about the other; they converge over a tick or two, with the battery's
+  loop the fast one and `settleSeconds` pacing the slow one.
+- **A battery whose power sensor is quiet counts as not discharging**, which
+  under-credits rather than over-credits, and is logged as a warning. The
+  arrays stay where the meter alone would put them rather than being handed an
+  allowance built on an invented number.
+
+The one case this does not fix is a battery being **forced** to discharge into a
+negative price, by a schedule that is not looking at the price. It exports what
+it discharges rather than yielding, and the log says so:
+
+```
+! the battery is discharging 1500 W into a house the arrays already cover —
+  that is what is going out of the meter
+```
+
+Cutting the arrays back *would* stop that export — by draining the battery to
+displace free generation, which is the trade the whole term exists to refuse. So
+it is reported rather than acted on. Expect it for a tick or two whenever a
+battery is in the middle of yielding; a standing one means something is forcing
+the discharge, and that is where to go and look.
 
 The gap is the few seconds before the battery ramps, where the surplus is on the
 meter but about to be taken. That is what `settleSeconds` is for: the meter has
@@ -559,10 +642,16 @@ reverse. The tick rate is battery control's `intervalSeconds`, which is a
 ceiling on how often changes can produce a tick rather than the thing producing
 them; curtailment's own pacing comes from `settleSeconds`.
 
-Two entities join the watched set when curtailment is on: every array's power
-sensor, and **the price entity**. That last one is what makes "the price just
-went negative" provoke a tick with nothing anywhere polling a clock — its state
-changes at every slot boundary.
+Three entities join the watched set when curtailment is on: every array's power
+sensor, **every battery's power sensor**, and **the price entity**. The price
+entity is what makes "the price just went negative" provoke a tick with nothing
+anywhere polling a clock — its state changes at every slot boundary. The
+batteries are there for [the discharge
+term](#the-battery-free-when-it-charges-not-when-it-discharges), and only their
+power: a battery's state of charge is battery control's alone, and curtailment
+decides nothing on it. Reading a battery's power does not mean commanding it —
+curtailment publishes for arrays and nothing else, whether or not battery control
+is even switched on.
 
 ## What is deliberately not here
 
@@ -574,6 +663,13 @@ changes at every slot boundary.
 - **Getting paid to consume** at negative prices — dumping into the battery,
   running the heat pump. That is the "battery control (negative prices)" roadmap
   item, and conflating the two would make both harder to reason about.
+- **Telling the battery to stop discharging.** Curtailment reads what the
+  batteries are doing and stops holding the arrays down in their place; it never
+  commands one. Stopping the discharge outright is battery control's decision to
+  make, and making it from here would mean two features writing targets for the
+  same hardware on the same tick. The arithmetic does not need it: the arrays
+  taking the house over is what makes the discharge stop, through whatever is
+  actually steering the battery.
 - **A ramp-rate limit.** The settle time damps the loop — once it is applied
   after each move as well as before the first, which is what bounds how fast the
   limit can travel. A cap on the size of a single step would be a second answer

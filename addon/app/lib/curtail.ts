@@ -10,39 +10,77 @@
  *
  * Writing `G` for the grid reading (positive importing), `C` for what the
  * *curtailable* arrays are generating, `N` for what everything else is
- * generating, `L` for the load and `B` for the battery, the house balances as
+ * generating, `L` for the load and `B` for the batteries (positive charging),
+ * the house balances as
  *
  *     G + C + N = L + B
  *
- * Leaving `L`, `B` and `N` exactly where they are, the curtailable generation
- * that would put the meter at `G_target` satisfies
+ * Leaving `L` and `N` exactly where they are, the curtailable generation that
+ * would put the meter at `G_target` with the batteries at `B_target` satisfies
  *
- *     G_target + C_allowed + N = L + B
+ *     G_target + C_allowed + N = L + B_target
  *
  * and subtracting one from the other gives the whole strategy:
  *
- *     C_allowed = C + (G - G_target)
+ *     C_allowed = C + (G - G_target) + (B_target - B)
  *
  * "what the arrays we can command are making now, plus however far the meter is
- * from where we want it". **The load, the battery and the uncurtailable arrays
- * all cancel out.** We never measure the load, and we never reason about what
- * the battery is doing — both are already inside `G`. It is the same feedback
- * form as `S = C - net` in `net-zero.ts`, and it has the same property: a wrong
- * answer this tick is corrected on the next one instead of accumulating.
+ * from where we want it, plus whatever a battery is delivering that the sun
+ * could deliver instead". **The load and the uncurtailable arrays cancel out.**
+ * We never measure the load — it is already inside `G` — and it is the same
+ * feedback form as `S = C - net` in `net-zero.ts`, with the same property: a
+ * wrong answer this tick is corrected on the next one instead of accumulating.
  *
  * `N` cancelling is the part that is easy to get wrong. An array nobody can
  * command is still generating, and its output is already in `G`; counting it
  * into `C` as well would ask the arrays we *can* command to give up what it is
  * producing on top of what the meter actually shows.
  *
- * ## Why the battery gets first refusal, for free
+ * ## Why a charging battery is free, and a discharging one is not
  *
- * If battery control is on and the battery has room, it soaks up the surplus and
- * drives `G` towards zero — so this computes `C_allowed ≈ C` and cuts nothing.
- * Only once the battery is full or at its power limit does the export appear on
- * the meter, and only then is anything curtailed. Charging at a negative price
- * before throwing generation away is the right order, and it falls out of the
- * arithmetic rather than needing to be coordinated.
+ * `B_target` is `B` for as long as a battery is charging or idle, the last term
+ * is zero, and the battery cancels out exactly like the load. That is the case
+ * this feature was written around: if battery control is on and the battery has
+ * room, it soaks up the surplus and drives `G` towards zero — so this computes
+ * `C_allowed ≈ C` and cuts nothing. Only once the battery is full or at its
+ * power limit does the export appear on the meter, and only then is anything
+ * curtailed. Charging at a negative price before throwing generation away is the
+ * right order, and it falls out of the arithmetic rather than needing to be
+ * coordinated.
+ *
+ * A **discharging** battery is the case that does not cancel, and treating it as
+ * though it did was wrong in a way that hid itself. `G` is what crosses the
+ * meter *after* the battery has covered the house, so a battery stepping in
+ * makes the meter read balanced while the house is in fact short of exactly what
+ * the battery is delivering. The feedback term goes to zero, the limit stops
+ * rising, and the arrays stay pinned at whatever they were last cut to — while
+ * the battery empties into a house the sun was standing by to supply for
+ * nothing.
+ *
+ * The two halves of this add-on will hold each other there indefinitely.
+ * Net-zero discharges to cover the import that curtailment created, the meter
+ * comes back to zero, and curtailment reads its own suppression as balance. Once
+ * something else is holding the meter, *every* level of PV is an equilibrium,
+ * which is what makes this a fixed point rather than a slow drift — the same
+ * shape of trap as the one at zero below.
+ *
+ * So `B_target` is `min(B, 0)`: never discharging, and never a demand to charge
+ * either. The term reduces to the net discharge, added back,
+ *
+ *     C_allowed = C + (G - G_target) + max(0, -B)
+ *
+ * which is the shortfall the meter would have shown had no battery stepped in.
+ * It is what makes `G - G_target` mean the same thing whether or not one did.
+ *
+ * Nothing is commanded to the battery from here. This only stops the arrays
+ * being held down, and a limit is a ceiling: raising one an array cannot reach
+ * does nothing at all, which is why a dark array on a winter evening is left
+ * undisturbed by the battery carrying the house. The battery yields on its own
+ * — net-zero sees the surplus the arrays now make and stops discharging, and so
+ * does an inverter running its own self-consumption logic. The exception is a
+ * battery being *forced* to discharge into a negative price: it exports what it
+ * discharges rather than yielding, and `warnings` says so rather than the arrays
+ * being cut back to hide it.
  *
  * The gap is the few seconds before the battery ramps, where the surplus is on
  * the meter but about to be taken. That is what `settleSeconds` is for.
@@ -92,6 +130,25 @@ export type PvArraySnapshot = {
   controlMode: PvControlMode;
   /** `stepped` only: the fixed limit to hold it at, in percent of its rating. */
   stepLimitPercent: number | null;
+};
+
+/**
+ * What a battery is doing right now, as far as curtailment is concerned.
+ *
+ * Every configured battery, steered or not, and deliberately so: this is
+ * physics rather than authority. A battery nobody here commands discharges into
+ * the same house and hides the same shortfall, and it is just as likely to be
+ * the one doing it — an inverter running its own self-consumption logic needs
+ * no automation to start covering the load.
+ *
+ * Only the power, because only the power is in the arithmetic. What the battery
+ * *may* do — its window, its limits, whether it is steered — belongs to
+ * `net-zero.ts`, and nothing is commanded from here.
+ */
+export type PvBatterySnapshot = {
+  title: string;
+  /** Current power in W — positive charging, negative discharging — or null. */
+  powerW: number | null;
 };
 
 /**
@@ -169,6 +226,15 @@ export type CurtailPlan = {
   /** The combined limit that would put the meter on target, or null when unknowable. */
   combinedAllowedW: number | null;
   /**
+   * What the batteries are delivering to the house, in W, as a positive
+   * magnitude — netted across them, and zero when they are idle or charging.
+   *
+   * The `max(0, -B)` term of the arithmetic above, reported rather than merely
+   * used: a limit that rose because a battery was discharging is otherwise
+   * indistinguishable in the log from one that rose because the kettle went on.
+   */
+  batteryDischargeW: number;
+  /**
    * Whether the meter is far enough from the target to be worth acting on.
    *
    * The loop uses this to run the settle clock: it is the answer to "is
@@ -186,6 +252,11 @@ export type CurtailInput = {
   /** Net grid power in W: positive importing, negative exporting. Null when unreadable. */
   gridPowerW: number | null;
   arrays: PvArraySnapshot[];
+  /**
+   * Every configured battery. Empty is an ordinary house rather than a missing
+   * reading — panels and no battery — and reads as nothing discharging.
+   */
+  batteries: PvBatterySnapshot[];
   /**
    * What a kWh put on the grid earns right now, with the contract applied.
    * Null when there is no forecast, the slot has run out, or the production
@@ -224,6 +295,28 @@ function magnitude(watts: number): string {
  */
 function price(value: number, currency: string): string {
   return `${value.toFixed(4)} ${currency}/kWh`;
+}
+
+/**
+ * What the batteries are taking off the house's hands, as a positive number of
+ * watts, or zero when they are idle or charging.
+ *
+ * **Netted across the batteries, not summed per battery**, which matters in the
+ * one house that has both: one charging at 2 kW while another discharges at
+ * 2 kW is contributing nothing to the load between them, and asking the arrays
+ * to cover the discharge would be asking them to cover the charge twice.
+ *
+ * A battery whose power sensor has no number counts as zero rather than being
+ * guessed at, which under-credits rather than over-credits — the arrays stay
+ * where they are instead of being handed an allowance built on an invention.
+ * The caller warns; see `planCurtailment`.
+ */
+function batteryDischargeOf(batteries: PvBatterySnapshot[]): number {
+  const netW = batteries.reduce(
+    (total, battery) => total + (battery.powerW ?? 0),
+    0,
+  );
+  return Math.max(0, -netW);
 }
 
 /**
@@ -308,6 +401,11 @@ function releaseAll(
     netW: input.gridPowerW,
     curtailablePvW: 0,
     combinedAllowedW: null,
+    // Reported on every path, released ones included: it is an observation
+    // about the house rather than part of this decision, and a log that only
+    // mentioned the battery when it had been acted on would make it look as
+    // though nothing else had ever been looked at.
+    batteryDischargeW: batteryDischargeOf(input.batteries),
     offTarget: false,
     decisions: input.arrays.map((array) =>
       array.curtailable
@@ -495,6 +593,12 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
         .filter(participates)
         .reduce((total, array) => total + (array.powerW ?? 0), 0),
       combinedAllowedW: null,
+      // Observed and reported, but not acted on: this strategy never reads the
+      // meter, so it has no feedback term for a discharge to be added back to.
+      // A house whose battery is carrying it while a ceiling holds the arrays
+      // down wants `graded-export`, for the same reason it wants it to hold the
+      // house near zero at all.
+      batteryDischargeW: batteryDischargeOf(input.batteries),
       // No meter, so nothing is ever off target and the loop's settle clock
       // stays cleared. A ceiling moves when the price moves into another band,
       // which is its own pacing and does not want a second one on top.
@@ -603,15 +707,68 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
   const effectiveTargetW = gridTargetW - exportAllowanceW;
 
   const netW = gridPowerW;
-  const offBy = netW - effectiveTargetW;
+
+  // The battery term, and the whole of why there is one — see the header. `G`
+  // is what crosses the meter *after* a battery has covered the house, so a
+  // discharging one hides exactly the shortfall this law is looking for and
+  // leaves the arrays pinned wherever they were last cut to. Added back, the
+  // error means the same thing whether or not a battery stepped in: how much
+  // more the arrays could be making with the meter on target and nothing being
+  // taken out of a battery to keep it there.
+  const batteryDischargeW = batteryDischargeOf(input.batteries);
+
+  // Warned about even though the answer is simply the one without it. An
+  // unreadable battery is the case where the arrays quietly stay held back
+  // while it empties, and that is precisely the failure this term exists to
+  // end — so it says so rather than reporting a confident number built on a
+  // sensor that is not there.
+  for (const battery of input.batteries) {
+    if (battery.powerW === null) {
+      warnings.push(
+        `${battery.title}: power reading unavailable, assuming it is not discharging`,
+      );
+    }
+  }
+
+  const meterOffBy = netW - effectiveTargetW;
+  const offBy = meterOffBy + batteryDischargeW;
   const offTarget = Math.abs(offBy) >= deadbandW;
   const combinedAllowedW = curtailablePvW + offBy;
+
+  // The one case the term above does not fix, and it must not pass silently. A
+  // battery that goes on discharging while the arrays already cover the house
+  // puts what it discharges out of the meter. Cutting the arrays back *would*
+  // stop that export — by draining the battery to displace free generation,
+  // which is the trade this whole term exists to refuse — so it is reported
+  // rather than acted on. Ordinary for a tick or two while a battery yields;
+  // standing, it means something is forcing the discharge.
+  if (
+    batteryDischargeW >= deadbandW &&
+    meterOffBy <= -deadbandW &&
+    !offTarget
+  ) {
+    warnings.push(
+      `the battery is discharging ${magnitude(batteryDischargeW)} into a house the arrays already cover — that is what is going out of the meter`,
+    );
+  }
 
   const flow = netW > 0 ? "importing" : "exporting";
   const target =
     effectiveTargetW === 0
       ? "balanced"
       : `a ${signed(effectiveTargetW)} target`;
+  /**
+   * Named in every summary below for as long as it is happening, because the
+   * meter stops being the whole story the moment it is. `-1959 W` beside a
+   * battery discharging 1959 W is a house whose arrays are covering it exactly;
+   * the same reading on its own is a house exporting at a price it is paying,
+   * and a log that showed only the second would send somebody looking for a
+   * fault in the wrong half of the system.
+   */
+  const batteryClause =
+    batteryDischargeW > 0
+      ? ` while the battery discharges ${magnitude(batteryDischargeW)}`
+      : "";
 
   if (!offTarget) {
     return {
@@ -619,11 +776,12 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
       netW,
       curtailablePvW,
       combinedAllowedW,
+      batteryDischargeW,
       offTarget: false,
       decisions: decide((array) =>
         hold(array, `grid within the ${deadbandW} W deadband`),
       ),
-      summary: `${priceClause}. Grid net ${signed(netW)} — ${target} within the ${deadbandW} W deadband, holding.`,
+      summary: `${priceClause}. Grid net ${signed(netW)}${batteryClause} — ${target} within the ${deadbandW} W deadband, holding.`,
       warnings,
     };
   }
@@ -648,6 +806,7 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
       netW,
       curtailablePvW,
       combinedAllowedW,
+      batteryDischargeW,
       offTarget: true,
       decisions: decide((array) =>
         hold(
@@ -655,7 +814,7 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
           `waiting for the meter to settle (${waited}s of ${config.settleSeconds}s)`,
         ),
       ),
-      summary: `${priceClause}. Grid net ${signed(netW)} (${flow}) — settling, ${waited}s of ${config.settleSeconds}s.`,
+      summary: `${priceClause}. Grid net ${signed(netW)} (${flow})${batteryClause} — settling, ${waited}s of ${config.settleSeconds}s.`,
       warnings,
     };
   }
@@ -725,6 +884,13 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     // On the way in, the same test means a surplus the battery is quietly
     // absorbing never costs a write at all: the meter is inside the deadband, so
     // this is never reached.
+    //
+    // The test is on `offBy` rather than on the meter, so the battery term is in
+    // it here too, and that is the right way round: an export a battery's own
+    // discharge accounts for is that battery's to stop, and spending one of a
+    // finite number of writes to hide it — by holding an array down so the
+    // battery can empty in its place — is the trade this mode exists to avoid
+    // making twice over.
     (array) =>
       offBy <= -deadbandW
         ? step(array)
@@ -740,9 +906,10 @@ export function planCurtailment(input: CurtailInput): CurtailPlan {
     netW,
     curtailablePvW,
     combinedAllowedW,
+    batteryDischargeW,
     offTarget: true,
     decisions,
-    summary: `${priceClause}.${exportAllowanceW > 0 ? ` Graded export — up to ${magnitude(exportAllowanceW)} may cross the meter.` : ""} Grid net ${signed(netW)} (${flow}), arrays at ${magnitude(curtailablePvW)} → allow ${magnitude(combinedAllowedW)} total.`,
+    summary: `${priceClause}.${exportAllowanceW > 0 ? ` Graded export — up to ${magnitude(exportAllowanceW)} may cross the meter.` : ""} Grid net ${signed(netW)} (${flow})${batteryClause}, arrays at ${magnitude(curtailablePvW)} → allow ${magnitude(combinedAllowedW)} total.`,
     warnings,
   };
 }

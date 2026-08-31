@@ -29,9 +29,12 @@
   generation limit goes out as an `elias_ems_<array>_pv_limit` event for an
   automation to carry out. It shares the control loop and one snapshot per tick
   with battery control, which is what gives the battery first refusal on a
-  surplus. What happens in the marginal band *above* the threshold is now a
-  choice of three strategies — release everything, cap each inverter, or allow a
-  price-graded share of export — see
+  surplus — and, since a battery **discharging** hides the shortfall the
+  feedback law looks for rather than cancelling out of it the way a charging one
+  does, what stops the two features holding each other with the arrays pinned
+  and the battery emptying to cover them. What happens in the marginal band
+  *above* the threshold is now a choice of three strategies — release everything,
+  cap each inverter, or allow a price-graded share of export — see
   [Strategies](features/pv-curtailment.md#strategies). An array generating more
   than its limit plus a margin is now noticed rather than believed: the limit is
   re-asserted and logged as a warning, which is the one place the add-on can
