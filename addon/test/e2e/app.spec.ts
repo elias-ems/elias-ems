@@ -158,7 +158,11 @@ test("battery control can be configured, enabled, and watched deciding", async (
   await suggestion("sensor\\.battery_energy_total\\b").click();
   await page.getByLabel(/^Power \(W\)/).fill("battery_power");
   await suggestion("sensor\\.battery_power\\b").click();
-  await page.getByLabel(/^Charge/).fill("state_of_charge");
+  // Anchored on the em dash as well as the word, for the same reason the two
+  // above are anchored at all: "Charger power (W)" in the curtailment card is
+  // also a label beginning "Charge", and a locator that matches two fields
+  // fails strictly rather than picking one.
+  await page.getByLabel(/^Charge —/).fill("state_of_charge");
   await suggestion("sensor\\.battery_state_of_charge\\b").click();
   // Control cannot be switched on unless something is steered. The event this
   // battery's targets go out on is named after the title typed above, and

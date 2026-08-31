@@ -159,6 +159,44 @@ export type CurtailmentConfig = {
    * insurance against a 15-minute price slot.
    */
   settleSeconds: number;
+  /**
+   * A binary sensor that reads `on` while a car is connected and still wants
+   * charge, or empty when there is no charger to make room for.
+   *
+   * **This is the one input curtailment cannot derive**, and the reason is worth
+   * stating in full. A charger steered by evcc in solar mode is a
+   * *meter-following load*; curtailment is a meter-following source limiter.
+   * Both drive the meter to their own target, and whichever arrives first leaves
+   * the other with nothing to see — which is curtailment, because
+   * `settleSeconds` is shorter than any charger's ramp. The equilibrium it lands
+   * in is stable rather than transient: the arrays are cut back to the house, no
+   * surplus ever reaches the charger, the car never starts, and the meter reads
+   * balanced for the rest of the afternoon. See `curtail.ts`.
+   *
+   * A discharging battery hides the same shortfall and *is* fixable inside the
+   * arithmetic, because what it is delivering can be measured. A load that has
+   * been throttled to nothing cannot be: it looks exactly like a load that was
+   * never there, in the same way an array pinned at 1 kW might be capable of
+   * 1.1 kW or of 5 kW. No term added to `C_allowed` can recover it, so the fact
+   * that a car wants the surplus has to arrive from outside the loop, and this
+   * is where it does.
+   *
+   * It must read on while a car *wants* charge, not only while one is already
+   * charging. A sensor of the second kind cannot open this gate at all —
+   * curtailment is precisely what stops the charging from starting.
+   */
+  carChargingEntityId: string;
+  /**
+   * What the charger can take at full rate, in W.
+   *
+   * Typed in for the reason an inverter's rating is: there is nowhere to read it
+   * from, and the highest draw ever observed would understate it after a week of
+   * cloud. It is a **floor under what the arrays may generate** while
+   * `carChargingEntityId` is on, not an allowance on top of what the car is
+   * already drawing — the second would export exactly as much as the car
+   * consumes, since the car's draw is already inside the grid reading.
+   */
+  chargerPowerW: number;
 };
 
 /**
@@ -188,6 +226,11 @@ export const DEFAULT_CURTAILMENT_CONFIG: CurtailmentConfig = {
   deadbandW: 50,
   minLimitPercent: 5,
   settleSeconds: 30,
+  // No car, which is every house until somebody says otherwise. Both fields are
+  // needed before anything is held open, so a half-filled pair is inert rather
+  // than surprising.
+  carChargingEntityId: "",
+  chargerPowerW: 0,
 };
 
 export const MAX_BAND_ABOVE_PER_KWH = 10;
@@ -196,6 +239,8 @@ export const MAX_DEADBAND_W = 5000;
 export const MAX_GRID_TARGET_W = 20000;
 export const MIN_SETTLE_SECONDS = 0;
 export const MAX_SETTLE_SECONDS = 900;
+/** Generous enough for a 22 kW three-phase wallbox and then some. */
+export const MAX_CHARGER_POWER_W = 100_000;
 
 function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
@@ -326,6 +371,15 @@ export function normalizeCurtailmentConfig(
       MIN_SETTLE_SECONDS,
       MAX_SETTLE_SECONDS,
     ),
+    carChargingEntityId:
+      typeof stored?.carChargingEntityId === "string"
+        ? stored.carChargingEntityId.trim()
+        : defaults.carChargingEntityId,
+    chargerPowerW: clamp(
+      Math.round(toFiniteNumber(stored?.chargerPowerW, defaults.chargerPowerW)),
+      0,
+      MAX_CHARGER_POWER_W,
+    ),
   };
 }
 
@@ -368,6 +422,17 @@ export const NO_CURTAILABLE_ARRAY_ERROR =
  */
 export const NO_PRICES_ERROR =
   "Curtailment decides on the injection price, so dynamic prices have to be configured first.";
+
+/**
+ * Why a car-charging sensor cannot be saved on its own.
+ *
+ * The pair is the setting: the sensor says a car wants the surplus and the
+ * power says how much of it to hold open. With only the first, the gate would
+ * open onto a floor of zero watts and change nothing — an installation that
+ * looks configured and behaves exactly as though it were not, which is the
+ * failure this whole feature is most careful about elsewhere.
+ */
+export const CHARGER_POWER_REQUIRED_ERROR = `Charger power must be a whole number of watts between 1 and ${MAX_CHARGER_POWER_W} once a car-charging sensor is set.`;
 
 function readNumber(formData: FormData, name: string): number | null {
   const raw = formData.get(name)?.toString().trim();
@@ -467,6 +532,10 @@ export function parseCurtailmentConfig(
   const minLimitPercent = readNumber(formData, "minLimitPercent");
   const settleSeconds = readNumber(formData, "settleSeconds");
 
+  const chargerPowerW = readNumber(formData, "chargerPowerW");
+  const carChargingEntityId =
+    formData.get("carChargingEntityId")?.toString().trim() ?? "";
+
   const strategy = formData.get("strategy")?.toString();
   const bands = parseBands(formData);
 
@@ -512,6 +581,18 @@ export function parseCurtailmentConfig(
   ) {
     errors.settleSeconds = `Settle time must be a whole number of seconds between ${MIN_SETTLE_SECONDS} and ${MAX_SETTLE_SECONDS}.`;
   }
+  // Only demanded once the sensor is there. A charger power left behind by a
+  // sensor that has since been cleared is harmless — nothing reads it — and
+  // rejecting it would make removing the sensor a two-step operation.
+  if (
+    carChargingEntityId !== "" &&
+    (chargerPowerW === null ||
+      !Number.isInteger(chargerPowerW) ||
+      chargerPowerW < 1 ||
+      chargerPowerW > MAX_CHARGER_POWER_W)
+  ) {
+    errors.chargerPowerW = CHARGER_POWER_REQUIRED_ERROR;
+  }
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
@@ -530,6 +611,14 @@ export function parseCurtailmentConfig(
       deadbandW: deadbandW as number,
       minLimitPercent: minLimitPercent as number,
       settleSeconds: settleSeconds as number,
+      carChargingEntityId,
+      // Clamped rather than rejected when there is no sensor to go with it, so
+      // that a number left in the box does not block a save that has nothing to
+      // do with it.
+      chargerPowerW: Math.max(
+        0,
+        Math.min(MAX_CHARGER_POWER_W, Math.round(chargerPowerW ?? 0)),
+      ),
     },
   };
 }

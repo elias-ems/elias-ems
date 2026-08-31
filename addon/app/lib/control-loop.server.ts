@@ -67,7 +67,7 @@ import {
   isIgnoringItsLimit,
   publishPvLimits,
 } from "./pv-limits.server";
-import { toNumber } from "./readings.server";
+import { toBoolean, toNumber } from "./readings.server";
 import { readingAge, readStates } from "./states.server";
 import {
   describePublishes,
@@ -224,6 +224,10 @@ function controlReadingIds(config: TickConfig): string[] {
           // slot boundary, which is what makes "the price just went negative"
           // provoke a tick with nothing anywhere polling a clock.
           ...priceEntityIds(prices),
+          // And the car sensor for the same reason: plugging one in is a change
+          // in what the house can absorb, and it should provoke a tick rather
+          // than waiting out an interval with the arrays still held down.
+          curtailment.carChargingEntityId,
         ]
       : []),
   ].filter(Boolean);
@@ -237,6 +241,11 @@ type Snapshots = {
   provenance: string;
   /** What a kWh put on the grid earns right now, or null when unknown. */
   productionPricePerKwh: number | null;
+  /**
+   * Whether a car wants the surplus, or null when nothing says — no sensor
+   * configured, or one that is not readable. See `curtail.ts`.
+   */
+  carCharging: boolean | null;
   currency: string;
   /** Each steerable battery's slug, by battery id, ready to publish under. */
   slugs: Map<string, string>;
@@ -253,7 +262,7 @@ type Snapshots = {
  * is now the exception rather than every tick.
  */
 async function readSnapshots(config: TickConfig): Promise<Snapshots> {
-  const { grid, batteries, pvEntities, prices } = config;
+  const { grid, batteries, pvEntities, prices, curtailment } = config;
   const gridConfigured = isGridConfigured(grid);
 
   const readingIds = controlReadingIds(config);
@@ -303,6 +312,9 @@ async function readSnapshots(config: TickConfig): Promise<Snapshots> {
       stepLimitPercent: entity.stepLimitPercent,
     })),
     productionPricePerKwh: priceRead.now?.productionPerKwh ?? null,
+    carCharging: curtailment.carChargingEntityId
+      ? toBoolean(stateOf(curtailment.carChargingEntityId))
+      : null,
     currency: priceRead.forecast?.currency ?? "EUR",
     provenance: describeSource(readings),
     slugs: new Map(
@@ -414,6 +426,7 @@ async function tickCurtailment(
     // stops the arrays being held down in their place.
     batteries: inputs.batteries,
     productionPricePerKwh: inputs.productionPricePerKwh,
+    carCharging: inputs.carCharging,
     currency: inputs.currency,
     config,
     nowMs,

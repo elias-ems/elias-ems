@@ -38,7 +38,12 @@
   [Strategies](features/pv-curtailment.md#strategies). An array generating more
   than its limit plus a margin is now noticed rather than believed: the limit is
   re-asserted and logged as a warning, which is the one place the add-on can
-  currently tell that nothing acted on what it sent. Still to do: that check only
+  currently tell that nothing acted on what it sent. A charger following the
+  meter — evcc in solar mode — used to be starved by all of this, since
+  curtailment reaches a balanced meter first and then never moves again; naming
+  a "a car wants charge" sensor and the charger's power now holds the arrays
+  open for it, and brings a stepped inverter up with them when the charger
+  outreaches the modulating ones. Still to do: that check only
   reaches a limit that binds. An array generating under its limit cannot be
   checked and does not need to be, but a *release* cannot be checked at all — an
   array wrongly left curtailed generates less than it might, and how much it
