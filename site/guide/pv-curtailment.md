@@ -37,17 +37,19 @@ the first two:
 The rule is short:
 
 ```
-allowed = what the arrays are making now + how far the meter is from your target
+allowed = what the arrays are making now
+        + how far the meter is from your target
+        + whatever your battery is discharging
 ```
 
 If you are making 4 kW and exporting 2 kW, the house is using 2 kW — so 2 kW is
 what the arrays may make. If the kettle then goes on and the meter swings to
 importing 500 W, the limit rises by exactly 500 W on the next tick.
 
-**You do not have to tell it what your house is using, and it never needs to know
-what your battery is doing.** Both are already inside the meter reading. That
-also makes it self-correcting: any decision that under- or over-shoots leaves the
-meter off target, and the next tick asks for the difference.
+**You do not have to tell it what your house is using.** That is already inside
+the meter reading, which is also what makes the rule self-correcting: any
+decision that under- or over-shoots leaves the meter off target, and the next
+tick asks for the difference.
 
 ### Your battery gets the surplus first, automatically
 
@@ -58,6 +60,39 @@ its power limit**, does the surplus reach the meter and get curtailed.
 
 That is the right order — charging at a negative price is better than throwing
 the energy away — and it happens on its own. Nothing needs configuring to get it.
+
+### A battery *discharging* is why there is a third term
+
+This is the mirror case, and the one worth knowing about, because nothing on the
+dashboard looks wrong while it is happening.
+
+Your panels get held down, so the house is short. Your battery covers the
+shortfall — whether the add-on is steering it or your inverter is doing
+self-consumption on its own. The meter comes back to zero. And a meter at zero
+is curtailment's "nothing to do", so the limit never rises again: the battery
+empties across the afternoon while the sun that could have supplied the same
+house, for nothing, goes unmade.
+
+So the add-on reads what your batteries are doing and asks the arrays for it.
+1,959 W coming out of the battery is 1,959 W the arrays are allowed to make. As
+they take the house over, whatever is steering the battery sees the surplus and
+stops discharging, and the two settle within a tick or two of each other.
+
+Four things follow from it:
+
+- **It never commands your battery.** It only stops holding the arrays down. A
+  limit is a ceiling, so raising one your array cannot reach — on a dark winter
+  evening, say — does nothing at all.
+- **Every battery counts**, steered by the add-on or not, netted against each
+  other if you have one charging while another discharges.
+- **A battery whose power sensor is unreadable** counts as not discharging, and
+  the log says so. The arrays stay where the meter alone would put them rather
+  than following a guess.
+- **A battery being forced to discharge** by a schedule that is not watching
+  prices will export what it discharges instead of backing off. The log says
+  that too — `the battery is discharging 1500 W into a house the arrays already
+  cover`. Curtailing your panels would stop the export by draining the battery
+  to replace free sun, which is the trade this rule exists to refuse.
 
 ## The rules
 

@@ -390,6 +390,44 @@ describe("runControlTick, curtailment half", () => {
     expect(targetEvents()).toEqual([]);
   });
 
+  it("asks the array for what the battery is delivering to the house", async () => {
+    // The battery's power is read for curtailment as well now, and this is why:
+    // a discharging battery hides the shortfall the feedback law looks for, so
+    // without it the array stays pinned at whatever it was cut to while the
+    // battery empties into a house the sun was ready to supply.
+    await addBattery(BATTERY);
+    await onlyCurtailment();
+    ha.setState("sensor.battery_power", "-1000", { unit_of_measurement: "W" });
+
+    await runControlTick();
+
+    // 1234.5 W generated, 842 W imported and 1000 W coming out of the battery,
+    // so the array may make 3077 W — 62% of a 5000 W inverter, against the 42%
+    // the meter alone would have asked for.
+    expect(logged("while the battery discharges 1000 W")).toBe(true);
+    expect(logged("arrays at 1235 W → allow 3077 W total")).toBe(true);
+    expect(pvLimitEvents()).toEqual([
+      ["elias_ems_south_roof_pv_limit", 62, false],
+    ]);
+    // Read, never commanded: battery control is off, and this half does not
+    // publish for a battery whatever it reads from one.
+    expect(targetEvents()).toEqual([]);
+  });
+
+  it("leaves a charging battery to take the surplus first", async () => {
+    // The order the feature was built around, and it must stay where it was: a
+    // battery with room drives the meter towards zero on its own, and what it
+    // draws is already inside the reading.
+    await addBattery(BATTERY);
+    await onlyCurtailment();
+    ha.setState("sensor.battery_power", "1000", { unit_of_measurement: "W" });
+
+    await runControlTick();
+
+    expect(logged("arrays at 1235 W → allow 2077 W total")).toBe(true);
+    expect(logged("while the battery discharges")).toBe(false);
+  });
+
   it("does not publish again while the limit has not moved", async () => {
     await onlyCurtailment();
 

@@ -11,9 +11,11 @@
  * read of the stored configuration rather than one per concern.
  *
  * They are also ordered: the batteries decide first. Nothing depends on that
- * ordering for correctness — curtailment's arithmetic has the battery cancel
- * out of it — but it keeps the log readable, with the reason a surplus was
- * curtailed sitting under the line saying the battery could not take it.
+ * ordering for correctness — both halves read the same snapshot, so curtailment
+ * sees what the batteries are *measured* to be doing rather than what they have
+ * just been told to do — but it keeps the log readable, with the reason a
+ * surplus was curtailed sitting under the line saying the battery could not
+ * take it.
  *
  * Each tick publishes what it decided as an event per battery and per array and
  * records both halves. Deciding and acting stay separable — `net-zero.ts` and
@@ -206,12 +208,15 @@ function controlReadingIds(config: TickConfig): string[] {
 
   return [
     ...(isGridConfigured(grid) ? [grid.powerEntityId] : []),
-    ...(control.enabled
-      ? batteries.flatMap((battery) => [
-          battery.socEntityId,
-          battery.powerEntityId,
-        ])
+    // Battery power belongs to both features, and to curtailment for a reason
+    // that is not obvious: it does not command batteries, but a discharging one
+    // hides the shortfall its feedback law is looking for, so the law has to be
+    // able to see it. See `curtail.ts`. The state of charge is battery
+    // control's alone — nothing here decides on it.
+    ...(control.enabled || curtailment.enabled
+      ? batteries.map((battery) => battery.powerEntityId)
       : []),
+    ...(control.enabled ? batteries.map((battery) => battery.socEntityId) : []),
     ...(curtailment.enabled
       ? [
           ...pvEntities.map((entity) => entity.powerEntityId),
@@ -403,6 +408,11 @@ async function tickCurtailment(
   const input: CurtailInput = {
     gridPowerW: inputs.gridPowerW,
     arrays: inputs.arrays,
+    // Every battery, steered or not: a battery discharging into the house is
+    // hiding the same watts from the meter whoever is telling it to. Nothing is
+    // commanded to them from this half — `curtail.ts` reads their power and
+    // stops the arrays being held down in their place.
+    batteries: inputs.batteries,
     productionPricePerKwh: inputs.productionPricePerKwh,
     currency: inputs.currency,
     config,

@@ -624,6 +624,27 @@ In [addon/app/lib/control-loop.server.ts](../../addon/app/lib/control-loop.serve
   loop that dies on the first outage is worse than no loop, because from the
   outside it still looks like it is working.
 
+### What curtailment does with a discharge
+
+Nothing here changes when [PV curtailment](pv-curtailment.md) is also on, and
+this is the one place worth saying why, because the two features do now look at
+the same number.
+
+Net-zero discharges to cover an import. Curtailment reads that discharge and
+[adds it back to what the arrays may
+make](pv-curtailment.md#the-battery-free-when-it-charges-not-when-it-discharges),
+because a discharging battery hides the shortfall its feedback law is looking
+for — otherwise the two would hold each other in a fixed point, with the arrays
+pinned at whatever they were cut to and the battery emptying to cover them.
+
+Curtailment never publishes a target for a battery, so the two never write to the
+same hardware. The handover is the ordinary loop instead: the arrays take the
+house over, the surplus reaches the meter, and net-zero reads it and stops
+discharging on the next tick, exactly as it would for any other load that had
+gone away. Net-zero is the fast loop with no settle time of its own, curtailment
+the slow one paced by `settleSeconds`, which is the right way round for the two
+to converge rather than chase each other.
+
 ## Watching it decide
 
 Every line the loop produces goes to **diagnostics** under the

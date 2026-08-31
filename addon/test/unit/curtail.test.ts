@@ -9,6 +9,7 @@ import {
   type CurtailInput,
   NOT_CURTAILABLE_REASON,
   type PvArraySnapshot,
+  type PvBatterySnapshot,
   planCurtailment,
 } from "../../app/lib/curtail";
 import {
@@ -33,12 +34,23 @@ function array(overrides: Partial<PvArraySnapshot> = {}): PvArraySnapshot {
   };
 }
 
+/** Idle unless a case says otherwise — most of these are not about batteries. */
+function battery(
+  overrides: Partial<PvBatterySnapshot> = {},
+): PvBatterySnapshot {
+  return { title: "Home battery", powerW: 0, ...overrides };
+}
+
 const NOW = 1_000_000;
 
 function input(overrides: Partial<CurtailInput> = {}): CurtailInput {
   return {
     gridPowerW: 0,
     arrays: [array()],
+    // No battery unless a case brings one: panels and no battery is an
+    // ordinary house, and it is the shape every case that predates the battery
+    // term was written against.
+    batteries: [],
     // Below the default threshold of 0, so the price says "hold back" unless a
     // case is specifically about the price.
     productionPricePerKwh: -0.05,
@@ -262,6 +274,228 @@ describe("the arithmetic", () => {
 
     expect(plan.combinedAllowedW).toBe(2020);
     expect(plan.decisions[0]).toMatchObject({ limitPercent: 40, limitW: 2000 });
+  });
+});
+
+describe("a battery that is discharging", () => {
+  it("asks the arrays for what the battery is delivering", () => {
+    // 2000 W generated, the meter balanced, and 1500 W of the house being
+    // covered by the battery. The arrays may make 3500 W — the 1500 W is a
+    // shortfall the meter cannot show, because the battery is already filling
+    // it.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: 0,
+        arrays: [array({ powerW: 2000 })],
+        batteries: [battery({ powerW: -1500 })],
+      }),
+    );
+
+    expect(plan.batteryDischargeW).toBe(1500);
+    expect(plan.combinedAllowedW).toBe(3500);
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 70 });
+  });
+
+  it("would otherwise leave the arrays pinned while the battery emptied", () => {
+    // The failure this term exists for, and it is a fixed point rather than a
+    // slow drift: net-zero discharges to cover the import curtailment created,
+    // the meter comes back to zero, and curtailment reads its own suppression
+    // as balance. Every level of PV is an equilibrium once something else is
+    // holding the meter.
+    const held = {
+      gridPowerW: -9,
+      arrays: [array({ powerW: 424, ratedPowerW: 10_000 })],
+    };
+
+    const withoutBattery = planCurtailment(input(held));
+    expect(withoutBattery.offTarget).toBe(false);
+
+    const withBattery = planCurtailment(
+      input({ ...held, batteries: [battery({ powerW: -1959 })] }),
+    );
+
+    expect(withBattery.offTarget).toBe(true);
+    expect(withBattery.combinedAllowedW).toBe(2374);
+    expect(withBattery.decisions[0]).toMatchObject({
+      action: "curtail",
+      limitPercent: 24,
+    });
+  });
+
+  it("leaves a charging battery exactly where it was", () => {
+    // The case the feature was written around, and it must not move: a battery
+    // soaking up the surplus drives the meter towards zero on its own, and
+    // whatever it is drawing is already inside the reading.
+    const plan = planCurtailment(
+      input({ gridPowerW: -2000, batteries: [battery({ powerW: 1500 })] }),
+    );
+
+    expect(plan.batteryDischargeW).toBe(0);
+    expect(plan.combinedAllowedW).toBe(2000);
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 40 });
+  });
+
+  it("nets the batteries against each other rather than summing discharges", () => {
+    // One charging at 2000 W beside one discharging at 1500 W is taking 500 W
+    // out of the house between them, not giving it 1500 W. Summing the
+    // discharges alone would ask the arrays to cover the charge twice.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: 0,
+        arrays: [array({ powerW: 2000 })],
+        batteries: [
+          battery({ title: "Cellar", powerW: -1500 }),
+          battery({ title: "Garage", powerW: 2000 }),
+        ],
+      }),
+    );
+
+    expect(plan.batteryDischargeW).toBe(0);
+    expect(plan.combinedAllowedW).toBe(2000);
+  });
+
+  it("adds up several batteries carrying the house together", () => {
+    const plan = planCurtailment(
+      input({
+        gridPowerW: 0,
+        arrays: [array({ powerW: 2000 })],
+        batteries: [
+          battery({ title: "Cellar", powerW: -800 }),
+          battery({ title: "Garage", powerW: -700 }),
+        ],
+      }),
+    );
+
+    expect(plan.batteryDischargeW).toBe(1500);
+    expect(plan.combinedAllowedW).toBe(3500);
+  });
+
+  it("assumes a battery with no reading is not discharging, and says so", () => {
+    // Under-crediting rather than over-crediting: an allowance built on an
+    // invented number would be handed to the arrays as though it were measured.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: 0,
+        arrays: [array({ powerW: 2000 })],
+        batteries: [battery({ powerW: null })],
+      }),
+    );
+
+    expect(plan.batteryDischargeW).toBe(0);
+    expect(plan.combinedAllowedW).toBe(2000);
+    expect(plan.warnings).toContainEqual(
+      expect.stringMatching(/Home battery: power reading unavailable/),
+    );
+  });
+
+  it("names the battery in the summary while it is discharging", () => {
+    // The meter alone stops being the whole story the moment a battery is in
+    // the way: -1500 W beside a battery discharging 1500 W is a house its
+    // arrays are covering exactly, and the same reading on its own is a house
+    // exporting at a price it is paying.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -3000,
+        arrays: [array({ powerW: 4000 })],
+        batteries: [battery({ powerW: -500 })],
+      }),
+    );
+
+    expect(plan.summary).toMatch(/while the battery discharges 500 W/);
+  });
+
+  it("holds, and warns, when the export is the battery's own discharge", () => {
+    // The one case the term cannot fix. Cutting the arrays back would stop the
+    // export — by draining the battery to displace free generation, which is
+    // the trade the term exists to refuse — so it is reported instead.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -1500,
+        arrays: [array({ powerW: 2000 })],
+        batteries: [battery({ powerW: -1500 })],
+      }),
+    );
+
+    expect(plan.offTarget).toBe(false);
+    expect(plan.decisions[0]).toMatchObject({
+      action: "hold",
+      commandPercent: null,
+    });
+    expect(plan.warnings).toContainEqual(
+      expect.stringMatching(/discharging 1500 W into a house the arrays/),
+    );
+  });
+
+  it("still cuts an export the discharge does not account for", () => {
+    // 3000 W going out with only 500 W of it coming from the battery: 2500 W
+    // is being sold at a loss and is the arrays' to give up.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -3000,
+        arrays: [array({ powerW: 4000 })],
+        batteries: [battery({ powerW: -500 })],
+      }),
+    );
+
+    expect(plan.combinedAllowedW).toBe(1500);
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 30 });
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("counts the discharge against a moved target under graded export", () => {
+    // The band moves the target and nothing else, so the battery term rides on
+    // it untouched: 33% of a 5000 W rating is 1650 W of allowed export, the
+    // meter is 1000 W short of that, and the battery is covering 500 W more.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -650,
+        arrays: [array({ powerW: 2000 })],
+        batteries: [battery({ powerW: -500 })],
+        productionPricePerKwh: 0.005,
+        config: {
+          ...DEFAULT_CURTAILMENT_CONFIG,
+          enabled: true,
+          strategy: "graded-export",
+        },
+      }),
+    );
+
+    expect(plan.combinedAllowedW).toBe(3500);
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 70 });
+  });
+
+  it("does not disturb a soft ceiling, which never reads the meter", () => {
+    // Reported, since it is a fact about the house, but not acted on: there is
+    // no feedback term here for it to be added back to.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: 0,
+        productionPricePerKwh: 0.005,
+        batteries: [battery({ powerW: -1500 })],
+        config: {
+          ...DEFAULT_CURTAILMENT_CONFIG,
+          enabled: true,
+          strategy: "soft-ceiling",
+        },
+      }),
+    );
+
+    expect(plan.batteryDischargeW).toBe(1500);
+    expect(plan.decisions[0]).toMatchObject({ limitPercent: 70 });
+  });
+
+  it("still releases everything once the price recovers", () => {
+    // Nothing about a battery makes a kWh worth less than the threshold says.
+    const plan = planCurtailment(
+      input({
+        productionPricePerKwh: 0.04,
+        gridPowerW: 0,
+        batteries: [battery({ powerW: -1500 })],
+      }),
+    );
+
+    expect(plan.curtailing).toBe(false);
+    expect(plan.decisions[0]).toMatchObject({ action: "release" });
   });
 });
 
@@ -743,6 +977,42 @@ describe("stepped inverters", () => {
       action: "curtail",
       limitPercent: 20,
       limitW: 1000,
+      commandPercent: 20,
+    });
+  });
+
+  it("does not spend a write on an export its own battery accounts for", () => {
+    // 1000 W going out of the meter while the battery gives out 2000 W: the
+    // export is the battery's, and so is stopping it. Holding this array down
+    // so the battery can empty in its place would spend one of a finite number
+    // of writes making that trade twice over.
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -1000,
+        arrays: [stepped({ powerW: 2000 })],
+        batteries: [battery({ powerW: -2000 })],
+      }),
+    );
+
+    expect(plan.offTarget).toBe(true);
+    expect(plan.decisions[0]).toMatchObject({
+      action: "hold",
+      commandPercent: null,
+    });
+    expect(plan.decisions[0].reason).toMatch(/no export to prevent/);
+  });
+
+  it("still steps when the export outruns the discharge", () => {
+    const plan = planCurtailment(
+      input({
+        gridPowerW: -2000,
+        arrays: [stepped({ powerW: 4000 })],
+        batteries: [battery({ powerW: -500 })],
+      }),
+    );
+
+    expect(plan.decisions[0]).toMatchObject({
+      action: "curtail",
       commandPercent: 20,
     });
   });
