@@ -127,6 +127,18 @@ export default function PricesSection({
   const [source, setSource] = useState(config.source);
   const selected = PRICE_SOURCES.find((option) => option.id === source);
 
+  // `summary` describes the entity that's actually saved, read back on the
+  // last load — it can't know anything about an entity picked since. Track
+  // what's currently in the field so the check below stops claiming to be
+  // about it the moment they diverge, rather than showing a stale result
+  // (most confusingly, the old entity's error) against the new pick until
+  // the next save.
+  const [liveEntityId, setLiveEntityId] = useState(config.forecastEntityId);
+  const summaryIsCurrent = liveEntityId === config.forecastEntityId;
+  const effectiveSummary: PriceSourceSummary = summaryIsCurrent
+    ? summary
+    : { ...summary, spotPerKwh: null };
+
   return (
     <Section
       title="Prices"
@@ -169,6 +181,7 @@ export default function PricesSection({
               placeholder="e.g. sensor.energi_epex_spot"
               defaultValue={config.forecastEntityId}
               error={errors.forecastEntityId}
+              onValueChange={setLiveEntityId}
             />
 
             {/*
@@ -178,13 +191,22 @@ export default function PricesSection({
               that already includes markups double-counts into a number that
               still looks like a price. Reading back the series — and the
               worked-out prices below — is what makes that visible.
+
+              Only shown while it's actually about the entity in the field:
+              `summary` is a fact about what's saved, not what's typed.
             */}
-            <p style={summary.ok ? hintStyle : errorStyle}>{summary.detail}</p>
-            {summary.spot && (
-              <p style={hintStyle}>
-                Now: {summary.spot} on the exchange · {summary.consumption} to
-                buy · {summary.production} to sell
-              </p>
+            {summaryIsCurrent && (
+              <>
+                <p style={summary.ok ? hintStyle : errorStyle}>
+                  {summary.detail}
+                </p>
+                {summary.spot && (
+                  <p style={hintStyle}>
+                    Now: {summary.spot} on the exchange · {summary.consumption}{" "}
+                    to buy · {summary.production} to sell
+                  </p>
+                )}
+              </>
             )}
 
             <FormulaField
@@ -193,7 +215,7 @@ export default function PricesSection({
               hint="Arithmetic over `price`, the exchange price per kWh. e.g. ((price * 1.02) + 0.1272) * 1.06 for a slope, a fixed charge and VAT. `min` and `max` are available."
               defaultValue={config.consumptionFormula}
               error={errors.consumptionFormula}
-              summary={summary}
+              summary={effectiveSummary}
             />
 
             <FormulaField
@@ -202,7 +224,7 @@ export default function PricesSection({
               hint="Usually a different formula. e.g. max(price * 0.98 - 0.015, 0) to take a cut and never go below zero, or just 0.05 for a fixed injection tariff."
               defaultValue={config.productionFormula}
               error={errors.productionFormula}
-              summary={summary}
+              summary={effectiveSummary}
             />
           </>
         )}
