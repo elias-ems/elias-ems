@@ -301,6 +301,67 @@ describe("action origin checking", () => {
     expect(await storedTitles()).toContain("Posted from the page");
   });
 
+  /**
+   * Posts straight at the app with the headers a proxy would have set, because
+   * the mock in front of it deliberately reproduces the *working* shape — HA
+   * forwarding Host untouched. What is under test here is the other shape.
+   */
+  async function submitBehindProxy(
+    headers: Record<string, string>,
+    title: string,
+  ) {
+    return fetch(`${stack.directUrl}/settings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Ingress-Path": stack.prefix,
+        ...headers,
+      },
+      body: new URLSearchParams({
+        intent: "pv-add",
+        title,
+        powerEntityId: "sensor.inverter_power",
+        energyEntityId: "sensor.inverter_energy_total",
+      }),
+      redirect: "manual",
+    });
+  }
+
+  it("accepts a form posted from the host the proxy says the browser used", async () => {
+    // Reached through Nabu Casa or a reverse proxy in front of Home Assistant,
+    // the Host arriving here is the internal one while the browser posts from
+    // the public name. Every page loads and every save fails, with nothing in
+    // the log naming an origin — see the CSRF note in server.js.
+    const response = await submitBehindProxy(
+      {
+        Host: "127.0.0.1:1",
+        "X-Forwarded-Host": "ems.example.com",
+        Origin: "https://ems.example.com",
+      },
+      "Posted from the forwarded host",
+    );
+
+    expect(response.status).toBeLessThan(400);
+    expect(await storedTitles()).toContain("Posted from the forwarded host");
+  });
+
+  it("still rejects a foreign origin when the proxy names a different host", async () => {
+    // The forwarded host widens the check to one more name, not to any name.
+    const response = await submitBehindProxy(
+      {
+        Host: "127.0.0.1:1",
+        "X-Forwarded-Host": "ems.example.com",
+        Origin: "http://evil.example",
+      },
+      "Posted past the forwarded host",
+    );
+
+    expect(response.status).toBe(400);
+    expect(await storedTitles()).not.toContain(
+      "Posted past the forwarded host",
+    );
+  });
+
   it("rejects a form posted from somewhere else", async () => {
     // React Router answers a failed origin check with 400, which is also what a
     // validation failure looks like — so the status alone proves nothing. What
