@@ -16,7 +16,12 @@
  * - Forwards the browser's original `Host` untouched and sets no `X-Forwarded-*`
  *   headers, matching HA. React Router's action-origin CSRF check compares
  *   Origin against that Host, so getting this wrong would either mask a real
- *   CSRF failure or invent one that production never sees.
+ *   CSRF failure or invent one that production never sees. That is the shape
+ *   where the two agree; the shape where they do not — HA behind Nabu Casa or a
+ *   reverse proxy, announcing the browser's host in `X-Forwarded-Host` — is
+ *   deliberately *not* reproduced here, because a mock that sent both shapes
+ *   would stop being the thing this one is for. It is covered by posting at the
+ *   stack's `directUrl` with those headers set by hand.
  *
  * Plain JavaScript on purpose — see the note in test/ha-mock.js.
  */
