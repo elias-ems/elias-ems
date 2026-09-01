@@ -131,8 +131,12 @@ Which two is `DECISION_ORIGINS` in [diagnostics.ts](../../addon/app/lib/diagnost
 not a literal in either place that needs it. The home loader seeds the feed with
 that filter and the feed's own poll re-sends it a couple of seconds later, so
 two copies could disagree — and nothing would say so, since either list on its
-own renders a perfectly plausible feed. Adding a third strategy is then one
-line, the same way adding an origin is.
+own renders a perfectly plausible feed. Adding a third strategy is that one
+line plus a badge for it in
+[DecisionFeed.tsx](../../addon/app/components/dashboard/DecisionFeed.tsx): a row
+whose origin is not in `BADGE` prints the origin id instead, which reads well
+enough in a sentence and does not fit the fixed column the two-to-four-character
+badges are sized for.
 
 An entry from the control loop looks like this:
 

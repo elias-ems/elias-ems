@@ -152,7 +152,9 @@ function logLoop(level: DiagnosticsLevel, message: string): void {
   if (state.curtailment?.enabled) origins.push("pv-curtailment");
 
   // Nothing enabled and yet a tick happened — a forced tick from the UI, or a
-  // race with a save. Battery control's box is the one the home page shows.
+  // race with a save. The line still has to land where a reader will find it,
+  // and one arbitrary-but-stable origin beats two copies of it: the home page's
+  // decision feed asks for both strategies, so either would have surfaced.
   for (const origin of origins.length > 0 ? origins : ["battery-control"]) {
     log(origin as DiagnosticsOrigin, level, message);
   }
