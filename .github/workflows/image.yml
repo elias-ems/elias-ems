@@ -1,0 +1,188 @@
+name: Add-on image
+
+# Builds and publishes the add-on's container image to GHCR.
+#
+# A GitHub release is the only release gesture: publishing one builds both
+# architectures, pushes the multi-arch manifest, and only then commits the new
+# `version` into addon/config.yaml on main. That order matters — Supervisor
+# reads `version` from config.yaml on the default branch to decide whether an
+# update exists, so main must never advertise a version before its image is
+# pullable. Ordinary feature PRs never touch `version`.
+#
+# On a pull request, only Dockerfile-shaped changes trigger a build, and it
+# never pushes. ci.yml's addon-integration job already runs `npm run build` on
+# every PR, so this only needs to prove the Dockerfile and build context still
+# work, not the app itself.
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - "addon/Dockerfile"
+      - "addon/.dockerignore"
+      - ".github/workflows/image.yml"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to (re)publish, e.g. 1.0.0-alpha.35
+        required: true
+      force:
+        description: Overwrite the tag if it already exists
+        type: boolean
+        default: false
+
+env:
+  IMAGE_NAME: elias-ems
+  REGISTRY_PREFIX: ghcr.io/elias-ems
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  init:
+    name: Resolve version and build matrix
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          case "${EVENT_NAME}" in
+            release)
+              version="${RELEASE_TAG#v}"
+              publish=true
+              ;;
+            workflow_dispatch)
+              version="${DISPATCH_VERSION}"
+              publish=true
+              ;;
+            *)
+              # PR builds don't push, so the version only labels the image.
+              version=$(sed -n 's/^version: *"\{0,1\}\([^"]*\)"\{0,1\}/\1/p' addon/config.yaml)
+              publish=false
+              ;;
+          esac
+
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'${version}' is not a valid semver/Docker tag"
+            exit 1
+          fi
+
+          if [[ "${publish}" == "true" && "${FORCE}" != "true" ]]; then
+            if docker buildx imagetools inspect "${REGISTRY_PREFIX}/${IMAGE_NAME}:${version}" >/dev/null 2>&1; then
+              echo "::error::${REGISTRY_PREFIX}/${IMAGE_NAME}:${version} is already published. Re-run with force to overwrite."
+              exit 1
+            fi
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+
+      - name: Build matrix
+        id: matrix
+        uses: home-assistant/builder/actions/prepare-multi-arch-matrix@2026.06.0
+        with:
+          architectures: '["amd64", "aarch64"]'
+          image-name: ${{ env.IMAGE_NAME }}
+          registry-prefix: ${{ env.REGISTRY_PREFIX }}
+
+  build:
+    name: Build ${{ matrix.arch }} image
+    needs: init
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.init.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+
+      - name: Build image
+        uses: home-assistant/builder/actions/build-image@2026.06.0
+        with:
+          arch: ${{ matrix.arch }}
+          context: "./addon"
+          image: ${{ matrix.image }}
+          image-tags: |
+            ${{ needs.init.outputs.version }}
+            latest
+          labels: |
+            io.hass.type=addon
+            io.hass.name=Elias ems
+            io.hass.description=Home Energy Management System (HEMS) that complements and extends Home Assistant
+            io.hass.url=https://elias-ems.github.io/elias-ems/
+          push: ${{ needs.init.outputs.publish }}
+          version: ${{ needs.init.outputs.version }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  manifest:
+    name: Publish multi-arch manifest
+    needs: [init, build]
+    if: needs.init.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      packages: write
+    steps:
+      - name: Publish multi-arch manifest
+        uses: home-assistant/builder/actions/publish-multi-arch-manifest@2026.06.0
+        with:
+          architectures: '["amd64", "aarch64"]'
+          image-name: ${{ env.IMAGE_NAME }}
+          registry-prefix: ${{ env.REGISTRY_PREFIX }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          image-tags: |
+            ${{ needs.init.outputs.version }}
+            latest
+
+  bump:
+    name: Bump config.yaml on main
+    needs: [init, manifest]
+    if: needs.init.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set version and commit
+        env:
+          VERSION: ${{ needs.init.outputs.version }}
+        run: |
+          sed -i "s/^version: .*/version: \"${VERSION}\"/" addon/config.yaml
+
+          if git diff --quiet -- addon/config.yaml; then
+            echo "addon/config.yaml already at ${VERSION}, nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add addon/config.yaml
+          git commit -m "chore(release): ${VERSION} [skip ci]"
+          git push origin main

@@ -12,7 +12,7 @@ Requires a Supervisor-based install (Home Assistant OS or Supervised) — Core-o
 2. Click the **⋮** menu (top right) → **Repositories**.
 3. Add `https://github.com/elias-ems/elias-ems` and close the dialog.
 4. Refresh the store page — the "Elias EMS Add-ons" repository shows up with "Elias ems" listed.
-5. Open it, click **Install**, and watch the build log (first build compiles the React Router app inside Docker, so it takes a few minutes).
+5. Open it and click **Install** — it pulls a prebuilt image, so this takes seconds rather than minutes.
 6. Once installed, click **Start**, then open the app from the sidebar panel.
 
 Then point it at your entities — the [configuration guide](https://elias-ems.github.io/elias-ems/guide/configure) covers the grid sensor's sign convention and what makes a battery steerable, which are the two things worth getting right first.
@@ -41,6 +41,16 @@ cd addon && npm install && npm run dev:mock
 ```
 
 `npm install` is also what installs the git hooks. See [CLAUDE.md](CLAUDE.md) for the full command list, the ingress quirks worth knowing before touching `server.js`, and why this repo uses Biome rather than ESLint.
+
+### Releasing
+
+A GitHub release is what publishes a new version — merging to `main` never does. Publishing one builds and pushes the `amd64`/`aarch64` image to GHCR and, once that succeeds, bumps `version` in [addon/config.yaml](addon/config.yaml) on `main` for you:
+
+```bash
+gh release create 1.0.0-alpha.35 --generate-notes --prerelease
+```
+
+See [Versioning](CLAUDE.md#versioning) and [Publishing the add-on image](CLAUDE.md#publishing-the-add-on-image) in CLAUDE.md for why the order matters and what [.github/workflows/image.yml](.github/workflows/image.yml) does.
 
 ### The documentation site
 

@@ -23,9 +23,9 @@ supported.
 
 ## Install and start
 
-5. Open it and click **Install**. The first build compiles the app inside
-   Docker, so give it a few minutes — watching the build log is the way to tell
-   it apart from a hung install.
+5. Open it and click **Install**. It pulls a prebuilt image rather than
+   compiling anything on your Home Assistant box, so this should finish in
+   seconds.
 6. When it finishes, click **Start**.
 7. Turn on **Show in sidebar** so you can reach it in one click, then open the
    panel.
@@ -49,7 +49,8 @@ batteries, and only then enable the control loop.
 The add-on declares a version, and Home Assistant's Supervisor decides there is
 an update purely by comparing that string to what you have installed. When a new
 version is published, **Update** appears on the add-on page the same way it does
-for any other add-on — there is nothing to pull by hand.
+for any other add-on — there is nothing to pull by hand, and clicking Update
+pulls the new prebuilt image rather than rebuilding it.
 
 Versions are `1.0.0-alpha.N` while this is pre-1.0. Expect settings to grow new
 fields between them; existing configuration is normalised forward rather than
