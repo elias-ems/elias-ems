@@ -123,10 +123,11 @@ Note that lefthook globs are matched from the **repo root** and ignore the `root
 
 ## Continuous integration
 
-Two workflows, both on `ubuntu-24.04` and both installing Node with `actions/setup-node`:
+Three workflows:
 
-- [.github/workflows/docs.yml](.github/workflows/docs.yml) — builds the site on pull requests touching `site/`, `docs/` or itself, and deploys from `main`.
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) — three jobs covering everything else: `addon` (lint, typecheck, unit tests), `addon-integration` (build, then the integration suite), and `site` (lint, typecheck, the link-rewriting tests).
+- [.github/workflows/docs.yml](.github/workflows/docs.yml) — builds the site on pull requests touching `site/`, `docs/` or itself, and deploys from `main`. Runs on `ubuntu-24.04` with Node via `actions/setup-node`.
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) — three jobs covering everything else: `addon` (lint, typecheck, unit tests), `addon-integration` (build, then the integration suite), and `site` (lint, typecheck, the link-rewriting tests). Also `ubuntu-24.04` with `actions/setup-node`.
+- [.github/workflows/image.yml](.github/workflows/image.yml) — builds and publishes the add-on's container image to GHCR. See [Publishing the add-on image](#publishing-the-add-on-image) below; it does not use `setup-node` at all, since nothing in it runs the app's own toolchain.
 
 **The end-to-end suite does not run in CI yet.** Its first run hung for four hours on `npx playwright install --with-deps chromium` — not failing, just never returning, so nothing would have ended it but the 6-hour default job timeout. The browser half is off until that is diagnosed; the integration suite needs no browser and so cannot hit the same wall, and `npm run test:e2e` locally still covers the ground. The steps to restore — a `~/.cache/ms-playwright` cache keyed on the installed Playwright version, the two install steps, the report upload — are in ci.yml's history at commit 9d68687. Every job now sets `timeout-minutes`, so a repeat costs minutes rather than hours.
 
@@ -137,12 +138,23 @@ Points worth not re-deriving:
 - **Node's version lives in [.node-version](.node-version), not in [mise.toml](mise.toml).** `setup-node`'s `node-version-file` reads `package.json`, `.nvmrc`, `.node-version` and `.tool-versions` — never a `mise.toml` — so leaving the number there would have meant maintaining it twice. mise reads `.node-version` too, but only because of the `idiomatic_version_file_enable_tools = ["node"]` setting in mise.toml: idiomatic version files are **off by default** in mise, and dropping that setting silently leaves local shells with no pinned Node at all. mise.toml still owns `gh`, which has no such file.
 - **`addon-integration` calls `vitest` directly** after its own `npm run build`, rather than going through `test:integration` — that script runs `npm run build` first, so using it would build twice.
 - **When e2e does come back, `mcr.microsoft.com/playwright:<version>-noble` is the obvious thing to try**, since it ships the browsers and their system libraries and so skips the install step that hung. The cost is that the image tag has to be bumped in lockstep with `@playwright/test`, and a mismatch fails obscurely.
-- **A container image is the wrong runner for this repo.** Matching the Dockerfile with `node:24-alpine` sounds appealing and cannot work: Playwright publishes no musl browser builds, and `install --with-deps` shells out to `apt-get`. What `node:24-alpine` would actually validate is the *image build*, and the way to check that is to build the Dockerfile — a job that does not exist yet.
+- **A container image is the wrong runner for this repo.** Matching the Dockerfile with `node:24-alpine` sounds appealing and cannot work: Playwright publishes no musl browser builds, and `install --with-deps` shells out to `apt-get`. What `node:24-alpine` would actually validate is the *image build*, and that is now [image.yml](.github/workflows/image.yml)'s job on a PR.
 - **The lint/typecheck/test steps within a job run even after an earlier one fails** (`if: ${{ !cancelled() && steps.install.outcome == 'success' }}`), so one lint error doesn't hide a type error. The install guard is the part that matters: plain `!cancelled()` would keep running the checks after `npm ci` itself had failed.
 - **The `site` job installs *both* projects.** `site`'s `lint` and `typecheck` shell out to the add-on's Biome and tsc with `--no`, which makes a missing `addon/node_modules` an error rather than a download.
 - lefthook's postinstall skips itself when `CI` is set, so CI checkouts correctly get no git hooks.
 
 Nothing enforces these on merge by itself — the job names have to be added as **required status checks** on `main` in the repository settings for a red run to block anything.
+
+### Publishing the add-on image
+
+[addon/config.yaml](addon/config.yaml)'s `image` field points Supervisor at `ghcr.io/elias-ems/elias-ems` — a prebuilt multi-arch image — rather than leaving it unset, which would make every install and update compile the app on the user's own Home Assistant box. [image.yml](.github/workflows/image.yml) is what keeps that image in step with the repository:
+
+- **A GitHub release, not a merge, is the release.** Publishing one (`gh release create 1.0.0-alpha.35 --generate-notes --prerelease`) builds `amd64` and `aarch64`, pushes both, publishes the multi-arch manifest, and only then commits the new `version` into `addon/config.yaml` on `main` and pushes — see [Versioning](#versioning) for why that order can't be reversed. `main` has a ruleset blocking deletion and force-push but no PR requirement, which is what lets that last step push directly.
+- **The builder actions are `home-assistant/builder`'s, pinned to `2026.06.0`.** That repo's own `home-assistant/builder@master` action is deprecated and due for removal; the composite actions (`prepare-multi-arch-matrix`, `build-image`, `publish-multi-arch-manifest`) are the current path. Bumping the pin is a manual, deliberate edit — there is no Renovate/Dependabot config for GitHub Actions in this repo.
+- **Both architectures build natively, no QEMU.** `prepare-multi-arch-matrix` maps `amd64 → ubuntu-24.04` and `aarch64 → ubuntu-24.04-arm`; ARM runners are free on public repositories, which this one is.
+- **On a pull request nothing is pushed**, and only Dockerfile-shaped changes (`addon/Dockerfile`, `addon/.dockerignore`, the workflow itself) trigger a build at all — `addon-integration` in ci.yml already runs `npm run build` on every PR, so the image build only needs to prove the Dockerfile and build context, not the app.
+- **The GHCR packages must stay public.** They default to private on first push, which anonymous Supervisor pulls cannot read; this is a one-time manual step in the repo's Packages settings, not something the workflow can set.
+- **`workflow_dispatch` re-publishes a specific version**, for when a release's build failed partway — it takes the same path (build, push, manifest, bump) and needs `force: true` to overwrite a tag that already exists. Overwriting one otherwise fails the `init` job on purpose: a version string a user already has installed can never be re-offered to them, so publishing over it silently would leave that install stuck.
 
 ## Home Assistant ingress
 
@@ -261,7 +273,10 @@ The add-on version lives in the `version` field of [addon/config.yaml](addon/con
 
 - Use semver with an incrementing pre-release counter while pre-1.0: `1.0.0-alpha.1`, `1.0.0-alpha.2`, ... → `1.0.0-beta.1`, `1.0.0-beta.2`, ... → `1.0.0` for the first stable release.
 - Bump once per meaningful release (batch related changes), not on every commit.
-- No automated version-bump pipeline yet — bump manually as part of the release commit.
+- **Never edit `version` by hand.** [image.yml](.github/workflows/image.yml)'s `bump` job owns it: publishing a GitHub release builds and pushes the image first, and only after that succeeds does the workflow commit the new `version` into `addon/config.yaml` on `main` and push. That order is load-bearing — Supervisor reads `version` from `main` to decide an update exists, so `main` must never advertise a version before its image is pullable. A feature PR should not touch `version` at all; cut a release when you want one in front of users:
+  ```bash
+  gh release create 1.0.0-alpha.35 --generate-notes --prerelease
+  ```
 
 ## Commit messages
 
