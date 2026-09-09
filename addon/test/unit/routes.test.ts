@@ -45,6 +45,11 @@ const postedBattery = {
 
 /** The same battery as it should end up on disk, with real numbers. */
 const storedBattery = {
+  chargeLimitMode: "off" as const,
+  chargeLimitEntityId: "",
+  chargeEfficiencyPercent: 95,
+  solarMarginPercent: 20,
+  chargeWearPerKwh: 0,
   ...postedBattery,
   capacityKwh: 10,
   minChargePercent: 10,
@@ -233,6 +238,7 @@ describe("GET / (dashboard)", () => {
 
   it("returns nothing to show before anything is configured", async () => {
     expect(await loadIndex()).toEqual({
+      chargeLimits: { batteries: [] },
       arrays: [],
       grid: { configured: false, power: null, powerW: null },
       batteries: [],

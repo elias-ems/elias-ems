@@ -16,6 +16,12 @@
 import { slugifyTitle } from "./slug";
 
 export type BatteryFields = {
+  /** Separate from target-power steering; legacy records default to off. */
+  chargeLimitMode?: "off" | "preview" | "active";
+  chargeLimitEntityId?: string;
+  chargeEfficiencyPercent?: number;
+  solarMarginPercent?: number;
+  chargeWearPerKwh?: number;
   title: string;
   /** Usable capacity in kWh. */
   capacityKwh: number;
@@ -123,6 +129,18 @@ export function normalizeBattery(battery: Battery): Battery {
       BATTERY_DEFAULTS.maxChargePercent,
     ),
     steered: battery.steered === true,
+    chargeLimitMode: ["preview", "active"].includes(
+      battery.chargeLimitMode || "",
+    )
+      ? battery.chargeLimitMode
+      : "off",
+    chargeLimitEntityId: battery.chargeLimitEntityId?.trim() || "",
+    chargeEfficiencyPercent: toFiniteNumber(
+      battery.chargeEfficiencyPercent,
+      95,
+    ),
+    solarMarginPercent: toFiniteNumber(battery.solarMarginPercent, 20),
+    chargeWearPerKwh: toFiniteNumber(battery.chargeWearPerKwh, 0),
     maxChargePowerW: toOptionalPowerW(battery.maxChargePowerW),
     maxDischargePowerW: toOptionalPowerW(battery.maxDischargePowerW),
   };
@@ -254,6 +272,51 @@ export function parseBattery(
   const maxDischargePowerW = readOptionalPowerW(formData, "maxDischargePowerW");
 
   const errors: BatteryErrors = {};
+  const chargeLimitMode = formData.get("chargeLimitMode")?.toString() || "off";
+  const chargeLimitEntityId =
+    formData.get("chargeLimitEntityId")?.toString().trim() || "";
+  const chargeEfficiencyPercent =
+    readNumber(formData, "chargeEfficiencyPercent") ??
+    (formData.get("chargeEfficiencyPercent") ? NaN : 95);
+  const solarMarginPercent =
+    readNumber(formData, "solarMarginPercent") ??
+    (formData.get("solarMarginPercent") ? NaN : 20);
+  const chargeWearPerKwh =
+    readNumber(formData, "chargeWearPerKwh") ??
+    (formData.get("chargeWearPerKwh") ? NaN : 0);
+  if (!["off", "preview", "active"].includes(chargeLimitMode))
+    errors.chargeLimitMode = "Choose off, preview, or active.";
+  if (chargeLimitEntityId && !/^number\.[a-z0-9_]+$/.test(chargeLimitEntityId))
+    errors.chargeLimitEntityId =
+      "Choose a number entity controlling maximum charging power in W.";
+  if (chargeLimitMode !== "off") {
+    if (!chargeLimitEntityId)
+      errors.chargeLimitEntityId = "Pick the maximum charge limit entity.";
+    if (steered)
+      errors.chargeLimitMode =
+        "Turn off target-power steering; this strategy requires native self-consumption.";
+    if (!maxChargePowerW.ok || maxChargePowerW.value === null)
+      errors.maxChargePowerW =
+        "Set the hardware charge ceiling for charge-limit planning.";
+    if (!maxDischargePowerW.ok || maxDischargePowerW.value === null)
+      errors.maxDischargePowerW =
+        "Set the native discharge power limit for the self-consumption model.";
+  }
+  if (
+    !Number.isFinite(chargeEfficiencyPercent) ||
+    chargeEfficiencyPercent <= 0 ||
+    chargeEfficiencyPercent > 100
+  )
+    errors.chargeEfficiencyPercent =
+      "Efficiency must be above 0 and at most 100%.";
+  if (
+    !Number.isFinite(solarMarginPercent) ||
+    solarMarginPercent < 0 ||
+    solarMarginPercent > 80
+  )
+    errors.solarMarginPercent = "Solar margin must be between 0 and 80%.";
+  if (!Number.isFinite(chargeWearPerKwh) || chargeWearPerKwh < 0)
+    errors.chargeWearPerKwh = "Wear cost must be a non-negative number.";
   if (!title) {
     errors.title = "Give this battery a name.";
   } else if (slugifyTitle(title) === "") {
@@ -318,6 +381,11 @@ export function parseBattery(
       powerEntityId,
       socEntityId,
       steered,
+      chargeLimitMode: chargeLimitMode as "off" | "preview" | "active",
+      chargeLimitEntityId,
+      chargeEfficiencyPercent,
+      solarMarginPercent,
+      chargeWearPerKwh,
       // Both are known good here: an unparseable one is an error above.
       maxChargePowerW: maxChargePowerW.ok ? maxChargePowerW.value : null,
       maxDischargePowerW: maxDischargePowerW.ok

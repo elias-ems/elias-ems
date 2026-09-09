@@ -38,6 +38,7 @@ const BLOB = "https://github.com/elias-ems/elias-ems/blob/main";
 export const PAGES = new Map([
   ["docs/architecture.md", "architecture"],
   ["docs/features/battery-control.md", "battery-control"],
+  ["docs/features/charge-limit.md", "charge-limit"],
   ["docs/features/live-readings.md", "live-readings"],
   ["docs/features/diagnostics.md", "diagnostics"],
   ["docs/features/dynamic-prices.md", "dynamic-prices"],

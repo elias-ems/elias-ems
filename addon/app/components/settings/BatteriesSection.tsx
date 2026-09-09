@@ -10,7 +10,7 @@ import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
 import EntityAutocomplete from "../EntityAutocomplete";
 import Field from "../Field";
-import { hintStyle, labelStyle } from "../form";
+import { errorStyle, hintStyle, inputStyle, labelStyle } from "../form";
 import EditableList from "./EditableList";
 import EventNameField from "./EventNameField";
 import Section from "./Section";
@@ -69,9 +69,14 @@ export default function BatteriesSection({
                   Steered — <code>{targetEventType(batterySlug(battery))}</code>
                 </>
               ) : (
-                "Not steered — watched only"
+                "Target-power steering off"
               )}
             </div>
+            {battery.chargeLimitMode && battery.chargeLimitMode !== "off" && (
+              <div style={{ fontSize: "0.875rem" }}>
+                Charge-limit optimization: {battery.chargeLimitMode}
+              </div>
+            )}
           </>
         )}
         renderFields={(battery) => {
@@ -108,7 +113,7 @@ export default function BatteriesSection({
                   battery?.minChargePercent ?? BATTERY_DEFAULTS.minChargePercent
                 }
                 error={errors.minChargePercent}
-                hint="Control will not discharge below this."
+                hint="For charge-limit planning, match the reserve configured in the battery's native self-consumption mode."
               />
               <Field
                 name="maxChargePercent"
@@ -121,7 +126,7 @@ export default function BatteriesSection({
                   battery?.maxChargePercent ?? BATTERY_DEFAULTS.maxChargePercent
                 }
                 error={errors.maxChargePercent}
-                hint="Control will not charge above this."
+                hint="For charge-limit planning, match the maximum SoC configured on the battery."
               />
               <EntityAutocomplete
                 name="energyEntityId"
@@ -145,6 +150,72 @@ export default function BatteriesSection({
                 error={errors.socEntityId}
               />
               <SteeredField defaultChecked={battery?.steered ?? true} />
+              <label style={labelStyle}>
+                Charge-limit optimization
+                <select
+                  name="chargeLimitMode"
+                  defaultValue={battery?.chargeLimitMode || "off"}
+                  style={{ ...inputStyle, display: "block", width: "100%" }}
+                >
+                  <option value="off">Off</option>
+                  <option value="preview">
+                    Preview — calculate without changing the battery
+                  </option>
+                  <option value="active">
+                    Active — adjust maximum charge limit
+                  </option>
+                </select>
+              </label>
+              {errors.chargeLimitMode && (
+                <p style={errorStyle}>{errors.chargeLimitMode}</p>
+              )}
+              <p style={hintStyle}>
+                Keep the battery in native self-consumption and turn off
+                target-power steering. Forecasts and household history come from
+                the Energy dashboard. Start with Preview to check the predicted
+                behavior. Active mode writes only the charge ceiling, at most
+                once every five minutes.
+              </p>
+              <EntityAutocomplete
+                name="chargeLimitEntityId"
+                label="Maximum charge limit (W)"
+                domain="number"
+                defaultValue={battery?.chargeLimitEntityId}
+                error={errors.chargeLimitEntityId}
+                hint="Select the entity that limits power entering the battery. Verify its behavior in Preview; entity names vary by integration."
+              />
+              <Field
+                name="chargeEfficiencyPercent"
+                label="Efficiency per direction (%)"
+                type="number"
+                min={1}
+                max={100}
+                step="any"
+                defaultValue={battery?.chargeEfficiencyPercent ?? 95}
+                error={errors.chargeEfficiencyPercent}
+                hint="95% charging and 95% discharging gives about 90% round-trip efficiency."
+              />
+              <Field
+                name="solarMarginPercent"
+                label="Solar forecast margin (%)"
+                type="number"
+                min={0}
+                max={80}
+                step="any"
+                defaultValue={battery?.solarMarginPercent ?? 20}
+                error={errors.solarMarginPercent}
+                hint="Plan with this much less solar to reduce the risk of waiting too long to charge."
+              />
+              <Field
+                name="chargeWearPerKwh"
+                label="Battery wear cost per charged kWh"
+                type="number"
+                min={0}
+                step="any"
+                defaultValue={battery?.chargeWearPerKwh ?? 0}
+                error={errors.chargeWearPerKwh}
+                hint="In the configured price currency. Zero excludes wear from the financial model."
+              />
               <Field
                 name="maxChargePowerW"
                 label="Maximum charge power (W) — optional"
@@ -154,7 +225,7 @@ export default function BatteriesSection({
                 placeholder="e.g. 5000"
                 defaultValue={battery?.maxChargePowerW ?? ""}
                 error={errors.maxChargePowerW}
-                hint="Leave empty for no limit."
+                hint="Required for charge-limit planning. Otherwise, leave empty for no target-power limit."
               />
               <Field
                 name="maxDischargePowerW"
@@ -165,7 +236,7 @@ export default function BatteriesSection({
                 placeholder="e.g. 5000"
                 defaultValue={battery?.maxDischargePowerW ?? ""}
                 error={errors.maxDischargePowerW}
-                hint="A positive number. Leave empty for no limit."
+                hint="Required for charge-limit planning. Otherwise, leave empty for no target-power limit."
               />
             </>
           );
@@ -203,8 +274,8 @@ function SteeredField({ defaultChecked }: { defaultChecked: boolean }) {
       </div>
       <p style={hintStyle}>
         Publishes its target power as an event whenever control decides
-        something. Leave this off to watch the battery without steering it — it
-        still appears on the dashboard and is simply left alone.
+        something. Leave this off for native self-consumption. Charge-limit
+        optimization is configured separately and does not publish target power.
       </p>
     </div>
   );
