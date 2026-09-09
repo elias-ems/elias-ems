@@ -7,7 +7,7 @@ import type {
   ChargeLimitsData,
 } from "./charge-limit-status";
 import { calculateChargePlan, numericState } from "./charge-planner.server";
-import { readCurtailmentConfig } from "./curtailment-config.server";
+import { readControlConfig } from "./control-config.server";
 import { appendDiagnostic } from "./diagnostics.server";
 import { fetchHaState, setHaChargeLimit } from "./ha.server";
 import { readJson } from "./store.server";
@@ -134,7 +134,7 @@ function empty(b: Battery): ChargeLimitStatus {
   return {
     batteryId: b.id,
     title: b.title,
-    mode: b.chargeLimitMode || "off",
+    mode: "preview",
     state: "waiting",
     message: "Waiting for the Energy dashboard forecast and household history.",
     calculatedAt: null,
@@ -149,6 +149,12 @@ function empty(b: Battery): ChargeLimitStatus {
     sources: 0,
     historyHours: 0,
     solarMarginPercent: b.solarMarginPercent ?? 20,
+    checks: {
+      solar: "Waiting",
+      history: "Waiting",
+      prices: "Waiting",
+      battery: "Waiting",
+    },
   };
 }
 
@@ -156,7 +162,7 @@ export async function readChargeLimits(): Promise<ChargeLimitsData> {
   const batteries = await listBatteries();
   return {
     batteries: batteries
-      .filter((b) => b.chargeLimitMode && b.chargeLimitMode !== "off")
+      .filter((b) => Boolean(b.chargeLimitEntityId))
       .map((b) => statuses.get(b.id) || empty(b)),
   };
 }
@@ -229,17 +235,17 @@ async function apply(b: Battery, desiredW: number, now: number) {
 }
 
 export async function chargeLimitTick(now = Date.now()) {
+  const control = await readControlConfig();
+  const active = control.enabled && control.strategy === "charge-limit";
   const batteries = await listBatteries();
-  const enabled = batteries.filter(
-    (b) => b.chargeLimitMode && b.chargeLimitMode !== "off",
-  );
+  const enabled = batteries.filter((b) => Boolean(b.chargeLimitEntityId));
   for (const lease of await leases()) {
     const battery = batteries.find((b) => b.id === lease.batteryId);
     if (
       (!recovered && !lease.paused) ||
       lease.restoring ||
       !battery ||
-      battery.chargeLimitMode !== "active" ||
+      !active ||
       battery.chargeLimitEntityId !== lease.entityId
     )
       await restore(lease);
@@ -281,29 +287,35 @@ export async function chargeLimitTick(now = Date.now()) {
     const status = empty(b);
     statuses.set(b.id, status);
     try {
-      const curtailment = await readCurtailmentConfig();
+      status.reportedW = numericState(
+        await fetchHaState(b.chargeLimitEntityId || ""),
+      );
       // Independent single-battery plans would allocate the same solar twice.
       if (batteries.length !== 1)
         throw new Error(
           "Charge-limit planning currently supports one configured household battery.",
         );
-      if (b.steered)
-        throw new Error(
-          "Disable target-power steering and keep the battery in native self-consumption.",
-        );
-      if (curtailment.enabled)
-        throw new Error(
-          "Disable Elias PV curtailment while using charge-limit planning; curtailed solar is not yet modeled.",
-        );
-      if ((await leases()).find((l) => l.batteryId === b.id)?.paused)
-        throw new Error(
-          "Charge-limit control is paused after an external change. Save battery settings to resume.",
-        );
-      const result = await calculateChargePlan(b, now);
+      let blocked = [
+        control.enabled &&
+          control.strategy !== "charge-limit" &&
+          "Hypothetical preview: assumes native self-consumption while another battery strategy is active.",
+        b.steered &&
+          "Turn off target-power steering for this battery before activating charge-limit control.",
+        (await leases()).find((l) => l.batteryId === b.id)?.paused &&
+          "Control is paused after an external change. Save battery settings to resume.",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const result = await calculateChargePlan(b, now, (key, message) => {
+        status.checks = { ...status.checks, [key]: message };
+      });
+      blocked = [blocked, result.controlBlocker].filter(Boolean).join(" ");
+      const mayWrite = active && !blocked;
       const current = result.plan.points[0];
       nextPlan = Math.min(nextPlan, current.end);
       Object.assign(status, {
-        state: b.chargeLimitMode === "active" ? "active" : "preview",
+        mode: mayWrite ? "active" : "preview",
+        state: mayWrite ? "active" : "preview",
         plan: result.plan,
         calculatedAt: now,
         validUntil: Math.min(now + PLAN_MS, current.end),
@@ -313,7 +325,8 @@ export async function chargeLimitTick(now = Date.now()) {
         forecastEnd: result.forecastEnd,
         sources: result.sources,
         historyHours: result.historyHours,
-        message: result.plan.reason,
+        solarMarginPercent: result.solarMarginPercent,
+        message: [blocked, result.plan.reason].filter(Boolean).join(" "),
       });
       if (!result.reserveCovered) {
         status.message +=
@@ -335,7 +348,11 @@ export async function chargeLimitTick(now = Date.now()) {
           ...result.plan.points.flatMap((p) => [p.start, p.end]),
         ].map((t) => [String(t), formatter.format(t)]),
       );
-      if (b.chargeLimitMode === "active") {
+      if (!mayWrite) {
+        const lease = (await leases()).find((l) => l.batteryId === b.id);
+        if (lease && !lease.paused) await restore(lease);
+      }
+      if (mayWrite) {
         // Do not publish a plan whose current interval ended while inputs were read.
         if (Date.now() >= current.end)
           throw new Error(
@@ -351,7 +368,7 @@ export async function chargeLimitTick(now = Date.now()) {
       appendDiagnostic(
         "charge-limit",
         "info",
-        `${b.title}: ${b.chargeLimitMode}, maximum charge ${current.limitW} W. ${result.plan.reason}`,
+        `${b.title}: ${status.mode}, maximum charge ${current.limitW} W. ${status.message}`,
       );
     } catch (error) {
       status.state = "error";

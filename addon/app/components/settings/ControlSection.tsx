@@ -30,7 +30,12 @@ export default function ControlSection({
   actionData,
 }: {
   config: ControlConfig;
-  ready: { grid: boolean; batteries: boolean; steerable: boolean };
+  ready: {
+    grid: boolean;
+    batteries: boolean;
+    steerable: boolean;
+    chargeLimit?: boolean;
+  };
   actionData?: SettingsActionData;
 }) {
   const navigation = useNavigation();
@@ -53,7 +58,9 @@ export default function ControlSection({
   // Left interactive while control is already on, so that a control key
   // cleared afterwards leaves a box that can still be unticked rather than a
   // switch stuck in the on position.
-  const canEnable = ready.steerable || config.enabled;
+  const eligible =
+    strategy === "charge-limit" ? ready.chargeLimit : ready.steerable;
+  const canEnable = eligible || config.enabled;
 
   return (
     <Section
@@ -76,9 +83,11 @@ export default function ControlSection({
           </label>
         </div>
 
-        {!ready.steerable && (
+        {!eligible && (
           <p style={errors.enabled ? errorStyle : hintStyle}>
-            {NO_STEERABLE_BATTERY_ERROR}
+            {strategy === "charge-limit"
+              ? "Configure one battery with a charge limit entity and turn off its target-power steering."
+              : NO_STEERABLE_BATTERY_ERROR}
           </p>
         )}
 
@@ -124,6 +133,50 @@ export default function ControlSection({
           error={errors.intervalSeconds}
           hint={`How often the loop reconsiders. ${MIN_INTERVAL_SECONDS}–${MAX_INTERVAL_SECONDS}s.`}
         />
+        <fieldset
+          style={{ border: "1px solid var(--color-border)", padding: "1rem" }}
+        >
+          <legend>Automatic charge-limit preview</legend>
+          <p style={hintStyle}>
+            Calculated on Home whenever a battery has a charge limit entity.
+            Only the enabled Optimize charge limit strategy can apply it; the
+            battery must remain in native self-consumption. Plans and writes
+            update at most every five minutes.
+          </p>
+          {errors.enabled && <p style={errorStyle}>{errors.enabled}</p>}
+          {errors.planning && <p style={errorStyle}>{errors.planning}</p>}
+          <Field
+            name="solarMarginPercent"
+            label="Solar forecast margin (%)"
+            type="number"
+            min={0}
+            max={80}
+            step="any"
+            defaultValue={config.solarMarginPercent ?? ""}
+            hint="Leave empty to retain the battery's previous margin (20% by default)."
+          />
+          <Field
+            name="chargeWearPerKwh"
+            label="Wear cost per charged kWh"
+            type="number"
+            min={0}
+            step="any"
+            defaultValue={config.chargeWearPerKwh ?? ""}
+            hint="In the price currency. Leave empty to retain the battery's previous value."
+          />
+          <Field
+            name="gridImportIds"
+            label="Physical grid import counters"
+            defaultValue={config.gridImportIds ?? ""}
+            hint="Energy dashboard statistic IDs separated by commas. Include each physical tariff once; exclude reimbursement and duplicate accounting entries. Leave both fields empty for discovery when there is only one grid source."
+          />
+          <Field
+            name="gridExportIds"
+            label="Physical grid export counters"
+            defaultValue={config.gridExportIds ?? ""}
+            hint="Energy dashboard statistic IDs separated by commas. Configure both import and export when selecting sources explicitly."
+          />
+        </fieldset>
 
         <div>
           <button type="submit" disabled={isSaving}>

@@ -10,7 +10,7 @@ import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
 import EntityAutocomplete from "../EntityAutocomplete";
 import Field from "../Field";
-import { errorStyle, hintStyle, inputStyle, labelStyle } from "../form";
+import { hintStyle, labelStyle } from "../form";
 import EditableList from "./EditableList";
 import EventNameField from "./EventNameField";
 import Section from "./Section";
@@ -72,9 +72,9 @@ export default function BatteriesSection({
                 "Target-power steering off"
               )}
             </div>
-            {battery.chargeLimitMode && battery.chargeLimitMode !== "off" && (
+            {battery.chargeLimitEntityId && (
               <div style={{ fontSize: "0.875rem" }}>
-                Charge-limit optimization: {battery.chargeLimitMode}
+                Automatic charge-limit preview
               </div>
             )}
           </>
@@ -150,31 +150,9 @@ export default function BatteriesSection({
                 error={errors.socEntityId}
               />
               <SteeredField defaultChecked={battery?.steered ?? true} />
-              <label style={labelStyle}>
-                Charge-limit optimization
-                <select
-                  name="chargeLimitMode"
-                  defaultValue={battery?.chargeLimitMode || "off"}
-                  style={{ ...inputStyle, display: "block", width: "100%" }}
-                >
-                  <option value="off">Off</option>
-                  <option value="preview">
-                    Preview — calculate without changing the battery
-                  </option>
-                  <option value="active">
-                    Active — adjust maximum charge limit
-                  </option>
-                </select>
-              </label>
-              {errors.chargeLimitMode && (
-                <p style={errorStyle}>{errors.chargeLimitMode}</p>
-              )}
               <p style={hintStyle}>
-                Keep the battery in native self-consumption and turn off
-                target-power steering. Forecasts and household history come from
-                the Energy dashboard. Start with Preview to check the predicted
-                behavior. Active mode writes only the charge ceiling, at most
-                once every five minutes.
+                A configured charge limit automatically produces a Home preview.
+                Enable Optimize charge limit under Battery control to apply it.
               </p>
               <EntityAutocomplete
                 name="chargeLimitEntityId"
@@ -194,27 +172,6 @@ export default function BatteriesSection({
                 defaultValue={battery?.chargeEfficiencyPercent ?? 95}
                 error={errors.chargeEfficiencyPercent}
                 hint="95% charging and 95% discharging gives about 90% round-trip efficiency."
-              />
-              <Field
-                name="solarMarginPercent"
-                label="Solar forecast margin (%)"
-                type="number"
-                min={0}
-                max={80}
-                step="any"
-                defaultValue={battery?.solarMarginPercent ?? 20}
-                error={errors.solarMarginPercent}
-                hint="Plan with this much less solar to reduce the risk of waiting too long to charge."
-              />
-              <Field
-                name="chargeWearPerKwh"
-                label="Battery wear cost per charged kWh"
-                type="number"
-                min={0}
-                step="any"
-                defaultValue={battery?.chargeWearPerKwh ?? 0}
-                error={errors.chargeWearPerKwh}
-                hint="In the configured price currency. Zero excludes wear from the financial model."
               />
               <Field
                 name="maxChargePowerW"

@@ -7,6 +7,8 @@ export type ChargeInterval = {
   buy: number;
   sell: number;
   estimatedPrice: boolean;
+  /** Ideal threshold curtailment: surplus above battery acceptance is discarded. */
+  curtailExport?: boolean;
 };
 export type ChargeModel = {
   capacityKwh: number;
@@ -81,7 +83,7 @@ export function simulateCharge(
     dischargeW: (discharge * 1000) / hours,
     cost:
       Math.max(0, -surplus - discharge) * slot.buy -
-      Math.max(0, surplus - charge) * slot.sell +
+      (slot.curtailExport ? 0 : Math.max(0, surplus - charge)) * slot.sell +
       charge * m.wearPerKwh,
   };
 }

@@ -36,6 +36,18 @@ const slot = (
 });
 
 describe("native self-consumption charging plan", () => {
+  it("models threshold curtailment without charging a negative-price export penalty", () => {
+    const forecast = { ...slot(0, 2000, 500, -0.2), curtailExport: true };
+    const result = simulateCharge(forecast, 1, 0, model);
+    expect(result.cost).toBe(0);
+    expect(result.energy).toBe(1);
+    expect(
+      simulateCharge({ ...forecast, curtailExport: false }, 1, 0, model).cost,
+    ).toBeCloseTo(0.3);
+    const charging = simulateCharge(forecast, 0, 500, model);
+    expect(charging.chargeW).toBe(500);
+    expect(charging.energy).toBe(0.5);
+  });
   it("exports valuable morning solar and stores cheaper midday solar for the evening", async () => {
     const plan = await optimizeCharge(
       [slot(0, 1000, 0, 0.2), slot(1, 1000, 0, 0.01), slot(2, 0, 1000, 0.01)],

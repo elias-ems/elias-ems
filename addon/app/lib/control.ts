@@ -6,13 +6,18 @@
  * `diagnostics.ts`'s shape, not a type of its own.
  */
 
-export type StrategyId = "net-zero-energy";
+export type StrategyId = "net-zero-energy" | "charge-limit";
 
 export type ControlConfig = {
   enabled: boolean;
   strategy: StrategyId;
   /** How often the loop reconsiders, in seconds. */
   intervalSeconds: number;
+  /** Explicit physical grid counters when Energy dashboard accounting is ambiguous. */
+  gridImportIds?: string;
+  gridExportIds?: string;
+  solarMarginPercent?: number;
+  chargeWearPerKwh?: number;
 };
 
 /**
@@ -25,6 +30,12 @@ export const STRATEGIES: Array<{
   label: string;
   description: string;
 }> = [
+  {
+    id: "charge-limit",
+    label: "Optimize charge limit",
+    description:
+      "Plan automatically with solar forecasts and prices. When enabled, adjust only the maximum charging limit while the battery stays in native self-consumption.",
+  },
   {
     id: "net-zero-energy",
     label: "Net zero energy",
@@ -64,6 +75,18 @@ export function normalizeControlConfig(
   const intervalSeconds = Number(stored?.intervalSeconds);
 
   return {
+    ...(stored?.gridImportIds !== undefined
+      ? { gridImportIds: String(stored.gridImportIds) }
+      : {}),
+    ...(stored?.gridExportIds !== undefined
+      ? { gridExportIds: String(stored.gridExportIds) }
+      : {}),
+    ...(stored?.solarMarginPercent !== undefined
+      ? { solarMarginPercent: Number(stored.solarMarginPercent) }
+      : {}),
+    ...(stored?.chargeWearPerKwh !== undefined
+      ? { chargeWearPerKwh: Number(stored.chargeWearPerKwh) }
+      : {}),
     enabled: stored?.enabled === true,
     strategy: isStrategyId(stored?.strategy)
       ? stored.strategy
@@ -76,7 +99,11 @@ export function normalizeControlConfig(
   };
 }
 
-export type ControlErrors = { intervalSeconds?: string; enabled?: string };
+export type ControlErrors = {
+  intervalSeconds?: string;
+  enabled?: string;
+  planning?: string;
+};
 
 /**
  * Why control cannot be switched on yet.
@@ -112,10 +139,35 @@ export function parseControlConfig(
   }
 
   const strategy = formData.get("strategy")?.toString();
+  const planning: Partial<ControlConfig> = {};
+  for (const key of ["gridImportIds", "gridExportIds"] as const) {
+    if (formData.has(key))
+      planning[key] = formData.get(key)?.toString().trim() || "";
+  }
+  for (const key of ["solarMarginPercent", "chargeWearPerKwh"] as const) {
+    const raw = formData.get(key)?.toString().trim();
+    if (raw) {
+      const value = Number(raw);
+      if (
+        !Number.isFinite(value) ||
+        value < 0 ||
+        (key === "solarMarginPercent" && value > 80)
+      )
+        return {
+          ok: false,
+          errors: {
+            planning:
+              "Solar margin must be 0–80%; wear cost must be non-negative.",
+          },
+        };
+      planning[key] = value;
+    }
+  }
 
   return {
     ok: true,
     config: {
+      ...planning,
       // An unchecked checkbox sends nothing at all, which is what makes the
       // absent case mean "off" here.
       enabled: formData.get("enabled") === "on",

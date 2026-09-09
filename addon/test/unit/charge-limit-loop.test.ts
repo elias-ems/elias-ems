@@ -45,7 +45,7 @@ const saveBattery = (b: Battery) =>
 
 beforeEach(async () => {
   vi.resetModules();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   directory = await mkdtemp(path.join(os.tmpdir(), "elias-charge-test-"));
   vi.stubEnv("DATA_DIR", directory);
   now = Date.now();
@@ -60,6 +60,9 @@ beforeEach(async () => {
   });
   mocks.curtail.mockResolvedValue({ enabled: false });
   mocks.calculate.mockImplementation(async () => ({
+    controlBlocker: (await mocks.curtail()).enabled
+      ? "Hypothetical curtailment preview; control blocked."
+      : null,
     plan: {
       points: [{ start: now, end: now + 900_000, limitW: 400 }],
       reason: "Wait for midday solar.",
@@ -76,6 +79,14 @@ beforeEach(async () => {
     reserveCovered: true,
   }));
   await saveBattery(battery);
+  await writeFile(
+    path.join(directory, "control.json"),
+    JSON.stringify({
+      enabled: true,
+      strategy: "charge-limit",
+      intervalSeconds: 5,
+    }),
+  );
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -83,8 +94,32 @@ afterEach(async () => {
 });
 
 describe("charge limit execution and recovery", () => {
+  it("ignores legacy active mode after upgrade until the new strategy is enabled", async () => {
+    await writeFile(
+      path.join(directory, "control.json"),
+      JSON.stringify({ enabled: false, strategy: "net-zero-energy" }),
+    );
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    expect(mocks.calculate).toHaveBeenCalledOnce();
+    expect(mocks.set).not.toHaveBeenCalled();
+    expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
+  });
+  it("keeps a hypothetical plan and live readback when curtailment blocks writes", async () => {
+    mocks.curtail.mockResolvedValue({ enabled: true });
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    const status = (await loop.readChargeLimits()).batteries[0];
+    expect(status.plan).not.toBeNull();
+    expect(status.reportedW).toBe(2000);
+    expect(status.message).toContain("Hypothetical");
+    expect(mocks.set).not.toHaveBeenCalled();
+  });
   it("does not write in preview and works without target steering", async () => {
-    await saveBattery({ ...battery, chargeLimitMode: "preview" });
+    await writeFile(
+      path.join(directory, "control.json"),
+      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
+    );
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
     expect(mocks.calculate).toHaveBeenCalledOnce();
@@ -98,7 +133,10 @@ describe("charge limit execution and recovery", () => {
     await loop.chargeLimitTick(now + 30_000);
     expect(mocks.set).toHaveBeenCalledTimes(1);
     expect((await loop.readChargeLimits()).batteries[0].reportedW).toBe(400);
-    await saveBattery({ ...battery, chargeLimitMode: "off" });
+    await writeFile(
+      path.join(directory, "control.json"),
+      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
+    );
     await loop.chargeLimitTick(now + 60_000);
     expect(current).toBe(2000);
   });
@@ -130,7 +168,7 @@ describe("charge limit execution and recovery", () => {
     await loop.chargeLimitTick(now + 300_000);
     expect(current).toBe(800);
     expect(mocks.set).toHaveBeenCalledTimes(1);
-    expect((await loop.readChargeLimits()).batteries[0].state).toBe("error");
+    expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
     await loop.releaseChargeLimit(battery.id);
     expect(current).toBe(800);
   });
@@ -149,7 +187,10 @@ describe("charge limit execution and recovery", () => {
         },
       ]),
     );
-    await saveBattery({ ...battery, chargeLimitMode: "off" });
+    await writeFile(
+      path.join(directory, "control.json"),
+      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
+    );
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
     expect(current).toBe(2000);

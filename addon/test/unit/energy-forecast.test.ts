@@ -25,6 +25,44 @@ const prefs: EnergyPreferences = {
   ],
 };
 describe("Energy dashboard forecast and demand", () => {
+  it("requires explicit physical meters when accounting grid entries are present", () => {
+    const withAccounting = {
+      energy_sources: [
+        ...prefs.energy_sources,
+        { type: "grid", stat_energy_from: "reimbursement" },
+        {
+          type: "grid",
+          stat_energy_from: "import2",
+          stat_energy_to: "export2",
+        },
+      ],
+    };
+    expect(() => consumptionCounters(withAccounting)).toThrow(
+      "Multiple grid sources",
+    );
+    const selected = consumptionCounters(withAccounting, {
+      gridImportIds: "import, import2",
+      gridExportIds: "export export2",
+    });
+    expect([...selected.keys()]).not.toContain("reimbursement");
+    expect(selected.get("import2")).toBe(1);
+    expect(selected.get("export2")).toBe(-1);
+    expect(() =>
+      consumptionCounters(withAccounting, { gridImportIds: "import" }),
+    ).toThrow("both physical");
+    expect(() =>
+      consumptionCounters(withAccounting, {
+        gridImportIds: "missing",
+        gridExportIds: "export",
+      }),
+    ).toThrow("must exist");
+    expect(() =>
+      consumptionCounters(withAccounting, {
+        gridImportIds: "import, import",
+        gridExportIds: "export",
+      }),
+    ).toThrow("overlap");
+  });
   it("follows selected providers, deduplicates and intersects complete hourly coverage", () => {
     const ids = selectedForecasts({
       energy_sources: [
@@ -67,6 +105,16 @@ describe("Energy dashboard forecast and demand", () => {
       }));
     const profile = buildLoadProfile(consumptionCounters(prefs), stats, "UTC");
     expect(profile.watts.every((w) => Math.abs(w - 1600) < 1e-6)).toBe(true);
+    // Recorder may return only start/change for hourly change requests.
+    const withoutEnd = Object.fromEntries(
+      Object.entries(stats).map(([id, rows]) => [
+        id,
+        rows.map(({ start, change }) => ({ start, change })),
+      ]),
+    );
+    expect(
+      buildLoadProfile(consumptionCounters(prefs), withoutEnd, "UTC"),
+    ).toEqual(profile);
     stats.charge = [];
     expect(() =>
       buildLoadProfile(consumptionCounters(prefs), stats, "UTC"),
