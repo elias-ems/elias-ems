@@ -51,6 +51,10 @@ export default defineConfig({
           items: [
             { text: "The dashboard", link: "/guide/dashboard" },
             { text: "Battery control", link: "/guide/battery-control" },
+            {
+              text: "Charge-limit optimization",
+              link: "/internals/charge-limit",
+            },
             { text: "Dynamic prices", link: "/guide/prices" },
             { text: "PV curtailment", link: "/guide/pv-curtailment" },
             { text: "Diagnostics", link: "/guide/diagnostics" },

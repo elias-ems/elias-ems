@@ -48,6 +48,11 @@ const BADGE: Record<
     color: "var(--color-battery)",
     background: "var(--color-battery-soft)",
   },
+  "charge-limit": {
+    label: "LIMIT",
+    color: "var(--color-battery)",
+    background: "var(--color-battery-soft)",
+  },
 };
 
 const LEVEL_COLOR: Record<DiagnosticEntry["level"], string> = {

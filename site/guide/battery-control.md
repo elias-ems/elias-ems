@@ -1,5 +1,9 @@
 # Battery control
 
+To keep the battery in native self-consumption and optimize only its maximum
+charging power, use [charge-limit optimization](/internals/charge-limit).
+The target-power strategy below is configured separately.
+
 The goal is one sentence: **keep the grid meter at zero.** If the house is
 importing, the battery should be covering it; if it is exporting, the battery
 should be soaking it up.

@@ -126,6 +126,7 @@ function stopApp(child, grace = 5_000) {
  * @param {number} [options.proxyPort]
  * @param {string} [options.ingressToken]
  * @param {Array<object>} [options.haStates] Overrides the fixture states.
+ * @param {Record<string, object>} [options.haCommandResults] Extra forecast WebSocket responses.
  */
 export async function startStack({
   dataDir = path.join(addonDir, "data"),
@@ -134,6 +135,7 @@ export async function startStack({
   proxyPort = 0,
   ingressToken = DEFAULT_INGRESS_TOKEN,
   haStates,
+  haCommandResults,
 } = {}) {
   if (!existsSync(SERVER_BUILD)) {
     throw new Error(
@@ -142,7 +144,11 @@ export async function startStack({
     );
   }
 
-  const ha = await startHaMock({ port: haPort, states: haStates });
+  const ha = await startHaMock({
+    port: haPort,
+    states: haStates,
+    commandResults: haCommandResults,
+  });
   const port = appPort ?? (await freePort());
 
   const app = spawn(process.execPath, ["server.js"], {

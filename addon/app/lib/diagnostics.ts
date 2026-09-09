@@ -13,7 +13,11 @@
  * `DIAGNOSTICS_ORIGINS` — nothing else, since every reader is driven by this
  * list rather than by a hardcoded set of boxes.
  */
-export type DiagnosticsOrigin = "battery-control" | "pv-curtailment" | "prices";
+export type DiagnosticsOrigin =
+  | "battery-control"
+  | "pv-curtailment"
+  | "prices"
+  | "charge-limit";
 
 export const DIAGNOSTICS_ORIGINS: Array<{
   id: DiagnosticsOrigin;
@@ -22,6 +26,7 @@ export const DIAGNOSTICS_ORIGINS: Array<{
   { id: "battery-control", label: "Battery control" },
   { id: "pv-curtailment", label: "PV curtailment" },
   { id: "prices", label: "Prices" },
+  { id: "charge-limit", label: "Charge limit" },
 ];
 
 export function isDiagnosticsOrigin(
@@ -80,6 +85,7 @@ export type DiagnosticsData = { entries: DiagnosticEntry[] };
  * is the first paint quietly swapping for a different log two seconds later.
  */
 export const DECISION_ORIGINS: DiagnosticsOrigin[] = [
+  "charge-limit",
   "pv-curtailment",
   "battery-control",
 ];

@@ -136,11 +136,13 @@ function sendJson(res, status, body) {
  * @param {number} [options.port] 0 (the default) picks a free port.
  * @param {string} [options.token] Bearer token the mock will accept.
  * @param {Array<object>} [options.states] Overrides the fixture.
+ * @param {Record<string, object>} [options.commandResults] Additional WebSocket results for forecast tests.
  */
 export async function startHaMock({
   port = 0,
   token = DEFAULT_SUPERVISOR_TOKEN,
   states,
+  commandResults = {},
 } = {}) {
   /**
    * Home Assistant stamps every state; the fixtures and hand-written states in
@@ -240,6 +242,24 @@ export async function startHaMock({
 
     if (pathname === "/core/api/states") {
       return sendJson(res, 200, current);
+    }
+
+    if (
+      pathname === "/core/api/services/number/set_value" &&
+      req.method === "POST"
+    ) {
+      return readJson(req).then((body) => {
+        const existing = current.find(
+          (entity) => entity.entity_id === body?.entity_id,
+        );
+        if (!existing || typeof body.value !== "number")
+          return sendJson(res, 400, { message: "Invalid number entity" });
+        applyState(existing.entity_id, {
+          ...existing,
+          state: String(body.value),
+        });
+        return sendJson(res, 200, []);
+      });
     }
 
     // Firing an event is how the add-on asks for anything to happen. Home
@@ -352,6 +372,14 @@ export async function startHaMock({
 
       const reply = (body) =>
         socket.send(JSON.stringify({ id: message.id, ...body }));
+
+      if (Object.hasOwn(commandResults, message.type)) {
+        return reply({
+          type: "result",
+          success: true,
+          result: commandResults[message.type],
+        });
+      }
 
       if (message.type === "ping") {
         return reply({ type: "pong" });

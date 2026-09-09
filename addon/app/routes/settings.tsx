@@ -17,6 +17,11 @@ import {
   removeBattery,
   updateBattery,
 } from "../lib/batteries.server";
+import {
+  invalidateChargePlans,
+  releaseChargeLimit,
+  withChargeLimitLock,
+} from "../lib/charge-limit-loop.server";
 import { NO_STEERABLE_BATTERY_ERROR, parseControlConfig } from "../lib/control";
 import {
   readControlConfig,
@@ -84,7 +89,15 @@ function editedId(formData: FormData): string | null {
   return id ? String(id) : null;
 }
 
-export async function action({ request }: Route.ActionArgs) {
+export function action(args: Route.ActionArgs) {
+  return withChargeLimitLock(async () => {
+    const result = await settingsAction(args);
+    if (result && "ok" in result && result.ok) invalidateChargePlans();
+    return result;
+  });
+}
+
+async function settingsAction({ request }: Route.ActionArgs) {
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
 
@@ -190,12 +203,14 @@ export async function action({ request }: Route.ActionArgs) {
         });
       }
 
+      if (recordId) await releaseChargeLimit(recordId);
       if (recordId) await updateBattery(recordId, parsed.fields);
       else await addBattery(parsed.fields);
       return { section: "battery" as const, ok: true as const };
     }
 
     case "battery-remove": {
+      await releaseChargeLimit(String(formData.get("id")));
       await removeBattery(String(formData.get("id")));
       return { section: "battery" as const, ok: true as const };
     }

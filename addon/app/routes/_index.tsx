@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useHref } from "react-router";
+import ChargePlanCard from "../components/dashboard/ChargePlanCard";
 import { sectionLabelStyle } from "../components/dashboard/chrome";
 import DeviceTable from "../components/dashboard/DeviceTable";
 import GridCard from "../components/dashboard/GridCard";
@@ -8,6 +9,7 @@ import StrategyRail from "../components/dashboard/StrategyRail";
 import { hintStyle } from "../components/form";
 import LiveHealthFacts from "../components/LiveHealthFacts";
 import LiveStatus from "../components/LiveStatus";
+import { readChargeLimits } from "../lib/charge-limit-loop.server";
 import { readControlConfig } from "../lib/control-config.server";
 import {
   controlLoopStatus,
@@ -44,14 +46,18 @@ const HIDDEN_REFRESH_INTERVAL = 60_000;
 const INITIAL_LOG_ENTRIES = 20;
 
 export async function loader() {
-  const [readings, config, curtailmentConfig] = await Promise.all([
-    readDashboard(),
-    readControlConfig(),
-    readCurtailmentConfig(),
-  ]);
+  const [readings, config, curtailmentConfig, chargeLimits] = await Promise.all(
+    [
+      readDashboard(),
+      readControlConfig(),
+      readCurtailmentConfig(),
+      readChargeLimits(),
+    ],
+  );
 
   return {
     ...readings,
+    chargeLimits,
     control: {
       enabled: config.enabled,
       status: controlLoopStatus(),
@@ -236,6 +242,8 @@ export default function Index({ loaderData }: Route.ComponentProps) {
         strategyLabel={curtailment.strategyLabel}
         curtailing={curtailment.enabled}
       />
+
+      <ChargePlanCard initial={loaderData.chargeLimits} />
 
       <GridCard
         configured={grid.configured}

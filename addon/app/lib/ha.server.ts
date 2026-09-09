@@ -179,3 +179,24 @@ export async function fireHaEvent(
     );
   }
 }
+
+/** Slow charge-ceiling updates use readback; no target power or operating mode is written. */
+export async function setHaChargeLimit(
+  entityId: string,
+  value: number,
+): Promise<void> {
+  if (
+    !/^number\.[a-z0-9_]+$/.test(entityId) ||
+    !Number.isFinite(value) ||
+    value < 0
+  )
+    throw new Error("Invalid charge limit command.");
+  const response = await haFetch<unknown>("/services/number/set_value", {
+    method: "POST",
+    body: { entity_id: entityId, value },
+  });
+  if (!response.ok)
+    throw new Error(
+      `Home Assistant rejected the charge limit: ${response.status}`,
+    );
+}

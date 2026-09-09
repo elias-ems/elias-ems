@@ -13,7 +13,7 @@
  * lock entities included. An unrecognised value falls back to the default
  * rather than widening.
  */
-export const OFFERABLE_DOMAINS = ["sensor", "binary_sensor"] as const;
+export const OFFERABLE_DOMAINS = ["sensor", "binary_sensor", "number"] as const;
 
 export type OfferableDomain = (typeof OFFERABLE_DOMAINS)[number];
 
