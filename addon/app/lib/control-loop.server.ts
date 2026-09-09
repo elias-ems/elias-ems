@@ -550,7 +550,8 @@ export async function runControlTick(): Promise<void> {
   const inputs = await readSnapshots(config);
   const nowMs = Date.now();
 
-  if (config.control.enabled) await tickBatteryControl(inputs);
+  if (config.control.enabled && config.control.strategy === "net-zero-energy")
+    await tickBatteryControl(inputs);
   if (config.curtailment.enabled) {
     await tickCurtailment(inputs, config.curtailment, nowMs);
   }
@@ -887,7 +888,11 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   // A feature switched off while the other keeps the loop running still has to
   // let its own hardware go — the tick simply stops deciding for it, which on
   // its own would leave the last command standing forever.
-  if (previous?.enabled && !config.enabled) {
+  if (
+    previous?.enabled &&
+    previous.strategy === "net-zero-energy" &&
+    (!config.enabled || config.strategy !== "net-zero-energy")
+  ) {
     log("battery-control", "info", "Battery control disabled.");
     await releaseBatteries();
   }

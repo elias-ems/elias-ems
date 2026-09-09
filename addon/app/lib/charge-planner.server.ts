@@ -4,11 +4,14 @@ import {
   type ChargeModel,
   optimizeCharge,
 } from "./charge-plan";
+import { readControlConfig } from "./control-config.server";
+import { readCurtailmentConfig } from "./curtailment-config.server";
 import { localHour } from "./energy-forecast";
 import { readEnergyForecast } from "./energy-forecast.server";
 import type { HaState } from "./ha.server";
 import { readPrices } from "./price-source.server";
 import { parsePriceFormulas, priceSlot } from "./prices";
+import { listPvEntities } from "./pv-entities.server";
 import { readStates } from "./states.server";
 
 export function numericState(state: HaState | null | undefined): number | null {
@@ -69,17 +72,99 @@ export function chargeModel(
   };
 }
 
-export async function calculateChargePlan(battery: Battery, now = Date.now()) {
-  const [energy, prices, readings] = await Promise.all([
-    readEnergyForecast(now),
-    readPrices(),
-    readStates([battery.socEntityId, battery.chargeLimitEntityId || ""]),
-  ]);
+export async function calculateChargePlan(
+  battery: Battery,
+  now = Date.now(),
+  report: (key: string, message: string) => void = () => {},
+) {
+  const control = await readControlConfig();
+  battery = {
+    ...battery,
+    solarMarginPercent:
+      control.solarMarginPercent ?? battery.solarMarginPercent,
+    chargeWearPerKwh: control.chargeWearPerKwh ?? battery.chargeWearPerKwh,
+  };
+  const checked = async <T>(key: string, task: Promise<T>): Promise<T> => {
+    try {
+      const result = await task;
+      report(key, "Available");
+      return result;
+    } catch (error) {
+      report(key, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  };
+  const results = await Promise.allSettled([
+    checked("history", readEnergyForecast(now, report)),
+    checked(
+      "prices",
+      readPrices().then((result) => {
+        if (result.read.error || !result.read.forecast)
+          throw new Error(result.read.error || "Configure dynamic prices.");
+        return result;
+      }),
+    ),
+    checked(
+      "battery",
+      readStates([battery.socEntityId, battery.chargeLimitEntityId || ""]).then(
+        (readings) => {
+          const soc = readings.states.get(battery.socEntityId)?.state;
+          if (soc?.attributes?.unit_of_measurement !== "%")
+            throw new Error("The SoC entity must report percent.");
+          chargeModel(
+            battery,
+            readings.states.get(battery.chargeLimitEntityId || "")?.state,
+            numericState(soc),
+          );
+          return readings;
+        },
+      ),
+    ),
+  ] as const);
+  const [e, p, r] = results;
+  if (e.status === "rejected") throw e.reason;
+  if (p.status === "rejected") throw p.reason;
+  if (r.status === "rejected") throw r.reason;
+  const [energy, prices, readings] = [e.value, p.value, r.value] as const;
   const state = readings.states.get(battery.chargeLimitEntityId || "")?.state;
   const socState = readings.states.get(battery.socEntityId)?.state;
   if (socState?.attributes?.unit_of_measurement !== "%")
     throw new Error("The SoC entity must report percent.");
   const model = chargeModel(battery, state, numericState(socState));
+  const [curtailment, arrays] = await Promise.all([
+    readCurtailmentConfig(),
+    listPvEntities(),
+  ]);
+  const solarSources =
+    energy.preferences?.energy_sources.filter((s) => s.type === "solar") || [];
+  // A feedback controller is approximated at equilibrium. Fixed steps, positive
+  // floors, alternate targets and flexible chargers need per-array/time models.
+  const curtailmentModeled =
+    curtailment.enabled &&
+    curtailment.strategy === "threshold" &&
+    curtailment.gridTargetW === 0 &&
+    curtailment.minLimitPercent === 0 &&
+    !curtailment.carChargingEntityId &&
+    solarSources.length > 0 &&
+    solarSources.every((s) =>
+      arrays.some(
+        (a) =>
+          a.energyEntityId === s.stat_energy_from &&
+          a.curtailable &&
+          a.controlMode === "modulating" &&
+          a.ratedPowerW,
+      ),
+    );
+  const controlBlocker =
+    curtailment.enabled && !curtailmentModeled
+      ? "Hypothetical preview: assumes uncurtailed solar. This PV curtailment configuration is not yet modeled; charge-limit control is blocked."
+      : null;
+  report(
+    "curtailment",
+    curtailmentModeled
+      ? "Threshold export suppression at equilibrium; controller transients are not predicted."
+      : controlBlocker || "Disabled",
+  );
   if (!prices.read.forecast || prices.read.error)
     throw new Error(
       prices.read.error || "Configure dynamic purchase and export prices.",
@@ -116,6 +201,9 @@ export async function calculateChargePlan(battery: Battery, now = Date.now()) {
       );
     const next = Math.min(end, p.end, (Math.floor(t / 900_000) + 1) * 900_000);
     slots.push({
+      curtailExport:
+        curtailmentModeled &&
+        p.productionPerKwh < curtailment.priceThresholdPerKwh,
       start: t,
       end: next,
       solarW: pv,
@@ -152,6 +240,8 @@ export async function calculateChargePlan(battery: Battery, now = Date.now()) {
     reserve = (model.capacityKwh * (model.maxSoc - model.minSoc)) / 100;
   const plan = await optimizeCharge(slots, model, reserve);
   return {
+    controlBlocker,
+    curtailmentModeled,
     plan,
     model,
     reportedW: numericState(state),

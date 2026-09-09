@@ -27,7 +27,13 @@ import {
   readControlConfig,
   saveControlConfig,
 } from "../lib/control-config.server";
-import { releasePvArray, syncControlLoop } from "../lib/control-loop.server";
+import {
+  pendingControlTick,
+  releaseBatteries,
+  releasePvArray,
+  stopControlLoop,
+  syncControlLoop,
+} from "../lib/control-loop.server";
 import {
   NO_CURTAILABLE_ARRAY_ERROR,
   NO_PRICES_ERROR,
@@ -203,7 +209,14 @@ async function settingsAction({ request }: Route.ActionArgs) {
         });
       }
 
-      if (recordId) await releaseChargeLimit(recordId);
+      if (recordId) {
+        const previous = (await listBatteries()).find((b) => b.id === recordId);
+        if (!formData.has("solarMarginPercent"))
+          parsed.fields.solarMarginPercent = previous?.solarMarginPercent ?? 20;
+        if (!formData.has("chargeWearPerKwh"))
+          parsed.fields.chargeWearPerKwh = previous?.chargeWearPerKwh ?? 0;
+        await releaseChargeLimit(recordId);
+      }
       if (recordId) await updateBattery(recordId, parsed.fields);
       else await addBattery(parsed.fields);
       return { section: "battery" as const, ok: true as const };
@@ -230,19 +243,44 @@ async function settingsAction({ request }: Route.ActionArgs) {
       // on, and nothing stops a form being posted directly.
       if (parsed.config.enabled) {
         const batteries = await listBatteries();
-        if (!batteries.some(isSteerable)) {
+        if (
+          parsed.config.strategy === "charge-limit"
+            ? batteries.length !== 1 ||
+              !batteries[0].chargeLimitEntityId ||
+              batteries[0].steered
+            : !batteries.some(isSteerable)
+        ) {
           return failed({
             section: "control",
             recordId: null,
-            errors: { enabled: NO_STEERABLE_BATTERY_ERROR },
+            errors: {
+              enabled:
+                parsed.config.strategy === "charge-limit"
+                  ? "Configure one battery with a maximum charge limit entity and turn off its target-power steering."
+                  : NO_STEERABLE_BATTERY_ERROR,
+            },
           });
         }
       }
 
-      await saveControlConfig(parsed.config);
-      // Take effect now rather than at the next restart: someone who has just
-      // ticked the box expects the log on the home page to start moving.
-      await syncControlLoop();
+      const previous = await readControlConfig();
+      stopControlLoop();
+      await pendingControlTick();
+      try {
+        for (const battery of await listBatteries())
+          await releaseChargeLimit(battery.id);
+        if (
+          previous.enabled &&
+          previous.strategy === "net-zero-energy" &&
+          (!parsed.config.enabled ||
+            parsed.config.strategy !== "net-zero-energy")
+        )
+          await releaseBatteries();
+        await saveControlConfig(parsed.config);
+      } finally {
+        // Resume the stored strategy even when restoration or saving failed.
+        await syncControlLoop();
+      }
       return { section: "control" as const, ok: true as const };
     }
 
@@ -361,6 +399,10 @@ export default function Settings({
             grid: isGridConfigured(grid),
             batteries: batteries.length > 0,
             steerable: batteries.some(isSteerable),
+            chargeLimit:
+              batteries.length === 1 &&
+              Boolean(batteries[0].chargeLimitEntityId) &&
+              !batteries[0].steered,
           }}
           actionData={actionData}
         />

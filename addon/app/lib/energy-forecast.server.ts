@@ -1,3 +1,4 @@
+import { readControlConfig } from "./control-config.server";
 import {
   buildLoadProfile,
   combineSolar,
@@ -12,7 +13,10 @@ let historyCache:
   | { key: string; at: number; profile: ReturnType<typeof buildLoadProfile> }
   | undefined;
 
-export async function readEnergyForecast(now = Date.now()) {
+export async function readEnergyForecast(
+  now = Date.now(),
+  report: (key: string, message: string) => void = () => {},
+) {
   const [prefs, forecasts, config] = await haCommands<
     [
       EnergyPreferences,
@@ -23,14 +27,28 @@ export async function readEnergyForecast(now = Date.now()) {
     { type: "energy/get_prefs" },
     { type: "energy/solar_forecast" },
     { type: "get_config" },
-  ]);
-  const ids = selectedForecasts(prefs);
+  ]).catch((error) => {
+    report("solar", error instanceof Error ? error.message : String(error));
+    throw error;
+  });
+  const { ids, solar } = (() => {
+    try {
+      const ids = selectedForecasts(prefs);
+      return { ids, solar: combineSolar(ids, forecasts) };
+    } catch (error) {
+      report("solar", error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  })();
   if (prefs.energy_sources.filter((s) => s.type === "battery").length !== 1)
     throw new Error(
       "Charge-limit planning requires one household battery source in the Energy dashboard.",
     );
-  const solar = combineSolar(ids, forecasts);
-  const counters = consumptionCounters(prefs);
+  report(
+    "solar",
+    `${ids.length} sources; ${solar.length} shared forecast hours`,
+  );
+  const counters = consumptionCounters(prefs, await readControlConfig());
   const key = JSON.stringify([config.time_zone, [...counters]]);
   if (
     !historyCache ||
@@ -56,6 +74,7 @@ export async function readEnergyForecast(now = Date.now()) {
     };
   }
   return {
+    preferences: prefs,
     solar,
     profile: historyCache.profile,
     sources: ids,

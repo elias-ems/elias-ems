@@ -30,6 +30,14 @@ beforeAll(async () => {
       productionFormula: "price",
     }),
   );
+  await writeFile(
+    path.join(directory, "control.json"),
+    JSON.stringify({
+      enabled: true,
+      strategy: "charge-limit",
+      intervalSeconds: 5,
+    }),
+  );
   stack = await startStack({
     dataDir: directory,
     haStates: [
@@ -67,15 +75,11 @@ it("plans in the background, serves Home through ingress and restores on a setti
   expect(html).toContain("Recommended charge ceiling");
   expect(html).toContain("Forecast and schedule details");
 
-  const body = new URLSearchParams(
-    Object.entries({
-      ...chargeBatteryFixture,
-      chargeLimitMode: "off",
-      intent: "battery-update",
-    })
-      .filter(([key]) => key !== "steered")
-      .map(([k, v]) => [k, String(v)]),
-  );
+  const body = new URLSearchParams({
+    intent: "control-save",
+    strategy: "charge-limit",
+    intervalSeconds: "5",
+  });
   const saved = await fetch(`${stack.baseUrl}settings`, {
     method: "POST",
     headers: {

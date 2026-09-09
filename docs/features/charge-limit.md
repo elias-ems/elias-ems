@@ -15,21 +15,43 @@ In Settings → Batteries, edit the battery:
 3. Search for its **Maximum charge limit (W)** entity. The integration must expose
    a `number` entity with W units and valid `min`, `max`, and `step` attributes.
    Names vary: verify which setting limits charging for the installed integration.
-4. Select **Preview** to calculate without writing. Defaults are 95% efficiency
-   in each direction, a 20% reduction of predicted solar, and no wear cost.
-5. Check the Home plan against observed self-consumption, then select **Active**
-   to allow Elias to update that number entity. Updates are at most once per
-   five minutes; current settings are checked every 30 seconds.
+4. Save the battery. Home automatically calculates a preview, even while Battery
+   control is disabled or another strategy is selected. Defaults are 95%
+   efficiency in each direction, a 20% solar margin, and no wear cost.
+5. Under **Battery control**, set the solar margin and wear cost if needed.
+   Check the Home plan, then select **Optimize charge limit** and enable Battery
+   control to allow writes. Keep native self-consumption enabled on the device.
+   Limits update at most once per five minutes; readback runs every 30 seconds.
+
+Existing per-battery Off/Preview/Active selections no longer authorize writes.
+Upgrades retain the entity and automatically show a passive preview. Activation
+requires the new strategy to be explicitly selected and enabled. Previously
+applied limits are recovered through the restoration journal. Battery-specific
+margin and wear values remain the fallback until global values are supplied.
 
 Dynamic consumption and production price formulas must be configured. In Home
 Assistant's Energy dashboard, configure the grid, battery charge/discharge
 energy counters, and a forecast for every solar source. Three complete samples
 of every hour of the day are required within the last fourteen days.
 
-The initial implementation supports one configured household battery. Elias PV
-curtailment must be disabled: a forecast of uncurtailed generation cannot yet be
-combined with the existing curtailment strategies. Other external battery or PV
-controllers must not change the behavior assumed by the model.
+One configured household battery is supported. With multiple Energy dashboard
+grid sources, select physical import and export statistic IDs under Battery
+control (commas or whitespace separate IDs). Include each tariff exactly once.
+Exclude reimbursement, accounting and submeter entries already included in the
+physical meter. Selections must match the Energy dashboard and their direction;
+duplicate IDs are rejected. Elias never modifies Energy dashboard preferences.
+
+PV curtailment no longer suppresses the preview. Threshold curtailment is modeled
+at equilibrium when all forecast solar sources match configured modulating arrays,
+the grid target and minimum PV limit are zero, and no flexible charger override
+is configured. Surplus beyond battery acceptance is discarded below the export
+price threshold. Controller transients are not predicted.
+
+Other curtailment configurations (including fixed steps and marginal-price bands)
+show an explicitly **hypothetical preview assuming uncurtailed solar**. Writes are
+blocked until that configuration can be modeled or curtailment is disabled.
+Another active battery strategy likewise makes the preview hypothetical. Other
+external battery or PV controllers must not change the model's assumptions.
 
 ## Forecast and financial model
 
@@ -80,6 +102,9 @@ The expandable schedule includes solar and household demand. Cost difference is
 modeled over published prices, not measured savings; plans may end with different
 stored energy. Forecast source count, coverage, history sample count, and solar
 margin make the assumptions visible.
+The live limit is fetched before planning, so a forecast or source-selection
+failure does not falsely mark an available entity unavailable. **Planning inputs**
+lists solar, history, price and battery checks separately.
 
 ## Control lifecycle
 

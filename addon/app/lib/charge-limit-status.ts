@@ -18,5 +18,6 @@ export type ChargeLimitStatus = {
   sources: number;
   historyHours: number;
   solarMarginPercent: number;
+  checks?: Record<string, string>;
 };
 export type ChargeLimitsData = { batteries: ChargeLimitStatus[] };

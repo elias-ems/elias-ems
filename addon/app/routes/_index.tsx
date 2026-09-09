@@ -275,19 +275,40 @@ export default function Index({ loaderData }: Route.ComponentProps) {
           ),
         }}
         control={{
-          summary: batteryControlSummary(batteries, {
-            enabled: control.enabled,
-            running: control.status.running,
-          }),
-          rule: control.enabled ? (
-            <>
-              Running the <strong>{control.status.strategy}</strong> strategy
-              whenever a reading changes, at most every{" "}
-              {control.status.intervalSeconds} s.
-            </>
-          ) : (
-            <>Switched off — no target is published for any battery.</>
-          ),
+          summary:
+            control.status.strategy === "charge-limit"
+              ? {
+                  tone: control.enabled ? "idle" : "off",
+                  state: control.enabled
+                    ? "Charge limit selected"
+                    : "Preview only",
+                  value: null,
+                  unit: "",
+                  percent: null,
+                  caption:
+                    "see Battery plan for readiness, requested limits and readback",
+                }
+              : batteryControlSummary(batteries, {
+                  enabled: control.enabled,
+                  running: control.status.running,
+                }),
+          rule:
+            control.status.strategy === "charge-limit" ? (
+              <>
+                Automatic planning every five minutes.{" "}
+                {control.enabled
+                  ? "Charge-limit writes require a valid plan and native self-consumption."
+                  : "Control is disabled; previews remain available."}
+              </>
+            ) : control.enabled ? (
+              <>
+                Running the <strong>{control.status.strategy}</strong> strategy
+                whenever a reading changes, at most every{" "}
+                {control.status.intervalSeconds} s.
+              </>
+            ) : (
+              <>Switched off — no target is published for any battery.</>
+            ),
         }}
         initialEntries={decisions}
       />

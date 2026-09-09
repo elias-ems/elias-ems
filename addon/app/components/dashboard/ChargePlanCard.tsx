@@ -168,6 +168,18 @@ function BatteryPlan({
         )}
       </div>
       <p style={{ ...hintStyle, margin: 0 }}>{status.message}</p>
+      {status.checks && (
+        <details>
+          <summary>Planning inputs</summary>
+          <ul>
+            {Object.entries(status.checks).map(([key, value]) => (
+              <li key={key}>
+                {key}: {value}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {status.mode === "preview" && (
         <p style={hintStyle}>
           Preview only — the battery's settings are unchanged.

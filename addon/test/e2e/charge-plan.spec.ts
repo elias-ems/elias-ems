@@ -20,7 +20,11 @@ test("charge plan hydrates, fits mobile and offers the charge-limit entity", asy
   try {
     await writeFile(
       path.join(directory, "batteries.json"),
-      JSON.stringify([chargeBatteryFixture]),
+      JSON.stringify([{ ...chargeBatteryFixture, chargeLimitMode: "off" }]),
+    );
+    await writeFile(
+      path.join(directory, "curtailment.json"),
+      JSON.stringify({ enabled: true, strategy: "soft-ceiling" }),
     );
     await writeFile(
       path.join(directory, "prices.json"),
@@ -60,6 +64,11 @@ test("charge plan hydrates, fits mobile and offers the charge-limit entity", asy
     await expect(
       page.getByText("Preview only — the battery's settings are unchanged."),
     ).toBeVisible();
+    await expect(
+      page
+        .getByRole("paragraph")
+        .filter({ hasText: /Hypothetical preview: assumes uncurtailed solar/ }),
+    ).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(
       page.getByRole("img", {
@@ -72,6 +81,13 @@ test("charge plan hydrates, fits mobile and offers the charge-limit entity", asy
       ),
     ).toBe(false);
     await page.goto(`${stack.baseUrl}settings`);
+    await expect(page.locator('select[name="chargeLimitMode"]')).toHaveCount(0);
+    await expect(
+      page.getByRole("option", { name: "Optimize charge limit", exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      page.getByLabel("Physical grid import counters", { exact: true }),
+    ).toBeVisible();
     await page.getByRole("button", { name: /Edit/ }).first().click();
     const entity = page.getByLabel("Maximum charge limit (W)", { exact: true });
     await entity.fill("Battery maximum charge");
