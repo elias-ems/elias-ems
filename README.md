@@ -47,7 +47,7 @@ cd addon && npm install && npm run dev:mock
 A GitHub release is what publishes a new version — merging to `main` never does. Publishing one builds and pushes the `amd64`/`aarch64` image to GHCR and, once that succeeds, bumps `version` in [addon/config.yaml](addon/config.yaml) on `main` for you:
 
 ```bash
-gh release create 1.0.0-alpha.35 --generate-notes --prerelease
+gh release create v1.0.0-alpha.39 --title 1.0.0-alpha.39 --generate-notes --prerelease
 ```
 
 See [Versioning](CLAUDE.md#versioning) and [Publishing the add-on image](CLAUDE.md#publishing-the-add-on-image) in CLAUDE.md for why the order matters and what [.github/workflows/image.yml](.github/workflows/image.yml) does.

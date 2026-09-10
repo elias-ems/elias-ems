@@ -149,7 +149,7 @@ Nothing enforces these on merge by itself — the job names have to be added as 
 
 [addon/config.yaml](addon/config.yaml)'s `image` field points Supervisor at `ghcr.io/elias-ems/elias-ems` — a prebuilt multi-arch image — rather than leaving it unset, which would make every install and update compile the app on the user's own Home Assistant box. [image.yml](.github/workflows/image.yml) is what keeps that image in step with the repository:
 
-- **A GitHub release, not a merge, is the release.** Publishing one (`gh release create 1.0.0-alpha.35 --generate-notes --prerelease`) builds `amd64` and `aarch64`, pushes both, publishes the multi-arch manifest, and only then commits the new `version` into `addon/config.yaml` on `main` and pushes — see [Versioning](#versioning) for why that order can't be reversed. `main` has a ruleset blocking deletion and force-push but no PR requirement, which is what lets that last step push directly.
+- **A GitHub release, not a merge, is the release.** Publishing one (`gh release create v1.0.0-alpha.39 --title 1.0.0-alpha.39 --generate-notes --prerelease`) builds `amd64` and `aarch64`, pushes both, publishes the multi-arch manifest, and only then commits the new `version` into `addon/config.yaml` on `main` and pushes — see [Versioning](#versioning) for why that order can't be reversed. Release tags always use the `v<version>` form; release titles use the unprefixed version, and the workflow rejects an unprefixed tag before building. `main` has a ruleset blocking deletion and force-push but no PR requirement, which is what lets that last step push directly.
 - **The builder actions are `home-assistant/builder`'s, pinned to `2026.06.0`.** That repo's own `home-assistant/builder@master` action is deprecated and due for removal; the composite actions (`prepare-multi-arch-matrix`, `build-image`, `publish-multi-arch-manifest`) are the current path. Bumping the pin is a manual, deliberate edit — there is no Renovate/Dependabot config for GitHub Actions in this repo.
 - **Both architectures build natively, no QEMU.** `prepare-multi-arch-matrix` maps `amd64 → ubuntu-24.04` and `aarch64 → ubuntu-24.04-arm`; ARM runners are free on public repositories, which this one is.
 - **On a pull request nothing is pushed**, and only Dockerfile-shaped changes (`addon/Dockerfile`, `addon/.dockerignore`, the workflow itself) trigger a build at all — `addon-integration` in ci.yml already runs `npm run build` on every PR, so the image build only needs to prove the Dockerfile and build context, not the app.
@@ -273,10 +273,11 @@ To exercise the app inside Home Assistant itself, add this repo as a custom repo
 The add-on version lives in the `version` field of [addon/config.yaml](addon/config.yaml). Home Assistant Supervisor detects updates purely by comparing this string to the installed version — it does not look at commits or file diffs, so a version bump is what actually surfaces "Update available" in HA.
 
 - Use semver with an incrementing pre-release counter while pre-1.0: `1.0.0-alpha.1`, `1.0.0-alpha.2`, ... → `1.0.0-beta.1`, `1.0.0-beta.2`, ... → `1.0.0` for the first stable release.
+- Prefix Git tags with `v` (for example, `v1.0.0-alpha.39`). GitHub release titles, the Home Assistant version, and container image tags remain unprefixed.
 - Bump once per meaningful release (batch related changes), not on every commit.
 - **Never edit `version` by hand.** [image.yml](.github/workflows/image.yml)'s `bump` job owns it: publishing a GitHub release builds and pushes the image first, and only after that succeeds does the workflow commit the new `version` into `addon/config.yaml` on `main` and push. That order is load-bearing — Supervisor reads `version` from `main` to decide an update exists, so `main` must never advertise a version before its image is pullable. A feature PR should not touch `version` at all; cut a release when you want one in front of users:
   ```bash
-  gh release create 1.0.0-alpha.35 --generate-notes --prerelease
+  gh release create v1.0.0-alpha.39 --title 1.0.0-alpha.39 --generate-notes --prerelease
   ```
 
 ## Commit messages

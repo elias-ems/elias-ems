@@ -63,7 +63,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version to (re)publish, e.g. 1.0.0-alpha.35
+        description: Version to (re)publish, e.g. 1.0.0-alpha.39
         required: true
       force:
         description: Overwrite the tag if it already exists
@@ -100,12 +100,15 @@ repo changing. Drop that one line if you want it strictly Dockerfile-only.
 Four jobs:
 
 - **`init`** — resolve and validate the version, then build the matrix.
-  - Version is the release tag with a leading `v` stripped if present, or the
-    dispatch input, or — on a PR, where nothing is pushed and it only feeds a
-    label — the current `version` out of `addon/config.yaml` via plain `sed`
-    (no `yq`: the ARM runner image is not guaranteed to carry it).
-  - Fail fast on a tag that is not a valid version/Docker tag
-    (`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`).
+  - A release tag must be `v<semver>`; anything without the `v` prefix fails
+    before a build starts. The normalized version is that tag with its required
+    `v` stripped, or the dispatch input, or — on a PR, where nothing is pushed
+    and it only feeds a label — the current `version` out of
+    `addon/config.yaml` via plain `sed` (no `yq`: the ARM runner image is not
+    guaranteed to carry it).
+  - Fail fast on a release tag that is not `v` followed by a valid version
+    (`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`), then validate the
+    normalized version as a Docker tag.
   - Fail if `docker buildx imagetools inspect ghcr.io/elias-ems/elias-ems:<v>`
     already resolves, unless `force`. Re-using a published version is the one
     mistake Supervisor cannot recover from on the user's side: they already
@@ -209,7 +212,7 @@ deleting the line: Supervisor goes straight back to building locally.
    the `image:` key is **not** added yet.
 2. **Cut the first release:**
    ```bash
-   gh release create 1.0.0-alpha.35 --generate-notes --prerelease
+   gh release create v1.0.0-alpha.35 --title 1.0.0-alpha.35 --generate-notes --prerelease
    ```
    That builds, pushes, publishes the manifest, and bumps config.yaml on main.
    HA is still local-building at this point, so a failure here costs nothing.
@@ -223,7 +226,9 @@ deleting the line: Supervisor goes straight back to building locally.
    the right one for it and no new release is needed.
 
 From then on the loop is: merge PRs without touching `version`, and run
-`gh release create <version>` when you want it in front of users.
+`gh release create v<version> --title <version>` when you want it in front of
+users. Git tags carry the `v`; GitHub release titles, `addon/config.yaml`, and
+GHCR image tags do not.
 
 ### 5. Documentation
 
