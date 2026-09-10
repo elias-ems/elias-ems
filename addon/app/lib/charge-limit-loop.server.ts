@@ -315,7 +315,6 @@ export async function chargeLimitTick(now = Date.now()) {
       nextPlan = Math.min(nextPlan, current.end);
       Object.assign(status, {
         mode: mayWrite ? "active" : "preview",
-        state: mayWrite ? "active" : "preview",
         plan: result.plan,
         calculatedAt: now,
         validUntil: Math.min(now + PLAN_MS, current.end),
@@ -365,6 +364,8 @@ export async function chargeLimitTick(now = Date.now()) {
           ? " Holding the previous limit until the five-minute write interval has elapsed."
           : " Readback is checked every 30 seconds.";
       }
+      // Readers can poll during apply/restore; publish readiness only once done.
+      status.state = mayWrite ? "active" : "preview";
       appendDiagnostic(
         "charge-limit",
         "info",
