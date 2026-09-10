@@ -25,43 +25,55 @@ const prefs: EnergyPreferences = {
   ],
 };
 describe("Energy dashboard forecast and demand", () => {
-  it("requires explicit physical meters when accounting grid entries are present", () => {
+  it("sums every grid source using configured import and export directions", () => {
     const withAccounting = {
       energy_sources: [
         ...prefs.energy_sources,
-        { type: "grid", stat_energy_from: "reimbursement" },
+        { type: "grid", stat_energy_from: "daily_fee" },
         {
           type: "grid",
-          stat_energy_from: "import2",
-          stat_energy_to: "export2",
+          flow_from: [{ stat_energy_from: "tariff2" }],
+          flow_to: [
+            { stat_energy_to: "return2" },
+            { stat_energy_to: "reimbursement" },
+          ],
         },
       ],
     };
-    expect(() => consumptionCounters(withAccounting)).toThrow(
-      "Multiple grid sources",
-    );
-    const selected = consumptionCounters(withAccounting, {
-      gridImportIds: "import, import2",
-      gridExportIds: "export export2",
+    const counters = consumptionCounters(withAccounting);
+    expect(Object.fromEntries(counters)).toEqual({
+      pv: 1,
+      import: 1,
+      export: -1,
+      discharge: 1,
+      charge: -1,
+      daily_fee: 1,
+      tariff2: 1,
+      return2: -1,
+      reimbursement: -1,
     });
-    expect([...selected.keys()]).not.toContain("reimbursement");
-    expect(selected.get("import2")).toBe(1);
-    expect(selected.get("export2")).toBe(-1);
-    expect(() =>
-      consumptionCounters(withAccounting, { gridImportIds: "import" }),
-    ).toThrow("both physical");
-    expect(() =>
-      consumptionCounters(withAccounting, {
-        gridImportIds: "missing",
-        gridExportIds: "export",
-      }),
-    ).toThrow("must exist");
-    expect(() =>
-      consumptionCounters(withAccounting, {
-        gridImportIds: "import, import",
-        gridExportIds: "export",
-      }),
-    ).toThrow("overlap");
+    const values = {
+      pv: 2,
+      import: 1,
+      export: 0.5,
+      discharge: 0.1,
+      charge: 1,
+      daily_fee: 0.002,
+      tariff2: 0.5,
+      return2: 0.1,
+      reimbursement: 0.001,
+    };
+    const stats: EnergyStatistics = Object.fromEntries(
+      Object.entries(values).map(([id, change]) => [
+        id,
+        Array.from({ length: 96 }, (_, i) => ({
+          start: i * 3_600_000,
+          change,
+        })),
+      ]),
+    );
+    const profile = buildLoadProfile(counters, stats, "UTC");
+    expect(profile.watts.every((w) => Math.abs(w - 2001) < 1e-6)).toBe(true);
   });
   it("follows selected providers, deduplicates and intersects complete hourly coverage", () => {
     const ids = selectedForecasts({

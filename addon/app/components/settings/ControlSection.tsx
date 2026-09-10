@@ -164,18 +164,6 @@ export default function ControlSection({
             defaultValue={config.chargeWearPerKwh ?? ""}
             hint="In the price currency. Leave empty to retain the battery's previous value."
           />
-          <Field
-            name="gridImportIds"
-            label="Physical grid import counters"
-            defaultValue={config.gridImportIds ?? ""}
-            hint="Energy dashboard statistic IDs separated by commas. Include each physical tariff once; exclude reimbursement and duplicate accounting entries. Leave both fields empty for discovery when there is only one grid source."
-          />
-          <Field
-            name="gridExportIds"
-            label="Physical grid export counters"
-            defaultValue={config.gridExportIds ?? ""}
-            hint="Energy dashboard statistic IDs separated by commas. Configure both import and export when selecting sources explicitly."
-          />
         </fieldset>
 
         <div>

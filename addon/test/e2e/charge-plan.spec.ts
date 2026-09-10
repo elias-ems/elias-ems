@@ -87,7 +87,10 @@ test("charge plan hydrates, fits mobile and offers the charge-limit entity", asy
     ).toHaveCount(1);
     await expect(
       page.getByLabel("Physical grid import counters", { exact: true }),
-    ).toBeVisible();
+    ).toHaveCount(0);
+    await expect(
+      page.getByLabel("Physical grid export counters", { exact: true }),
+    ).toHaveCount(0);
     await page.getByRole("button", { name: /Edit/ }).first().click();
     const entity = page.getByLabel("Maximum charge limit (W)", { exact: true });
     await entity.fill("Battery maximum charge");

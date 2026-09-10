@@ -13,9 +13,6 @@ export type ControlConfig = {
   strategy: StrategyId;
   /** How often the loop reconsiders, in seconds. */
   intervalSeconds: number;
-  /** Explicit physical grid counters when Energy dashboard accounting is ambiguous. */
-  gridImportIds?: string;
-  gridExportIds?: string;
   solarMarginPercent?: number;
   chargeWearPerKwh?: number;
 };
@@ -75,12 +72,6 @@ export function normalizeControlConfig(
   const intervalSeconds = Number(stored?.intervalSeconds);
 
   return {
-    ...(stored?.gridImportIds !== undefined
-      ? { gridImportIds: String(stored.gridImportIds) }
-      : {}),
-    ...(stored?.gridExportIds !== undefined
-      ? { gridExportIds: String(stored.gridExportIds) }
-      : {}),
     ...(stored?.solarMarginPercent !== undefined
       ? { solarMarginPercent: Number(stored.solarMarginPercent) }
       : {}),
@@ -140,10 +131,6 @@ export function parseControlConfig(
 
   const strategy = formData.get("strategy")?.toString();
   const planning: Partial<ControlConfig> = {};
-  for (const key of ["gridImportIds", "gridExportIds"] as const) {
-    if (formData.has(key))
-      planning[key] = formData.get(key)?.toString().trim() || "";
-  }
   for (const key of ["solarMarginPercent", "chargeWearPerKwh"] as const) {
     const raw = formData.get(key)?.toString().trim();
     if (raw) {

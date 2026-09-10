@@ -1,4 +1,3 @@
-import { readControlConfig } from "./control-config.server";
 import {
   buildLoadProfile,
   combineSolar,
@@ -48,7 +47,7 @@ export async function readEnergyForecast(
     "solar",
     `${ids.length} sources; ${solar.length} shared forecast hours`,
   );
-  const counters = consumptionCounters(prefs, await readControlConfig());
+  const counters = consumptionCounters(prefs);
   const key = JSON.stringify([config.time_zone, [...counters]]);
   if (
     !historyCache ||
