@@ -94,6 +94,37 @@ afterEach(async () => {
 });
 
 describe("charge limit execution and recovery", () => {
+  it("publishes active status only after the charge-limit write completes", async () => {
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.set.mockImplementationOnce(async (_id: string, w: number) => {
+      enter();
+      await pending;
+      current = w;
+    });
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    const tick = loop.chargeLimitTick(now);
+    try {
+      await entered;
+      const status = (await loop.readChargeLimits()).batteries[0];
+      expect(status.state).toBe("waiting");
+      expect(status.requestedW).toBeNull();
+      expect(current).toBe(2000);
+    } finally {
+      release();
+      await tick;
+    }
+    const status = (await loop.readChargeLimits()).batteries[0];
+    expect(status.state).toBe("active");
+    expect(status.requestedW).toBe(400);
+    expect(current).toBe(400);
+  });
   it("ignores legacy active mode after upgrade until the new strategy is enabled", async () => {
     await writeFile(
       path.join(directory, "control.json"),
