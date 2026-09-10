@@ -131,26 +131,28 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 const planTimelineStart = Date.UTC(2026, 8, 10, 20);
-const planTimelinePoints = Array.from({ length: 12 }, (_, index) => ({
-  start: planTimelineStart + index * 3_600_000,
-  end: planTimelineStart + (index + 1) * 3_600_000,
-  solarW: index > 8 ? 900 : 0,
+const planTimelinePoints = Array.from({ length: 48 }, (_, index) => ({
+  start: planTimelineStart + index * 900_000,
+  end: planTimelineStart + (index + 1) * 900_000,
+  solarW: index > 32 ? 900 : 0,
   loadW: 500,
-  buy: 0.24 + Math.sin(index / 2) * 0.06,
-  sell: 0.13 + Math.sin(index / 2) * 0.04,
+  buy: 0.24 + Math.sin(index / 8) * 0.06,
+  sell: 0.13 + Math.sin(index / 8) * 0.04,
   estimatedPrice: false,
-  limitW: index >= 7 && index <= 9 ? 2_000 : 0,
-  chargeW: index >= 7 && index <= 9 ? 1_600 : 0,
+  limitW: index >= 28 && index <= 39 ? 2_000 : 0,
+  chargeW: index >= 28 && index <= 39 ? 1_600 : 0,
   dischargeW: 0,
-  soc: 72 - index * 5 + (index >= 7 ? (index - 6) * 17 : 0),
-  baselineSoc: 72 - index * 5,
+  soc: 72 - index * 1.25 + (index >= 28 ? (index - 27) * 4.25 : 0),
+  baselineSoc: 72 - index * 1.25,
 }));
 const planTimelineFixture = {
   points: planTimelinePoints,
   times: Object.fromEntries(
     planTimelinePoints.map((point) => {
       const date = new Date(point.start);
-      const clock = `${String(date.getUTCHours()).padStart(2, "0")}:00`;
+      const clock = `${String(date.getUTCHours()).padStart(2, "0")}:${String(
+        date.getUTCMinutes(),
+      ).padStart(2, "0")}`;
       return [String(point.start), `10 Sep, ${clock}`];
     }),
   ),
