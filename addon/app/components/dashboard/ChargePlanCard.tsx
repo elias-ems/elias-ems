@@ -112,9 +112,18 @@ function BatteryPlan({
           </p>
           <details>
             <summary style={{ cursor: "pointer" }}>
-              Forecast and schedule details
+              Forecast and schedule details · {status.plan.points.length}{" "}
+              intervals
             </summary>
-            <div style={{ overflowX: "auto", marginTop: "0.75rem" }}>
+            <div
+              style={{
+                marginTop: "0.75rem",
+                maxHeight: "clamp(16rem, 52vh, 36rem)",
+                overflow: "auto",
+                border: "1px solid var(--color-border)",
+                borderRadius: 4,
+              }}
+            >
               <table
                 style={{
                   width: "100%",
@@ -137,7 +146,17 @@ function BatteryPlan({
                       "Load W",
                       "SoC %",
                     ].map((label) => (
-                      <th key={label} style={{ padding: "0.4rem" }}>
+                      <th
+                        key={label}
+                        style={{
+                          position: "sticky",
+                          top: 0,
+                          zIndex: 1,
+                          padding: "0.5rem 0.4rem",
+                          background: "var(--color-surface)",
+                          borderBottom: "1px solid var(--color-border)",
+                        }}
+                      >
                         {label}
                       </th>
                     ))}
