@@ -6,120 +6,7 @@ import type {
 import { usePolledJson } from "../../lib/json-fetch";
 import { hintStyle } from "../form";
 import { cardStyle, eyebrowStyle, monoStyle } from "./chrome";
-
-const colors = ["var(--color-battery)", "var(--color-text)"];
-
-function Timeline({
-  status,
-  kind,
-}: {
-  status: ChargeLimitStatus;
-  kind: "power" | "soc" | "price";
-}) {
-  const [compact, setCompact] = useState(false);
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 600px)");
-    const update = () => setCompact(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  const points = status.plan?.points || [];
-  if (!points.length) return null;
-  const from = points[0].start;
-  const to = points[points.length - 1].end;
-  const series =
-    kind === "power"
-      ? [points.map((p) => p.limitW), points.map((p) => p.chargeW)]
-      : kind === "soc"
-        ? [points.map((p) => p.soc), points.map((p) => p.baselineSoc)]
-        : [points.map((p) => p.buy), points.map((p) => p.sell)];
-  const labels =
-    kind === "power"
-      ? ["Charge ceiling", "Expected charging"]
-      : kind === "soc"
-        ? ["Planned SoC", "Unrestricted SoC"]
-        : ["Purchase price", "Export price"];
-  const max = kind === "soc" ? 100 : Math.max(0.01, ...series.flat());
-  const min = Math.min(0, ...series.flat());
-  const unit =
-    kind === "power" ? "W" : kind === "soc" ? "%" : `${status.currency}/kWh`;
-  const width = compact ? 320 : 900;
-  const left = compact ? 42 : 70;
-  const right = width - (compact ? 12 : 50);
-  const x = (t: number) => left + ((t - from) / (to - from)) * (right - left);
-  const y = (n: number) => 105 - ((n - min) / (max - min)) * 85;
-  const time = (t: number) => status.times[String(t)] || "";
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <svg
-        viewBox={`0 0 ${width} 155`}
-        role="img"
-        aria-label={`${labels.join(" and ")} over time, ${unit}`}
-        style={{ width: "100%", display: "block" }}
-      >
-        <title>{`${labels.join(" and ")} (${unit})`}</title>
-        {compact && (
-          <text x={left} y={12} fontSize={10} fill="var(--color-text-muted)">
-            {unit}
-          </text>
-        )}
-        {[min, (min + max) / 2, max].map((v) => (
-          <g key={v}>
-            <line
-              x1={left}
-              x2={right}
-              y1={y(v)}
-              y2={y(v)}
-              stroke="var(--color-border)"
-            />
-            <text
-              x={left - 8}
-              y={y(v) + 4}
-              textAnchor="end"
-              fill="var(--color-text-muted)"
-              fontSize={11}
-            >
-              {kind === "price" ? v.toFixed(2) : Math.round(v)}
-            </text>
-          </g>
-        ))}
-        {series.map((values, j) => (
-          <path
-            key={labels[j]}
-            d={points
-              .map(
-                (p, i) =>
-                  `${i ? "L" : "M"}${x(p.start)},${y(values[i])} H${x(p.end)}`,
-              )
-              .join(" ")}
-            fill="none"
-            stroke={colors[j]}
-            strokeWidth={2}
-            strokeDasharray={j ? "5 4" : undefined}
-          />
-        ))}
-        {(compact ? [0, 1] : [0, 0.5, 1]).map((f) => (
-          <text
-            key={f}
-            x={left + f * (right - left)}
-            y={124}
-            textAnchor={f === 0 ? "start" : f === 1 ? "end" : "middle"}
-            fontSize={11}
-            fill="var(--color-text-muted)"
-          >
-            {time(from + f * (to - from))}
-          </text>
-        ))}
-        <text x={left} y={147} fontSize={11} fill="var(--color-text)">
-          {compact
-            ? `${labels[0]} / ${labels[1]}`
-            : `${labels[0]} — solid · ${labels[1]} — dashed · ${unit}`}
-        </text>
-      </svg>
-    </div>
-  );
-}
+import PlanTimeline from "./PlanTimeline";
 
 function BatteryPlan({
   status,
@@ -194,9 +81,15 @@ function BatteryPlan({
             {status.calculatedAt !== null &&
               `Calculated ${stamp(status.calculatedAt)}.`}
           </p>
-          <Timeline status={status} kind="power" />
-          <Timeline status={status} kind="soc" />
-          <Timeline status={status} kind="price" />
+          {(["power", "soc", "price"] as const).map((kind) => (
+            <PlanTimeline
+              key={kind}
+              points={status.plan?.points || []}
+              times={status.times}
+              kind={kind}
+              currency={status.currency}
+            />
+          ))}
           <p style={hintStyle}>
             Modeled cost difference versus unrestricted self-consumption:{" "}
             <strong>

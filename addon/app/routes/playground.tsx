@@ -55,6 +55,7 @@ import {
   SunIcon,
   TagIcon,
 } from "../components/dashboard/Icons";
+import PlanTimeline from "../components/dashboard/PlanTimeline";
 import PriceCard from "../components/dashboard/PriceCard";
 import PriceChart from "../components/dashboard/PriceChart";
 import StatePill from "../components/dashboard/StatePill";
@@ -129,6 +130,32 @@ export async function action({ request }: Route.ActionArgs) {
   };
 }
 
+const planTimelineStart = Date.UTC(2026, 8, 10, 20);
+const planTimelinePoints = Array.from({ length: 12 }, (_, index) => ({
+  start: planTimelineStart + index * 3_600_000,
+  end: planTimelineStart + (index + 1) * 3_600_000,
+  solarW: index > 8 ? 900 : 0,
+  loadW: 500,
+  buy: 0.24 + Math.sin(index / 2) * 0.06,
+  sell: 0.13 + Math.sin(index / 2) * 0.04,
+  estimatedPrice: false,
+  limitW: index >= 7 && index <= 9 ? 2_000 : 0,
+  chargeW: index >= 7 && index <= 9 ? 1_600 : 0,
+  dischargeW: 0,
+  soc: 72 - index * 5 + (index >= 7 ? (index - 6) * 17 : 0),
+  baselineSoc: 72 - index * 5,
+}));
+const planTimelineFixture = {
+  points: planTimelinePoints,
+  times: Object.fromEntries(
+    planTimelinePoints.map((point) => {
+      const date = new Date(point.start);
+      const clock = `${String(date.getUTCHours()).padStart(2, "0")}:00`;
+      return [String(point.start), `10 Sep, ${clock}`];
+    }),
+  ),
+};
+
 /**
  * Every specimen on the page, keyed so the index and the specimen itself
  * cannot drift apart — one entry names it once, and both ends read that.
@@ -199,6 +226,11 @@ const ENTRIES = {
     id: "price-chart",
     name: "PriceChart",
     path: "components/dashboard/PriceChart.tsx",
+  },
+  planTimeline: {
+    id: "plan-timeline",
+    name: "PlanTimeline",
+    path: "components/dashboard/PlanTimeline.tsx",
   },
   priceCard: {
     id: "price-card",
@@ -939,6 +971,22 @@ export default function Playground({
               currency="EUR"
             />
           </Variant>
+        </Specimen>
+
+        <Specimen
+          {...ENTRIES.planTimeline}
+          note="The battery planner's shared stepped chart. Its axis labels every interval by the hour; hover anywhere in the plot to inspect both series at that time. A long plan scrolls horizontally on a narrow screen instead of crushing its labels."
+        >
+          {(["power", "soc", "price"] as const).map((kind) => (
+            <Variant key={kind} label={kind} onCanvas>
+              <PlanTimeline
+                points={planTimelineFixture.points}
+                times={planTimelineFixture.times}
+                kind={kind}
+                currency="EUR"
+              />
+            </Variant>
+          ))}
         </Specimen>
 
         <Specimen
