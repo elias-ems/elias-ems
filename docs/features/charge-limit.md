@@ -34,12 +34,12 @@ Assistant's Energy dashboard, configure the grid, battery charge/discharge
 energy counters, and a forecast for every solar source. Three complete samples
 of every hour of the day are required within the last fourteen days.
 
-One configured household battery is supported. With multiple Energy dashboard
-grid sources, select physical import and export statistic IDs under Battery
-control (commas or whitespace separate IDs). Include each tariff exactly once.
-Exclude reimbursement, accounting and submeter entries already included in the
-physical meter. Selections must match the Energy dashboard and their direction;
-duplicate IDs are rejected. Elias never modifies Energy dashboard preferences.
+One configured household battery is supported. Elias automatically sums all grid
+energy counters configured in the Energy dashboard, including tariff and
+accounting entries. Import and export direction comes from Home Assistant's
+configuration, not entity names. No separate counter selection is needed;
+previously saved selections are ignored. Duplicate statistic IDs are rejected.
+Elias never modifies Energy dashboard preferences.
 
 PV curtailment no longer suppresses the preview. Threshold curtailment is modeled
 at equilibrium when all forecast solar sources match configured modulating arrays,

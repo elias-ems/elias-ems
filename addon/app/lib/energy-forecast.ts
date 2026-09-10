@@ -67,52 +67,7 @@ export function combineSolar(
 /** Signed energy counters needed to reconstruct household demand. Supports HA's older grid shape. */
 export function consumptionCounters(
   prefs: EnergyPreferences,
-  selection?: { gridImportIds?: string; gridExportIds?: string },
 ): Map<string, number> {
-  const imports =
-    selection?.gridImportIds?.split(/[\s,]+/).filter(Boolean) || [];
-  const exports =
-    selection?.gridExportIds?.split(/[\s,]+/).filter(Boolean) || [];
-  if (imports.length || exports.length) {
-    if (!imports.length || !exports.length)
-      throw new Error(
-        "Select both physical grid import and export counters in Battery control.",
-      );
-    const grid = prefs.energy_sources.filter((s) => s.type === "grid");
-    const configuredImports = new Set(
-      grid.flatMap((s) => [
-        s.stat_energy_from,
-        ...(s.flow_from || []).map((f) => f.stat_energy_from),
-      ]),
-    );
-    const configuredExports = new Set(
-      grid.flatMap((s) => [
-        s.stat_energy_to,
-        ...(s.flow_to || []).map((f) => f.stat_energy_to),
-      ]),
-    );
-    if (
-      imports.some((id) => !configuredImports.has(id)) ||
-      exports.some((id) => !configuredExports.has(id))
-    )
-      throw new Error(
-        "Selected grid counters must exist in the Energy dashboard.",
-      );
-    prefs = {
-      energy_sources: [
-        ...prefs.energy_sources.filter((s) => s.type !== "grid"),
-        {
-          type: "grid",
-          flow_from: imports.map((stat_energy_from) => ({ stat_energy_from })),
-          flow_to: exports.map((stat_energy_to) => ({ stat_energy_to })),
-        },
-      ],
-    };
-  } else if (prefs.energy_sources.filter((s) => s.type === "grid").length > 1) {
-    throw new Error(
-      "Multiple grid sources may include accounting or overlapping meters. Select physical grid import and export counters in Battery control.",
-    );
-  }
   const counters = new Map<string, number>();
   let hasImport = false;
   let hasExport = false;
