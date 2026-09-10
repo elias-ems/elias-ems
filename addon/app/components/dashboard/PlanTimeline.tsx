@@ -62,6 +62,10 @@ export default function PlanTimeline({
   const y = (n: number) => 105 - ((n - min) / (max - min)) * 85;
   const time = (t: number) => times[String(t)] || "";
   const clock = (t: number) => time(t).match(/\d{2}:\d{2}$/)?.[0] || time(t);
+  const isTwoHourTick = (t: number) => {
+    const match = clock(t).match(/^(\d{2}):(\d{2})$/);
+    return match !== null && Number(match[1]) % 2 === 0 && match[2] === "00";
+  };
   const value = (n: number) =>
     kind === "price" ? n.toFixed(3) : String(Math.round(n));
   const hovered = active === null ? null : points[active];
@@ -133,27 +137,29 @@ export default function PlanTimeline({
             strokeDasharray={j ? "5 4" : undefined}
           />
         ))}
-        {points.map((point) => (
-          <g key={point.start}>
-            <line
-              x1={x(point.start)}
-              x2={x(point.start)}
-              y1={108}
-              y2={113}
-              stroke="var(--color-border)"
-            />
-            <text
-              x={x((point.start + point.end) / 2)}
-              y={125}
-              textAnchor="middle"
-              fontSize={10}
-              fill="var(--color-text-muted)"
-              fontFamily="var(--font-mono)"
-            >
-              {clock(point.start)}
-            </text>
-          </g>
-        ))}
+        {points
+          .filter((point) => isTwoHourTick(point.start))
+          .map((point) => (
+            <g key={point.start}>
+              <line
+                x1={x(point.start)}
+                x2={x(point.start)}
+                y1={108}
+                y2={113}
+                stroke="var(--color-border)"
+              />
+              <text
+                x={x((point.start + point.end) / 2)}
+                y={125}
+                textAnchor="middle"
+                fontSize={10}
+                fill="var(--color-text-muted)"
+                fontFamily="var(--font-mono)"
+              >
+                {clock(point.start)}
+              </text>
+            </g>
+          ))}
         <line
           x1={right}
           x2={right}
