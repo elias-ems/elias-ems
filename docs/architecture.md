@@ -2,8 +2,10 @@
 
 The root `gym/` directory provides an offline battery-planner experiment harness.
 It runs the production pure optimizer directly with versioned JSON datasets;
-private Home Assistant captures and results are gitignored. See `gym/README.md`
-in the repository for capture, replay and curation commands.
+the approved household dataset and frozen reference output are committed.
+The test runs today's prepared inputs; yesterday is retained as historical context.
+Raw captures and experiment results are gitignored. See `gym/README.md` in the
+repository for replay and curation commands.
 
 This is a Home Assistant add-on repository (the layout HA's Add-on Store expects: `repository.yaml` at the root plus one directory per add-on, each with its own `config.yaml`).
 

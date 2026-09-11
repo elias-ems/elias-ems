@@ -8,7 +8,10 @@ import {
   simulateCharge,
 } from "../addon/app/lib/charge-plan.ts";
 
-const [input, output = "gym/results/latest"] = process.argv.slice(2);
+const [
+  input = "gym/datasets/household-2026-09-11/input.json",
+  output = "gym/results/latest",
+] = process.argv.slice(2);
 if (!input)
   throw new Error("Usage: node gym/run.mjs <dataset.json> [output-directory]");
 const raw = await readFile(input, "utf8");
@@ -62,7 +65,7 @@ const score = (limits) => {
   };
 };
 const optimized = score(plan.points.map((p) => p.limitW));
-const baseline = score(
+const unrestricted = score(
   plan.points.map(() => deviceLimit(data.model.maxW, data.model)),
 );
 const source = await readFile(
@@ -79,8 +82,8 @@ const report = {
   }).trim(),
   elapsedMs,
   optimized,
-  baseline,
-  objectiveImprovement: baseline.objective - optimized.objective,
+  unrestricted,
+  objectiveImprovement: unrestricted.objective - optimized.objective,
   assumptions: data.assumptions,
   plan,
 };
@@ -90,7 +93,7 @@ await writeFile(
   JSON.stringify(report, null, 2),
 );
 const header =
-  "start,end,ceilingW,chargingW,dischargingW,solarW,loadW,buy,sell,soc,baselineSoc";
+  "start,end,ceilingW,chargingW,dischargingW,solarW,loadW,buy,sell,soc,unrestrictedSoc";
 const csv = plan.points.map((p) =>
   [
     new Date(p.start).toISOString(),
@@ -121,7 +124,7 @@ console.log(
       kind: data.kind,
       intervals: plan.points.length,
       optimized,
-      baseline,
+      unrestricted,
       objectiveImprovement: report.objectiveImprovement,
     },
     null,
