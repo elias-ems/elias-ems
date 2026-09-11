@@ -66,10 +66,12 @@
 
   /* Chart marks are graphics, so 3:1 is the bar to clear — but the blue-grey
      that reads as "quiet" only manages 2.9:1 on white, hence the darker light
-     value. `--color-chart-now` is deliberately heavier than `--color-import` in
-     both directions: darker in light, brighter in dark. */
+     value. Active ("now") bars take a contextual tint rather than an alarming
+     universal red: darker in light theme, brighter in dark theme. */
   --color-chart-bar: light-dark(#6b8299, #9aa5b1);
-  --color-chart-now: light-dark(#7f0710, #ffb0b0);
+  --color-chart-bar-now: light-dark(#334155, #e2e8f0);
+  --color-import-now: light-dark(#7f0710, #ffd1d1);
+  --color-chart-now: var(--color-chart-bar-now);
 
   /* The tints a pill or a callout sits on. Kept faint enough that the colour
      above still clears 4.5:1 when drawn on them. */

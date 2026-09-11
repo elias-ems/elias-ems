@@ -124,6 +124,7 @@ function toPrices(
       coverage: null,
       currency: "EUR",
       curve: [],
+      curveTomorrow: [],
       nowMinutes: null,
       error: null,
     };
@@ -142,6 +143,17 @@ function toPrices(
       ? null
       : formatPricePerKwh(value, currency);
 
+  const formulas = parsePriceFormulas(config);
+  const nowDate = new Date(now);
+  const tomorrowDate = new Date(
+    nowDate.getFullYear(),
+    nowDate.getMonth(),
+    nowDate.getDate() + 1,
+    12,
+    0,
+    0,
+  );
+
   return {
     configured: true,
     consumption: price(read.now?.consumptionPerKwh),
@@ -156,8 +168,9 @@ function toPrices(
         ? `${read.forecast?.slots.length} slots · ${formatSlotRange(first.start, last.end)}`
         : null,
     currency,
-    curve: read.forecast
-      ? toCurve(read.forecast, parsePriceFormulas(config), now)
+    curve: read.forecast ? toCurve(read.forecast, formulas, nowDate) : [],
+    curveTomorrow: read.forecast?.tomorrowIncluded
+      ? toCurve(read.forecast, formulas, tomorrowDate)
       : [],
     nowMinutes: read.now ? startMinutes(read.now.slot.start) : null,
     error: read.error,
@@ -173,48 +186,46 @@ function startMinutes(iso: string): number | null {
 }
 
 /**
- * Today's slots, averaged into one point per hour.
+ * Slots for a given day, kept at their published cadence (15m, 30m, or 60m).
  *
- * Today only: the forecast carries tomorrow as soon as it is published, and a
- * chart that silently grew a second day would make every hour half as wide
- * halfway through the afternoon.
- *
- * Bucketed by the hour each slot *starts* in rather than by an index, for the
- * reason `PriceSlot` carries explicit boundaries at all — providers publish
- * quarter-hourly or hourly and a DST day has neither 96 nor 24 of them, so any
- * arithmetic over a position in the array is wrong twice a year.
+ * Minutes-since-local-midnight rather than timestamps, so the browser can plot
+ * knowing nothing about timezones.
  */
 function toCurve(
   forecast: PriceForecast,
   formulas: PriceFormulas,
-  now: number,
+  targetDate: Date,
 ): PriceCurvePoint[] {
-  const today = new Date(now).toDateString();
-  const buckets = new Map<number, number[]>();
+  const targetDay = targetDate.toDateString();
+  const points: PriceCurvePoint[] = [];
 
   for (const slot of forecast.slots) {
     const at = new Date(slot.start);
-    if (Number.isNaN(at.getTime()) || at.toDateString() !== today) continue;
+    if (Number.isNaN(at.getTime()) || at.toDateString() !== targetDay) continue;
 
     // A slot whose selling leg does not evaluate is left out rather than
     // charted as zero: the gap says "no number here", which is true, and a
     // zero would sit exactly on the threshold line and read as a decision.
-    const selling = priceSlot(slot, formulas).productionPerKwh;
+    const priced = priceSlot(slot, formulas);
+    const selling = priced.productionPerKwh;
     if (selling === null) continue;
 
-    const hour = at.getHours() * 60;
-    const bucket = buckets.get(hour);
-    if (bucket) bucket.push(selling);
-    else buckets.set(hour, [selling]);
+    const start = at.getHours() * 60 + at.getMinutes();
+    const end = new Date(slot.end);
+    const durationMinutes = Number.isNaN(end.getTime())
+      ? 15
+      : Math.max(1, Math.round((end.getTime() - at.getTime()) / 60_000));
+    const endMinutes = Math.min(1440, start + durationMinutes);
+
+    points.push({
+      startMinutes: start,
+      endMinutes,
+      sellingPerKwh: selling,
+      spotPerKwh: priced.spotPerKwh,
+    });
   }
 
-  return [...buckets.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([startMinutes, values]) => ({
-      startMinutes,
-      sellingPerKwh:
-        values.reduce((sum, value) => sum + value, 0) / values.length,
-    }));
+  return points.sort((a, b) => a.startMinutes - b.startMinutes);
 }
 
 export async function readDashboard(): Promise<DashboardReadings> {
