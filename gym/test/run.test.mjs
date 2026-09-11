@@ -13,21 +13,21 @@ test("offline runner is reproducible and preserves curation", async () => {
     const run = () =>
       execFileSync(
         process.execPath,
-        ["gym/run.mjs", "gym/examples/synthetic.json", output],
+        ["gym/run.mjs", "gym/datasets/household-2026-09-11/input.json", output],
         { cwd: root },
       );
     run();
     const first = JSON.parse(
       await readFile(path.join(output, "report.json"), "utf8"),
     );
-    assert.equal(first.kind, "synthetic");
-    assert.equal(first.plan.points.length, 24);
+    assert.equal(first.kind, "measured-hindsight");
+    assert.equal(first.plan.points.length, 52);
     assert.ok(first.objectiveImprovement >= -1e-6);
     assert.ok(
       first.plan.points.every(
         (p) =>
-          p.soc >= 10 - 1e-6 &&
-          p.soc <= 95 + 1e-6 &&
+          p.soc >= 5 - 1e-6 &&
+          p.soc <= 100 + 1e-6 &&
           p.chargeW <= p.limitW + 1e-6,
       ),
     );
