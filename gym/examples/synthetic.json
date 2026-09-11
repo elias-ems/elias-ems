@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "id": "synthetic-sunny-day",
+  "kind": "synthetic",
+  "timeZone": "Europe/Brussels",
+  "currency": "EUR",
+  "model": {
+    "capacityKwh": 5,
+    "minSoc": 10,
+    "maxSoc": 95,
+    "soc": 20,
+    "minW": 0,
+    "maxW": 2000,
+    "stepW": 100,
+    "dischargeW": 2000,
+    "efficiency": 0.95,
+    "wearPerKwh": 0
+  },
+  "terminalReserveKwh": 2,
+  "assumptions": ["Synthetic deterministic example; no household data."],
+  "slots": [
+    {
+      "start": 1788991200000,
+      "end": 1788994800000,
+      "solarW": 0,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1788994800000,
+      "end": 1788998400000,
+      "solarW": 0,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1788998400000,
+      "end": 1789002000000,
+      "solarW": 0,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789002000000,
+      "end": 1789005600000,
+      "solarW": 0,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789005600000,
+      "end": 1789009200000,
+      "solarW": 0,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789009200000,
+      "end": 1789012800000,
+      "solarW": 0,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789012800000,
+      "end": 1789016400000,
+      "solarW": 0,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789016400000,
+      "end": 1789020000000,
+      "solarW": 1035.276180410083,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789020000000,
+      "end": 1789023600000,
+      "solarW": 1999.9999999999998,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789023600000,
+      "end": 1789027200000,
+      "solarW": 2828.42712474619,
+      "loadW": 700,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789027200000,
+      "end": 1789030800000,
+      "solarW": 3464.1016151377544,
+      "loadW": 700,
+      "buy": 0.2,
+      "sell": 0.02,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789030800000,
+      "end": 1789034400000,
+      "solarW": 3863.7033051562735,
+      "loadW": 700,
+      "buy": 0.2,
+      "sell": 0.02,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789034400000,
+      "end": 1789038000000,
+      "solarW": 4000.0,
+      "loadW": 700,
+      "buy": 0.2,
+      "sell": 0.02,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789038000000,
+      "end": 1789041600000,
+      "solarW": 3863.7033051562735,
+      "loadW": 700,
+      "buy": 0.2,
+      "sell": 0.02,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789041600000,
+      "end": 1789045200000,
+      "solarW": 3464.101615137755,
+      "loadW": 700,
+      "buy": 0.2,
+      "sell": 0.02,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789045200000,
+      "end": 1789048800000,
+      "solarW": 2828.42712474619,
+      "loadW": 700,
+      "buy": 0.2,
+      "sell": 0.02,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789048800000,
+      "end": 1789052400000,
+      "solarW": 1999.9999999999998,
+      "loadW": 700,
+      "buy": 0.2,
+      "sell": 0.02,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789052400000,
+      "end": 1789056000000,
+      "solarW": 1035.2761804100842,
+      "loadW": 1200,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789056000000,
+      "end": 1789059600000,
+      "solarW": 4.898587196589413e-13,
+      "loadW": 1200,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789059600000,
+      "end": 1789063200000,
+      "solarW": 0,
+      "loadW": 1200,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789063200000,
+      "end": 1789066800000,
+      "solarW": 0,
+      "loadW": 1200,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789066800000,
+      "end": 1789070400000,
+      "solarW": 0,
+      "loadW": 1200,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789070400000,
+      "end": 1789074000000,
+      "solarW": 0,
+      "loadW": 1200,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1789074000000,
+      "end": 1789077600000,
+      "solarW": 0,
+      "loadW": 1200,
+      "buy": 0.4,
+      "sell": 0.12,
+      "estimatedPrice": false
+    }
+  ]
+}
