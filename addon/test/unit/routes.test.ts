@@ -254,6 +254,7 @@ describe("GET / (dashboard)", () => {
         coverage: null,
         currency: "EUR",
         curve: [],
+        curveTomorrow: [],
         nowMinutes: null,
         error: null,
       },

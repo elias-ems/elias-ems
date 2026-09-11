@@ -8,6 +8,7 @@
  * one especially, because it is what makes a formula checkable against a bill
  * and a mis-picked entity visible rather than merely plausible.
  */
+import { useState } from "react";
 import { Link } from "react-router";
 import type { DashboardPrices } from "../../lib/dashboard";
 import {
@@ -41,6 +42,16 @@ export default function PriceCard({
   /** Whether curtailment is switched on, which is what makes the line mean anything. */
   curtailing: boolean;
 }) {
+  const [selectedDay, setSelectedDay] = useState<"today" | "tomorrow">("today");
+  const hasTomorrow = Boolean(
+    prices.curveTomorrow && prices.curveTomorrow.length > 0,
+  );
+  const activeCurve =
+    selectedDay === "tomorrow" && hasTomorrow
+      ? prices.curveTomorrow
+      : prices.curve;
+  const activeNowMinutes = selectedDay === "today" ? prices.nowMinutes : null;
+
   // The question the card is really asking: is exporting worth doing right now?
   // Not "is the price negative" — the threshold is configurable because a
   // contract with an injection fee breaks even somewhere above zero.
@@ -157,8 +168,76 @@ export default function PriceCard({
           minWidth: 0,
         }}
       >
-        <h2 style={eyebrowStyle}>Selling price · today, hourly average</h2>
-        {prices.curve.length > 0 ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "0.5rem",
+          }}
+        >
+          <h2 style={eyebrowStyle}>
+            Selling price · {selectedDay === "tomorrow" ? "tomorrow" : "today"}
+          </h2>
+          {hasTomorrow && (
+            <div
+              style={{
+                display: "inline-flex",
+                background: "var(--color-border)",
+                padding: 2,
+                borderRadius: 6,
+                gap: 2,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setSelectedDay("today")}
+                style={{
+                  border: "none",
+                  background:
+                    selectedDay === "today"
+                      ? "var(--color-surface)"
+                      : "transparent",
+                  color:
+                    selectedDay === "today"
+                      ? "var(--color-text)"
+                      : "var(--color-text-muted)",
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  fontSize: "0.6875rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedDay("tomorrow")}
+                style={{
+                  border: "none",
+                  background:
+                    selectedDay === "tomorrow"
+                      ? "var(--color-surface)"
+                      : "transparent",
+                  color:
+                    selectedDay === "tomorrow"
+                      ? "var(--color-text)"
+                      : "var(--color-text-muted)",
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  fontSize: "0.6875rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Tomorrow
+              </button>
+            </div>
+          )}
+        </div>
+        {activeCurve.length > 0 ? (
           <>
             {/*
               The same chart at two plot sizes, one shown at a time. The wide
@@ -167,8 +246,8 @@ export default function PriceCard({
             */}
             <div className="dash-chart-wide">
               <PriceChart
-                curve={prices.curve}
-                nowMinutes={prices.nowMinutes}
+                curve={activeCurve}
+                nowMinutes={activeNowMinutes}
                 thresholdPerKwh={thresholdPerKwh}
                 currency={prices.currency}
               />
@@ -176,8 +255,8 @@ export default function PriceCard({
             <div className="dash-chart-narrow">
               <PriceChart
                 compact
-                curve={prices.curve}
-                nowMinutes={prices.nowMinutes}
+                curve={activeCurve}
+                nowMinutes={activeNowMinutes}
                 thresholdPerKwh={thresholdPerKwh}
                 currency={prices.currency}
               />

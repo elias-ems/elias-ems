@@ -86,21 +86,42 @@ function entry(
 
 /**
  * A day with a solar glut in it: the selling price goes negative either side of
- * noon and peaks in the evening.
- *
- * Shaped that way on purpose. A flat curve would draw the same chart whatever
- * the threshold is, and the whole point of the threshold line is the band of
- * hours it cuts off — which only exists on a day where exporting is sometimes
- * worth money and sometimes isn't.
+ * noon and peaks in the evening, with quarter-hourly 15-minute slots.
  */
-const PRICE_CURVE: PriceCurvePoint[] = [
-  0.081, 0.074, 0.07, 0.068, 0.072, 0.089, 0.112, 0.128, 0.101, 0.062, 0.021,
-  -0.004, -0.018, -0.021, -0.009, 0.014, 0.048, 0.087, 0.134, 0.161, 0.152,
-  0.128, 0.104, 0.092,
-].map((sellingPerKwh, hour) => ({
-  startMinutes: hour * 60,
-  sellingPerKwh,
-}));
+const PRICE_CURVE: PriceCurvePoint[] = Array.from({ length: 96 }, (_, i) => {
+  const hour = i / 4;
+  const base =
+    0.09 +
+    0.04 * Math.sin(((hour - 4) / 24) * 2 * Math.PI) -
+    0.11 * Math.exp(-(((hour - 13) / 2.5) ** 2)) +
+    0.09 * Math.exp(-(((hour - 19.5) / 2) ** 2));
+  const sellingPerKwh = Math.round(base * 10000) / 10000;
+  return {
+    startMinutes: i * 15,
+    endMinutes: (i + 1) * 15,
+    sellingPerKwh,
+    spotPerKwh: Math.round((sellingPerKwh + 0.003) * 10000) / 10000,
+  };
+});
+
+const PRICE_CURVE_TOMORROW: PriceCurvePoint[] = Array.from(
+  { length: 96 },
+  (_, i) => {
+    const hour = i / 4;
+    const base =
+      0.08 +
+      0.04 * Math.sin(((hour - 5) / 24) * 2 * Math.PI) -
+      0.08 * Math.exp(-(((hour - 14) / 3) ** 2)) +
+      0.08 * Math.exp(-(((hour - 20) / 2) ** 2));
+    const sellingPerKwh = Math.round(base * 10000) / 10000;
+    return {
+      startMinutes: i * 15,
+      endMinutes: (i + 1) * 15,
+      sellingPerKwh,
+      spotPerKwh: Math.round((sellingPerKwh + 0.003) * 10000) / 10000,
+    };
+  },
+);
 
 /** 13:00, which sits in the negative band above — where curtailment acts. */
 const NOW_MINUTES = 13 * 60;
@@ -186,6 +207,7 @@ export function playgroundFixtures(now: number) {
     coverage: "through tomorrow 23:45",
     currency: "EUR",
     curve: PRICE_CURVE,
+    curveTomorrow: PRICE_CURVE_TOMORROW,
     nowMinutes: NOW_MINUTES,
     error: null,
   };
@@ -350,6 +372,7 @@ export function playgroundFixtures(now: number) {
         slot: null,
         coverage: null,
         curve: [],
+        curveTomorrow: [],
         nowMinutes: null,
         error: "sensor.energi_epex_spot has no forecast attribute.",
       },
@@ -363,6 +386,7 @@ export function playgroundFixtures(now: number) {
         coverage: null,
         currency: "EUR",
         curve: [],
+        curveTomorrow: [],
         nowMinutes: null,
         error: null,
       },

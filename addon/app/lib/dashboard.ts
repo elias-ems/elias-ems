@@ -65,23 +65,19 @@ export type DashboardBattery = {
 };
 
 /**
- * One hour of the day on the price chart.
+ * One interval of the day on the price chart.
  *
- * Hourly means rather than the 96 raw slots, and minutes-since-local-midnight
- * rather than a timestamp, for two reasons that both come down to what crosses
- * the wire. These readings are pushed on every state change, so the whole
- * quarter-hourly series would be a kilobyte of unchanged prices resent every
- * time an inverter twitched. And a plain minute offset is something the browser
- * can plot knowing nothing about timezones, which is the same reason every
- * other string on this page is built on the server.
+ * Quarter-hourly (or hourly for legacy providers), using minutes-since-local-midnight
+ * rather than timestamps, so the browser can plot knowing nothing about timezones.
  *
  * The *selling* leg, because that is the number curtailment's threshold is
- * compared against. A chart of the exchange price would put its zero crossing
- * in the wrong place by whatever the contract's injection fee is.
+ * compared against.
  */
 export type PriceCurvePoint = {
   startMinutes: number;
+  endMinutes: number;
   sellingPerKwh: number;
+  spotPerKwh?: number;
 };
 
 /**
@@ -120,8 +116,10 @@ export type DashboardPrices = {
    * rather than guessing at EUR.
    */
   currency: string;
-  /** Today's selling price hour by hour. Empty when there is nothing to draw. */
+  /** Today's selling price interval by interval. Empty when there is nothing to draw. */
   curve: PriceCurvePoint[];
+  /** Tomorrow's selling price curve, when published. */
+  curveTomorrow: PriceCurvePoint[];
   /** Where the current slot starts on that curve, in minutes past local midnight. */
   nowMinutes: number | null;
   error: string | null;

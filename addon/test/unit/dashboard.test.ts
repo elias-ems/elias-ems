@@ -27,6 +27,8 @@ import {
   startHaLive,
   stopHaLive,
 } from "../../app/lib/ha-live.server";
+import { DEFAULT_PRICE_CONFIG } from "../../app/lib/prices";
+import { savePriceConfig } from "../../app/lib/prices.server";
 import { defaultStates, startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
@@ -69,6 +71,7 @@ afterEach(async () => {
   // whether there is one.
   stopHaLive();
   ha.setStates(await defaultStates());
+  await savePriceConfig(DEFAULT_PRICE_CONFIG);
 });
 
 describe("readDashboard", () => {
@@ -108,6 +111,73 @@ describe("readDashboard", () => {
     await vi.waitFor(async () => {
       const readings = await readDashboard();
       expect(readings.grid.power?.display).toMatch(/^-1\D?500 W$/);
+    });
+  });
+
+  it("reads 15-minute price slots and tomorrow's curve without hourly averaging", async () => {
+    await savePriceConfig({
+      source: "home-assistant",
+      forecastEntityId: "sensor.prices",
+      consumptionFormula: "price",
+      productionFormula: "price",
+    });
+
+    const today = new Date();
+    const todayBase = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate(),
+      0,
+      0,
+      0,
+    ).getTime();
+    const tomorrowBase = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate() + 1,
+      0,
+      0,
+      0,
+    ).getTime();
+
+    const rawToday = Array.from({ length: 96 }, (_, i) => ({
+      hour: new Date(todayBase + i * 15 * 60_000).toISOString(),
+      price: 0.1 + i / 1000,
+    }));
+
+    const rawTomorrow = Array.from({ length: 96 }, (_, i) => ({
+      hour: new Date(tomorrowBase + i * 15 * 60_000).toISOString(),
+      price: 0.2 + i / 1000,
+    }));
+
+    ha.setState("sensor.prices", "0.1", {
+      currency: "EUR",
+      tomorrow_valid: true,
+      raw_today: rawToday,
+      raw_tomorrow: rawTomorrow,
+    });
+
+    const readings = await readDashboard();
+    expect(readings.prices.configured).toBe(true);
+    expect(readings.prices.curve).toHaveLength(96);
+    expect(readings.prices.curve[0]).toEqual({
+      startMinutes: 0,
+      endMinutes: 15,
+      sellingPerKwh: 0.1,
+      spotPerKwh: 0.1,
+    });
+    expect(readings.prices.curve[1]).toEqual({
+      startMinutes: 15,
+      endMinutes: 30,
+      sellingPerKwh: 0.101,
+      spotPerKwh: 0.101,
+    });
+    expect(readings.prices.curveTomorrow).toHaveLength(96);
+    expect(readings.prices.curveTomorrow[0]).toEqual({
+      startMinutes: 0,
+      endMinutes: 15,
+      sellingPerKwh: 0.2,
+      spotPerKwh: 0.2,
     });
   });
 });
