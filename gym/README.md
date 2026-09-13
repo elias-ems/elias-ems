@@ -64,3 +64,57 @@ of achieved savings. Testing history-based forecasting needs a separate harness.
 
 The one-off capture and preparation tools have been removed. Raw local captures
 under `data/` remain ignored; the approved normalized dataset is versioned.
+
+## Multiple algorithms and benchmark
+
+```sh
+node gym/benchmark.mjs
+node gym/run.mjs gym/datasets/household-2026-09-11/input.json gym/results/evening-target evening-target
+```
+
+The registry in `algorithms/index.mjs` exposes `cost-optimized` (existing dynamic programming
+optimizer) and `evening-target` (evening deadline algorithm). Add candidates there.
+The runner takes input, output directory, algorithm name and optional settings
+file; the benchmark takes input, output directory and optional settings file.
+
+`experiment.json` specifies an explicit offset-qualified evening deadline, target
+SoC, solar haircut, switching cost and search pass limit. The deadline must match
+an interval end. These settings are separate from the frozen input and reference.
+The initial experiment uses 18:00 Brussels, 100% SoC, 20% less solar and EUR 0.002
+per ceiling change. They are experimental assumptions, not measured uncertainty
+or live user configuration. A different day requires its own deadline setting.
+
+The evening candidate starts with maximum acceptance, computes the reachable
+energy at the deadline in nominal and reduced-solar scenarios, and preserves
+those targets while searching discrete device ceilings. If full is unreachable,
+it preserves the maximum reachable deadline energy and reports the shortfall.
+It searches four-interval blocks and individual intervals over several passes.
+This is a bounded local search, not a globally optimal solver.
+
+Among feasible schedules it minimizes the equally weighted energy costs of the
+two scenarios plus a switching penalty and an end reserve penalty. Import costs account for household demand
+between charging periods; the battery minimum SoC remains the physical reserve.
+There is no additional hard morning reserve. Lower solar provides headroom against
+forecast error but cannot guarantee performance for all weather outcomes. Both
+scenarios are known to the candidate; this is not an unseen stress test.
+
+Review `results/benchmark/comparison.md`, and each algorithm's `schedule.csv` and
+`report.json` beneath that directory. Both schedules are evaluated with the same
+simulator on both scenarios. Reports show actual energy cost separately from the
+legacy terminal-penalty objective and candidate search objective. Do not rank these
+algorithms solely on the legacy objective: the new candidate has an explicit
+evening requirement and a switching preference. Evaluator and algorithm hashes
+are recorded. Runtime covers one planner call and is only indicative.
+
+Both algorithms share their production implementation with the gym. The original committed reference output remains unchanged.
+
+The benchmark also rebuilds `results/benchmark/index.html`, a standalone visual
+report with comparison charts, scenario costs and a detailed interval table.
+Open it in a browser; rerun the benchmark and reload to see updated results.
+It uses local dataset time, embeds all data, and needs no server or internet.
+
+Select a default run with `algorithm` in `experiment.json`; select benchmark
+participants with the `algorithms` array. The live Battery control settings use
+the same Cost optimized and Evening target choices. Live evening planning uses
+the next configured local deadline and the battery maximum SoC; the solar margin
+is applied once, as a reduced-solar scenario rather than reducing both scenarios.

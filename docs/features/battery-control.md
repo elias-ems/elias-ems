@@ -755,3 +755,20 @@ tick currently in flight, since advancing a clock only *starts* one.
 - **Persisting decisions** for after-the-fact analysis. That wants its own store
   and a retention policy, not the [diagnostics](diagnostics.md) buffer made
   durable.
+
+## Charge planning algorithm selection
+
+Battery control exposes **Cost optimized** (default for existing configurations)
+and **Evening target**, independently of whether automatic writes are enabled.
+Both preview and active charge-limit control use the selection. Net zero energy
+control is unaffected.
+
+Evening target uses the battery maximum SoC and the next configured hour in Home
+Assistant's timezone (18:00 by default). Missing coverage through that deadline
+leaves planning unavailable; it does not invent prices or silently use another
+algorithm. The solar margin defines a second reduced-solar scenario, applied once.
+The planner preserves the maximum reachable deadline energy when full is impossible,
+reports the reachable SoC in diagnostics, and minimizes scenario cost plus a
+switching preference (0.002 currency units per change by default) and end reserve
+penalty. It is a bounded local search, not a guarantee of global optimality or a
+weather guarantee. Both implementations are also selectable in the offline gym.

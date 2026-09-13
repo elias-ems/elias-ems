@@ -148,3 +148,30 @@ describe("forecast planning through Home Assistant", () => {
     );
   });
 });
+
+it("selects the shared evening algorithm using the HA timezone and battery target", async () => {
+  configMocks.control.mockResolvedValue({
+    enabled: false,
+    strategy: "charge-limit",
+    chargeAlgorithm: "evening-target",
+    eveningHour: 18,
+    solarMarginPercent: 20,
+  });
+  const { calculateChargePlan } = await import(
+    "../../app/lib/charge-planner.server"
+  );
+  const report = vi.fn();
+  const result = await calculateChargePlan(
+    chargeBatteryFixture as Battery,
+    Date.now(),
+    report,
+  );
+  expect(result.plan.reason).toContain("Evening target");
+  expect(report).toHaveBeenCalledWith(
+    "algorithm",
+    expect.stringContaining("18:00"),
+  );
+  expect(
+    result.plan.points.every((p) => p.limitW >= 0 && p.limitW <= 2000),
+  ).toBe(true);
+});

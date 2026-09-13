@@ -5,7 +5,9 @@ It runs the production pure optimizer directly with versioned JSON datasets;
 the approved household dataset and frozen reference output are committed.
 The test runs today's prepared inputs; yesterday is retained as historical context.
 Raw captures and experiment results are gitignored. See `gym/README.md` in the
-repository for replay and curation commands.
+repository for replay and curation commands. A gym algorithm registry compares
+the production optimizer with an experimental evening-target search using a
+shared simulator; experiment settings are separate from the frozen dataset.
 
 This is a Home Assistant add-on repository (the layout HA's Add-on Store expects: `repository.yaml` at the root plus one directory per add-on, each with its own `config.yaml`).
 

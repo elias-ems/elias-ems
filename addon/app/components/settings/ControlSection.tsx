@@ -145,6 +145,43 @@ export default function ControlSection({
           </p>
           {errors.enabled && <p style={errorStyle}>{errors.enabled}</p>}
           {errors.planning && <p style={errorStyle}>{errors.planning}</p>}
+          <label style={labelStyle}>
+            Planning algorithm
+            <select
+              name="chargeAlgorithm"
+              defaultValue={config.chargeAlgorithm ?? "cost-optimized"}
+              style={inputStyle()}
+            >
+              <option value="cost-optimized">Cost optimized</option>
+              <option value="evening-target">Evening target</option>
+            </select>
+          </label>
+          <p style={hintStyle}>
+            Cost optimized minimizes cost with an end reserve penalty. Evening
+            target aims for the battery’s configured maximum SoC by the next
+            deadline, allowing for reduced solar and preferring fewer ceiling
+            changes. This selection also applies to the preview while control is
+            disabled.
+          </p>
+          <Field
+            name="eveningHour"
+            label="Evening deadline hour (Home Assistant local time)"
+            type="number"
+            min={0}
+            max={23}
+            step={1}
+            defaultValue={config.eveningHour ?? 18}
+            hint="Used by Evening target. Requires forecast and price coverage through the next deadline."
+          />
+          <Field
+            name="ceilingSwitchCost"
+            label="Evening target: cost per ceiling change"
+            type="number"
+            min={0}
+            step="any"
+            defaultValue={config.ceilingSwitchCost ?? 0.002}
+            hint="In the price currency; a small preference for steadier ceilings."
+          />
           <Field
             name="solarMarginPercent"
             label="Solar forecast margin (%)"

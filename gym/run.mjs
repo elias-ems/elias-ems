@@ -2,15 +2,15 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  deviceLimit,
-  optimizeCharge,
-  simulateCharge,
-} from "../addon/app/lib/charge-plan.ts";
+import { deviceLimit, simulateCharge } from "../addon/app/lib/charge-plan.ts";
+import { replay, validateSettings } from "./algorithms/evening.mjs";
+import { algorithms } from "./algorithms/index.mjs";
 
 const [
   input = "gym/datasets/household-2026-09-11/input.json",
   output = "gym/results/latest",
+  selectedAlgorithm,
+  settingsFile = "gym/experiment.json",
 ] = process.argv.slice(2);
 if (!input)
   throw new Error("Usage: node gym/run.mjs <dataset.json> [output-directory]");
@@ -26,13 +26,25 @@ if (
   !Array.isArray(data.assumptions)
 )
   throw new Error("Dataset must declare reserve and assumptions");
+const settings = JSON.parse(await readFile(settingsFile, "utf8"));
+validateSettings(data, settings);
+const algorithm = selectedAlgorithm ?? settings.algorithm ?? "cost-optimized";
+const implementation = algorithms[algorithm];
+if (!implementation) throw new Error(`Unknown algorithm: ${algorithm}`);
 const started = performance.now();
-const plan = await optimizeCharge(
-  data.slots,
-  data.model,
-  data.terminalReserveKwh,
-);
+const plan = await implementation.run(data, settings);
 const elapsedMs = performance.now() - started;
+if (
+  plan.points.length !== data.slots.length ||
+  plan.points.some(
+    (p) =>
+      !Number.isFinite(p.limitW) ||
+      p.limitW < data.model.minW ||
+      p.limitW > data.model.maxW ||
+      Math.abs(deviceLimit(p.limitW, data.model) - p.limitW) > 1e-6,
+  )
+)
+  throw new Error("Candidate returned an invalid charge schedule");
 // Re-score with the shared simulator; never treat a candidate's claimed cost as truth.
 const score = (limits) => {
   let energy = (data.model.capacityKwh * data.model.soc) / 100;
@@ -68,14 +80,44 @@ const optimized = score(plan.points.map((p) => p.limitW));
 const unrestricted = score(
   plan.points.map(() => deviceLimit(data.model.maxW, data.model)),
 );
-const source = await readFile(
-  new URL("../addon/app/lib/charge-plan.ts", import.meta.url),
-);
+const source = await readFile(implementation.source);
 const report = {
+  algorithm,
+  settings,
+  scenarios: [0, settings.solarHaircut].map((haircut) => {
+    const { points, ...metrics } = replay(
+      data,
+      plan.points.map((p) => p.limitW),
+      settings,
+      haircut,
+    );
+    return {
+      solarHaircut: haircut,
+      ...metrics,
+      targetShortfallKwh: Math.max(
+        0,
+        (data.model.capacityKwh * settings.targetSoc) / 100 -
+          metrics.deadlineEnergy,
+      ),
+    };
+  }),
   datasetId: data.id,
   kind: data.kind,
   generatedAt: new Date().toISOString(),
   datasetSha256: createHash("sha256").update(raw).digest("hex"),
+  evaluatorSha256: createHash("sha256")
+    .update(
+      await readFile(
+        new URL("../addon/app/lib/charge-plan.ts", import.meta.url),
+      ),
+    )
+    .update(
+      await readFile(
+        new URL("../addon/app/lib/charge-evening.ts", import.meta.url),
+      ),
+    )
+    .update(await readFile(new URL("./run.mjs", import.meta.url)))
+    .digest("hex"),
   algorithmSha256: createHash("sha256").update(source).digest("hex"),
   gitCommit: execFileSync("git", ["rev-parse", "HEAD"], {
     encoding: "utf8",
