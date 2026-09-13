@@ -102,7 +102,7 @@ function BatteryPlan({
           <p style={hintStyle}>
             {status.sources} Energy dashboard forecast source
             {status.sources === 1 ? "" : "s"} · {status.historyHours} complete
-            hours of consumption history · solar reduced by{" "}
+            hours of consumption history · solar forecast margin{" "}
             {status.solarMarginPercent}% for planning.{" "}
             {status.forecastEnd !== null &&
               `Solar coverage ends ${stamp(status.forecastEnd)}.`}{" "}

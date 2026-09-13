@@ -13,6 +13,9 @@ export type ControlConfig = {
   strategy: StrategyId;
   /** How often the loop reconsiders, in seconds. */
   intervalSeconds: number;
+  chargeAlgorithm?: "cost-optimized" | "evening-target";
+  eveningHour?: number;
+  ceilingSwitchCost?: number;
   solarMarginPercent?: number;
   chargeWearPerKwh?: number;
 };
@@ -78,6 +81,20 @@ export function normalizeControlConfig(
     ...(stored?.chargeWearPerKwh !== undefined
       ? { chargeWearPerKwh: Number(stored.chargeWearPerKwh) }
       : {}),
+    ...(stored?.chargeAlgorithm !== undefined
+      ? {
+          chargeAlgorithm:
+            stored.chargeAlgorithm === "evening-target"
+              ? ("evening-target" as const)
+              : ("cost-optimized" as const),
+        }
+      : {}),
+    ...(stored?.eveningHour !== undefined
+      ? { eveningHour: stored.eveningHour }
+      : {}),
+    ...(stored?.ceilingSwitchCost !== undefined
+      ? { ceilingSwitchCost: stored.ceilingSwitchCost }
+      : {}),
     enabled: stored?.enabled === true,
     strategy: isStrategyId(stored?.strategy)
       ? stored.strategy
@@ -131,6 +148,35 @@ export function parseControlConfig(
 
   const strategy = formData.get("strategy")?.toString();
   const planning: Partial<ControlConfig> = {};
+  const algorithm = formData.get("chargeAlgorithm")?.toString();
+  if (algorithm !== undefined) {
+    if (algorithm !== "cost-optimized" && algorithm !== "evening-target")
+      return {
+        ok: false,
+        errors: { planning: "Choose a valid charge planning algorithm." },
+      };
+    planning.chargeAlgorithm = algorithm;
+  }
+  for (const key of ["eveningHour", "ceilingSwitchCost"] as const) {
+    const raw = formData.get(key)?.toString();
+    if (raw !== undefined) {
+      const value = Number(raw);
+      if (
+        !raw.trim() ||
+        !Number.isFinite(value) ||
+        value < 0 ||
+        (key === "eveningHour" && (!Number.isInteger(value) || value > 23))
+      )
+        return {
+          ok: false,
+          errors: {
+            planning:
+              "Deadline hour must be 0–23; switching cost must be non-negative.",
+          },
+        };
+      planning[key] = value;
+    }
+  }
   for (const key of ["solarMarginPercent", "chargeWearPerKwh"] as const) {
     const raw = formData.get(key)?.toString().trim();
     if (raw) {

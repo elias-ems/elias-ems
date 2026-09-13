@@ -1,4 +1,5 @@
 import type { Battery } from "./batteries";
+import { evening } from "./charge-evening";
 import {
   type ChargeInterval,
   type ChargeModel,
@@ -173,7 +174,11 @@ export async function calculateChargePlan(
   if (!Number.isFinite(margin) || margin < 0 || margin > 80)
     throw new Error("Invalid solar forecast margin.");
   const solar = new Map(
-    energy.solar.map((s) => [s.start, s.wh * (1 - margin / 100)]),
+    energy.solar.map((s) => [
+      s.start,
+      s.wh *
+        (control.chargeAlgorithm === "evening-target" ? 1 : 1 - margin / 100),
+    ]),
   );
   const priced = prices.read.forecast.slots.map((s) => ({
     ...priceSlot(s, parsePriceFormulas(prices.config)),
@@ -238,7 +243,47 @@ export async function calculateChargePlan(
   // terminal value rather than treating the end of the forecast as free energy.
   if (!reserveCovered)
     reserve = (model.capacityKwh * (model.maxSoc - model.minSoc)) / 100;
-  const plan = await optimizeCharge(slots, model, reserve);
+  let plan:
+    | Awaited<ReturnType<typeof optimizeCharge>>
+    | Awaited<ReturnType<typeof evening>>;
+  if (control.chargeAlgorithm === "evening-target") {
+    const hour = control.eveningHour ?? 18;
+    const switchCost = control.ceilingSwitchCost ?? 0.002;
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23)
+      throw new Error("Invalid evening deadline hour.");
+    // Search real instants, rather than adding 24h, to respect HA timezone/DST.
+    const deadlineSlot = slots.find(
+      (s) =>
+        new Intl.DateTimeFormat("en-GB", {
+          timeZone: energy.profile.timeZone,
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        }).format(s.end) === `${String(hour).padStart(2, "0")}:00`,
+    );
+    if (!deadlineSlot)
+      throw new Error(
+        "Waiting for solar and price coverage through the next evening deadline.",
+      );
+    const eveningPlan = await evening(
+      { slots, model, terminalReserveKwh: reserve },
+      {
+        deadline: new Date(deadlineSlot.end).toISOString(),
+        targetSoc: model.maxSoc,
+        solarHaircut: margin / 100,
+        switchCost,
+        passes: 4,
+      },
+    );
+    plan = eveningPlan;
+    report(
+      "algorithm",
+      `Evening target: ${model.maxSoc}% by ${hour}:00; reachable nominal/reduced-solar SoC ${eveningPlan.target.reachableSoc.map((s) => s.toFixed(1)).join(" / ")}%`,
+    );
+  } else {
+    plan = await optimizeCharge(slots, model, reserve);
+    report("algorithm", "Cost optimized");
+  }
   return {
     controlBlocker,
     curtailmentModeled,
