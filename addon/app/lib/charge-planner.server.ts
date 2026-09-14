@@ -272,6 +272,7 @@ export async function calculateChargePlan(
         targetSoc: model.maxSoc,
         solarHaircut: margin / 100,
         switchCost,
+        spikeBufferKwh: control.spikeBufferKwh ?? 0.54,
         passes: 4,
       },
     );

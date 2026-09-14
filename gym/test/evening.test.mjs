@@ -14,7 +14,7 @@ const settings = JSON.parse(
 );
 
 test("evening search reaches target in both scenarios with intermediate stable limits", async () => {
-  const plan = await evening(data, settings);
+  const plan = await evening(data, { ...settings, spikeBufferKwh: 0 });
   const limits = plan.points.map((p) => p.limitW);
   for (const haircut of [0, settings.solarHaircut]) {
     const run = replay(data, limits, settings, haircut);
@@ -29,7 +29,10 @@ test("evening search reaches target in both scenarios with intermediate stable l
   }
   assert.ok(limits.some((w) => w > 0 && w < 2000));
   assert.ok(limits.every((w) => w >= 0 && w <= 2000 && w % 100 === 0));
-  assert.deepEqual((await evening(data, settings)).points, plan.points);
+  assert.deepEqual(
+    (await evening(data, { ...settings, spikeBufferKwh: 0 })).points,
+    plan.points,
+  );
 });
 
 test("impossible target preserves maximum reachable SoC and reports infeasibility", async () => {
@@ -92,4 +95,58 @@ test("charging moves to cheaper surplus while supplying intervening demand", asy
   assert.ok(plan.points[0].chargeW > 0 && plan.points[0].chargeW < 1500);
   assert.ok(plan.points[1].dischargeW >= 300 - 1e-6);
   assert.ok(plan.points[2].soc >= 100 - 1e-6);
+});
+
+test("spike buffer charges earlier, remains dischargeable, and can be disabled", async () => {
+  const start = Date.parse("2026-09-11T08:00:00Z");
+  const sample = {
+    ...data,
+    model: { ...data.model, capacityKwh: 3.6, soc: 5 },
+    slots: Array.from({ length: 8 }, (_, i) => ({
+      start: start + i * 3600000,
+      end: start + (i + 1) * 3600000,
+      solarW: i < 4 ? 1000 : 2000,
+      loadW: 500,
+      buy: 0.4,
+      sell: i < 4 ? 0.15 : 0.02,
+      estimatedPrice: false,
+    })),
+  };
+  const config = {
+    ...settings,
+    deadline: new Date(start + 8 * 3600000).toISOString(),
+    solarHaircut: 0,
+    spikeBufferKwh: 0,
+  };
+  const without = await evening(sample, config);
+  const withBuffer = await evening(sample, { ...config, spikeBufferKwh: 0.54 });
+  assert.equal(withBuffer.bufferTargetSoc, 20);
+  assert.ok(withBuffer.points[1].soc > without.points[1].soc);
+  const spiked = {
+    ...sample,
+    slots: sample.slots.map((s, i) => ({
+      ...s,
+      loadW: s.loadW + (i === 2 ? 1000 : 0),
+    })),
+  };
+  const a = replay(
+    spiked,
+    withBuffer.points.map((p) => p.limitW),
+    config,
+  );
+  const b = replay(
+    spiked,
+    without.points.map((p) => p.limitW),
+    config,
+  );
+  assert.ok(a.gridImportKwh < b.gridImportKwh);
+  assert.ok(a.points[2].soc < 20);
+  assert.equal(
+    (await evening(sample, { ...config, spikeBufferKwh: 100 })).spikeBufferKwh,
+    3.42,
+  );
+  await assert.rejects(
+    evening(sample, { ...config, spikeBufferKwh: -1 }),
+    /Invalid/,
+  );
 });

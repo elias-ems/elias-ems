@@ -118,3 +118,9 @@ participants with the `algorithms` array. The live Battery control settings use
 the same Cost optimized and Evening target choices. Live evening planning uses
 the next configured local deadline and the battery maximum SoC; the solar margin
 is applied once, as a reduced-solar scenario rather than reducing both scenarios.
+
+`spikeBufferKwh` defaults to 0.54 for Evening target; 0 disables it. The
+reported search objective includes a daytime buffer shortfall preference,
+separate from simulated energy costs. The spike test compares the same
+held-out demand pulse with and without a buffer, including discharge below
+the buffer target. Smooth hindsight costs alone cannot measure this benefit.

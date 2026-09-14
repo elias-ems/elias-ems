@@ -16,6 +16,7 @@ export type ControlConfig = {
   chargeAlgorithm?: "cost-optimized" | "evening-target";
   eveningHour?: number;
   ceilingSwitchCost?: number;
+  spikeBufferKwh?: number;
   solarMarginPercent?: number;
   chargeWearPerKwh?: number;
 };
@@ -95,6 +96,9 @@ export function normalizeControlConfig(
     ...(stored?.ceilingSwitchCost !== undefined
       ? { ceilingSwitchCost: stored.ceilingSwitchCost }
       : {}),
+    ...(stored?.spikeBufferKwh !== undefined
+      ? { spikeBufferKwh: Number(stored.spikeBufferKwh) }
+      : {}),
     enabled: stored?.enabled === true,
     strategy: isStrategyId(stored?.strategy)
       ? stored.strategy
@@ -157,7 +161,11 @@ export function parseControlConfig(
       };
     planning.chargeAlgorithm = algorithm;
   }
-  for (const key of ["eveningHour", "ceilingSwitchCost"] as const) {
+  for (const key of [
+    "eveningHour",
+    "ceilingSwitchCost",
+    "spikeBufferKwh",
+  ] as const) {
     const raw = formData.get(key)?.toString();
     if (raw !== undefined) {
       const value = Number(raw);
@@ -171,7 +179,7 @@ export function parseControlConfig(
           ok: false,
           errors: {
             planning:
-              "Deadline hour must be 0–23; switching cost must be non-negative.",
+              "Deadline hour must be 0–23; switching cost and spike buffer must be non-negative.",
           },
         };
       planning[key] = value;
