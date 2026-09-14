@@ -772,3 +772,11 @@ reports the reachable SoC in diagnostics, and minimizes scenario cost plus a
 switching preference (0.002 currency units per change by default) and end reserve
 penalty. It is a bounded local search, not a guarantee of global optimality or a
 weather guarantee. Both implementations are also selectable in the offline gym.
+
+Evening target also has a daytime spike buffer, default 0.54 kWh above the
+native minimum, capped at usable capacity. Set 0 to disable. It adds a soft
+penalty for missing buffer energy during solar hours before the deadline,
+valued at the import price per hour. This is a reserve preference, not a
+calibrated spike probability or a guarantee of savings. Native discharge is
+unchanged, so the battery can spend the buffer on unexpected demand. On a
+3.6 kWh battery with a 5% minimum, the default targets 20% SoC.

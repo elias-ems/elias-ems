@@ -10,6 +10,7 @@ export type EveningSettings = {
   solarHaircut: number;
   switchCost: number;
   passes: number;
+  spikeBufferKwh?: number;
 };
 
 import { deviceLimit, simulateCharge } from "./charge-plan.ts";
@@ -60,6 +61,8 @@ export function replay(
 
 export function validateSettings(data: EveningData, s: EveningSettings) {
   if (
+    !Number.isFinite(s.spikeBufferKwh ?? 0.54) ||
+    (s.spikeBufferKwh ?? 0.54) < 0 ||
     !Number.isFinite(s.targetSoc) ||
     s.targetSoc < data.model.minSoc ||
     s.targetSoc > data.model.maxSoc ||
@@ -99,6 +102,26 @@ export async function evening(data: EveningData, settings: EveningSettings) {
   const required = haircuts.map((h) =>
     Math.min(target, replay(data, limits, settings, h).deadlineEnergy),
   );
+  const buffer = Math.min(
+    settings.spikeBufferKwh ?? 0.54,
+    (m.capacityKwh * (m.maxSoc - m.minSoc)) / 100,
+  );
+  const bufferTarget = (m.capacityKwh * m.minSoc) / 100 + buffer;
+  // Soft holding cost: price each kWh of missing daytime buffer per hour at
+  // the import tariff. This is an explicit reserve preference, not energy cost
+  // or a calibrated probability of a spike. Never restrict native discharge.
+  const bufferPenalty = (points: ReturnType<typeof replay>["points"]) =>
+    points.reduce(
+      (sum, p) =>
+        sum +
+        (p.solarW > 0 && p.end <= Date.parse(settings.deadline)
+          ? (Math.max(0, bufferTarget - (p.soc * m.capacityKwh) / 100) *
+              Math.max(0, p.buy) *
+              (p.end - p.start)) /
+            3600000
+          : 0),
+      0,
+    );
   const evaluate = (candidate: number[]) => {
     const runs = haircuts.map((h) => replay(data, candidate, settings, h));
     if (runs.some((r, i) => r.deadlineEnergy < required[i] - 1e-8))
@@ -110,6 +133,7 @@ export async function evening(data: EveningData, settings: EveningSettings) {
         (sum, r) =>
           sum +
           r.energyCost +
+          bufferPenalty(r.points) +
           Math.max(
             0,
             (m.capacityKwh * m.minSoc) / 100 +
@@ -183,5 +207,8 @@ export async function evening(data: EveningData, settings: EveningSettings) {
       deadline: settings.deadline,
     },
     searchObjective: best,
+    spikeBufferKwh: buffer,
+    bufferTargetSoc: (bufferTarget / m.capacityKwh) * 100,
+    bufferPenalty: bufferPenalty(run.points),
   };
 }

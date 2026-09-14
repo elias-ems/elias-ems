@@ -174,6 +174,15 @@ export default function ControlSection({
             hint="Used by Evening target. Requires forecast and price coverage through the next deadline."
           />
           <Field
+            name="spikeBufferKwh"
+            label="Evening target: daytime spike buffer (kWh)"
+            type="number"
+            min={0}
+            step="any"
+            defaultValue={config.spikeBufferKwh ?? 0.54}
+            hint="Extra stored energy above the native minimum, capped at usable capacity. 0.54 kWh means a 20% target on a 3.6 kWh battery with a 5% minimum. A soft charging preference, not a discharge restriction. Set 0 to disable."
+          />
+          <Field
             name="ceilingSwitchCost"
             label="Evening target: cost per ceiling change"
             type="number"

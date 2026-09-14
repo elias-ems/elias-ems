@@ -14,6 +14,7 @@ describe("charge algorithm settings", () => {
         chargeAlgorithm: algorithm,
         eveningHour: "19",
         ceilingSwitchCost: "0.003",
+        spikeBufferKwh: "0.54",
       }).forEach(([k, v]) => {
         form.set(k, v);
       });
@@ -24,6 +25,7 @@ describe("charge algorithm settings", () => {
           chargeAlgorithm: algorithm,
           eveningHour: 19,
           ceilingSwitchCost: 0.003,
+          spikeBufferKwh: 0.54,
         });
       form.set("eveningHour", "25");
       expect(parseControlConfig(form).ok).toBe(false);
