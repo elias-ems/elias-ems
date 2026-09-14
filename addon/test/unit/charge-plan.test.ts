@@ -37,16 +37,63 @@ const slot = (
 
 describe("native self-consumption charging plan", () => {
   it("models threshold curtailment without charging a negative-price export penalty", () => {
-    const forecast = { ...slot(0, 2000, 500, -0.2), curtailExport: true };
+    const forecast = {
+      ...slot(0, 2000, 500, -0.2),
+      curtailment: {
+        fixedW: 0,
+        availableW: 2000,
+        floorW: 0,
+        gridTargetW: 0,
+        exportAllowanceW: 0,
+      },
+    };
     const result = simulateCharge(forecast, 1, 0, model);
     expect(result.cost).toBe(0);
     expect(result.energy).toBe(1);
     expect(
-      simulateCharge({ ...forecast, curtailExport: false }, 1, 0, model).cost,
+      simulateCharge({ ...forecast, curtailment: undefined }, 1, 0, model).cost,
     ).toBeCloseTo(0.3);
     const charging = simulateCharge(forecast, 0, 500, model);
     expect(charging.chargeW).toBe(500);
     expect(charging.energy).toBe(0.5);
+  });
+  it("models targets, floors, fixed generation and price bands", () => {
+    const base = {
+      ...slot(0, 3000, 500, 0.01),
+      curtailment: {
+        fixedW: 300,
+        availableW: 2700,
+        floorW: 600,
+        gridTargetW: 100,
+        exportAllowanceW: 0,
+      },
+    };
+    // The floor wins over a positive (importing) meter target.
+    expect(simulateCharge(base, 1, 0, model).cost).toBeCloseTo(-0.004);
+    // Graded export is added to what may cross the meter.
+    expect(
+      simulateCharge(
+        {
+          ...base,
+          curtailment: { ...base.curtailment, exportAllowanceW: 1000 },
+        },
+        1,
+        0,
+        model,
+      ).cost,
+    ).toBeCloseTo(-0.009);
+    // A soft ceiling binds even when the battery could accept more.
+    expect(
+      simulateCharge(
+        {
+          ...base,
+          curtailment: { ...base.curtailment, ceilingW: 700 },
+        },
+        0,
+        2000,
+        model,
+      ).chargeW,
+    ).toBe(500);
   });
   it("exports valuable morning solar and stores cheaper midday solar for the evening", async () => {
     const plan = await optimizeCharge(

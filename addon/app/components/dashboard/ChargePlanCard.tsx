@@ -134,7 +134,11 @@ function BatteryPlan({
               >
                 <caption style={hintStyle}>
                   SoC is at the end of each interval. Solar includes the
-                  configured margin.
+                  configured margin
+                  {status.plan.points.some((point) => point.curtailment)
+                    ? " and modeled PV curtailment"
+                    : ""}
+                  .
                 </caption>
                 <thead>
                   <tr>

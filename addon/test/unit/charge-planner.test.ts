@@ -94,12 +94,35 @@ describe("forecast planning through Home Assistant", () => {
     );
     const result = await calculateChargePlan(chargeBatteryFixture as Battery);
     expect(result.controlBlocker).toBeNull();
-    expect(result.plan.points.every((p) => p.curtailExport)).toBe(true);
+    expect(result.plan.points.every((p) => p.curtailment)).toBe(true);
     configMocks.arrays.mockResolvedValue([]);
     expect(
       (await calculateChargePlan(chargeBatteryFixture as Battery))
         .controlBlocker,
     ).toContain("Hypothetical");
+  });
+  it("models price bands and fixed-step arrays", async () => {
+    configMocks.curtailment.mockResolvedValue({
+      ...DEFAULT_CURTAILMENT_CONFIG,
+      enabled: true,
+      strategy: "soft-ceiling",
+      priceThresholdPerKwh: -1,
+    });
+    configMocks.arrays.mockResolvedValue([
+      {
+        energyEntityId: "pv",
+        curtailable: true,
+        controlMode: "stepped",
+        ratedPowerW: 5000,
+        stepLimitPercent: 20,
+      },
+    ]);
+    const { calculateChargePlan } = await import(
+      "../../app/lib/charge-planner.server"
+    );
+    const result = await calculateChargePlan(chargeBatteryFixture as Battery);
+    expect(result.controlBlocker).toBeNull();
+    expect(result.curtailmentModeled).toBe(true);
   });
   it("authenticates, consumes the selected forecast and Recorder history, and applies contract prices", async () => {
     const { calculateChargePlan } = await import(

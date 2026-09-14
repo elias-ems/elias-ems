@@ -41,15 +41,16 @@ configuration, not entity names. No separate counter selection is needed;
 previously saved selections are ignored. Duplicate statistic IDs are rejected.
 Elias never modifies Energy dashboard preferences.
 
-PV curtailment no longer suppresses the preview. Threshold curtailment is modeled
-at equilibrium when all forecast solar sources match configured modulating arrays,
-the grid target and minimum PV limit are zero, and no flexible charger override
-is configured. Surplus beyond battery acceptance is discarded below the export
-price threshold. Controller transients are not predicted.
+PV curtailment no longer suppresses the preview. Curtailment is modeled at
+equilibrium when every forecast solar source matches a configured, rated array.
+The model covers the grid target, minimum limit, uncurtailable and fixed-step
+arrays, and both marginal-price strategies. Because Home Assistant supplies one
+aggregate solar forecast, forecast output is apportioned by rated power (a
+common-irradiance assumption). Controller transients are not predicted.
 
-Other curtailment configurations (including fixed steps and marginal-price bands)
-show an explicitly **hypothetical preview assuming uncurtailed solar**. Writes are
-blocked until that configuration can be modeled or curtailment is disabled.
+An unmatched or unrated solar source, or a configured flexible-charger override,
+shows an explicitly **hypothetical preview assuming uncurtailed solar**. Writes
+are blocked until that configuration can be modeled or curtailment is disabled.
 Another active battery strategy likewise makes the preview hypothetical. Other
 external battery or PV controllers must not change the model's assumptions.
 
