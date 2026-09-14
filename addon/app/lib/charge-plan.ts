@@ -7,8 +7,21 @@ export type ChargeInterval = {
   buy: number;
   sell: number;
   estimatedPrice: boolean;
-  /** Ideal threshold curtailment: surplus above battery acceptance is discarded. */
-  curtailExport?: boolean;
+  /** PV curtailment projected at controller equilibrium for this interval. */
+  curtailment?: {
+    /** Generation which this controller cannot change. */
+    fixedW: number;
+    /** Forecast generation available from the modulating arrays. */
+    availableW: number;
+    /** Lowest combined output the modulating arrays may be commanded to. */
+    floorW: number;
+    /** Optional direct cap (the soft-ceiling strategy). */
+    ceilingW?: number;
+    /** Signed meter target: positive importing, negative exporting. */
+    gridTargetW: number;
+    /** Export deliberately allowed by the graded-export strategy. */
+    exportAllowanceW: number;
+  };
 };
 export type ChargeModel = {
   capacityKwh: number;
@@ -60,7 +73,30 @@ export function simulateCharge(
   const hours = (slot.end - slot.start) / 3_600_000;
   const floor = (m.capacityKwh * m.minSoc) / 100;
   const ceiling = (m.capacityKwh * m.maxSoc) / 100;
-  const surplus = ((slot.solarW - slot.loadW) * hours) / 1000;
+  let solarW = slot.solarW;
+  if (slot.curtailment) {
+    const c = slot.curtailment;
+    const roomW = Math.max(
+      0,
+      ((ceiling - energy) * 1000) / (hours * m.efficiency),
+    );
+    // The battery gets first refusal on the uncurtailed forecast. This mirrors
+    // the live loop's settle period: charging ramps before PV is held back.
+    const chargeW = Math.min(
+      Math.max(0, slot.solarW - slot.loadW),
+      limitW,
+      roomW,
+    );
+    const wantedW =
+      slot.loadW + chargeW - c.gridTargetW + c.exportAllowanceW - c.fixedW;
+    const modulatingW = Math.min(
+      c.availableW,
+      c.ceilingW ?? Infinity,
+      Math.max(c.floorW, wantedW),
+    );
+    solarW = c.fixedW + modulatingW;
+  }
+  const surplus = ((solarW - slot.loadW) * hours) / 1000;
   const charge = Math.max(
     0,
     Math.min(
@@ -79,11 +115,12 @@ export function simulateCharge(
   );
   return {
     energy: energy + charge * m.efficiency - discharge / m.efficiency,
+    solarW,
     chargeW: (charge * 1000) / hours,
     dischargeW: (discharge * 1000) / hours,
     cost:
       Math.max(0, -surplus - discharge) * slot.buy -
-      (slot.curtailExport ? 0 : Math.max(0, surplus - charge)) * slot.sell +
+      Math.max(0, surplus - charge) * slot.sell +
       charge * m.wearPerKwh,
   };
 }
@@ -193,6 +230,7 @@ export async function optimizeCharge(
     baselineCost += original.cost;
     return {
       ...slot,
+      solarW: next.solarW,
       limitW: selected,
       chargeW: next.chargeW,
       dischargeW: next.dischargeW,
@@ -213,6 +251,7 @@ export async function optimizeCharge(
       const next = simulateCharge(point, stored, limits[0], m);
       stored = next.energy;
       point.limitW = limits[0];
+      point.solarW = next.solarW;
       point.chargeW = next.chargeW;
       point.dischargeW = next.dischargeW;
       point.soc = point.baselineSoc;
