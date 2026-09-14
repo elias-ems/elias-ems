@@ -120,11 +120,11 @@ Four things follow from it:
 ### Curtail below
 
 This is applied to **what a kWh actually earns you**, with your production
-formula already applied — not the raw exchange price.
+formula already applied — not the raw market price.
 
 That distinction matters more than it sounds. If your contract charges an
 injection fee, a spot price of +0.09 can still mean you *lose* 0.06 per exported
-kWh. The exchange price would say "all fine"; what you are paid says otherwise,
+kWh. The market price would say "all fine"; what you are paid says otherwise,
 and that is the number this compares.
 
 Leave it at `0` for "curtail only when exporting actually costs money". Raise it
@@ -138,7 +138,7 @@ positive is importing, negative is exporting.
 `0` means balanced. If you would rather err on one side, this is the dial:
 
 - **Negative** (say `-100 W`) keeps a little export as insurance against dipping
-  into import at the buying price.
+  into import at the consumption price.
 - **Positive** (say `+100 W`) keeps a little import as insurance against
   exporting at a negative price.
 
@@ -213,7 +213,7 @@ while this array is held down:
 - **0%** if another array can cover it. Your other inverters pick up the house
   automatically — see below.
 - **Roughly your baseline load** if this is your only array. Stopping it entirely
-  would mean importing everything at the buying price, which is usually worse
+  would mean importing everything at the consumption price, which is usually worse
   than making what you use.
 
 ::: warning Don't assume 0% is safe on every inverter

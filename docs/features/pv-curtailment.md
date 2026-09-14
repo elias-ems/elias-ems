@@ -178,7 +178,7 @@ to prevent.
 Two of those need saying out loud.
 
 **The threshold applies to the production leg with your contract applied**, not
-to the raw exchange price. A dynamic tariff is a different formula in each
+to the raw market price. A dynamic tariff is a different formula in each
 direction (see [dynamic prices](dynamic-prices.md)), and an injection fee can
 make a *positive* spot price into a negative earning. What decides whether
 exporting a kWh is worth doing is what that kWh actually earns, which is the

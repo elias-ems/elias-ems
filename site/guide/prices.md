@@ -1,7 +1,7 @@
 # Dynamic prices
 
 If you are on a dynamic energy contract, Elias ems can read the day-ahead
-exchange prices Home Assistant already has and turn them into the two numbers
+market prices Home Assistant already has and turn them into the two numbers
 that actually matter: **what a kWh costs you** and **what a kWh earns you**, for
 every quarter hour of today and tomorrow.
 
@@ -41,7 +41,7 @@ provides. If the entity sets `use_cent`, the prices are read as cents and
 converted.
 
 ::: danger Point it at the raw market price, not an "all-in" total
-Several integrations publish two price sensors: the bare exchange price, and a
+Several integrations publish two price sensors: the bare market price, and a
 total that already has your markup, grid fees and VAT folded in.
 
 Elias ems applies *your* formula to whatever it reads. Give it the total and the
@@ -92,7 +92,7 @@ The last two fields, and the substance of the whole feature. See below.
 
 ## The formulas
 
-The exchange price is an **input to your contract, not the number on your
+The market price is an **input to your contract, not the number on your
 bill**. Your supplier takes the market price, applies a factor, adds a fixed
 amount per kWh, and adds VAT — and does something different again for what you
 inject. So Elias ems asks you for the arithmetic rather than guessing at it.
@@ -101,7 +101,7 @@ Both fields are ordinary arithmetic over one variable, `price`:
 
 | | |
 | --- | --- |
-| `price` | The exchange price for that slot, **in your currency per kWh** |
+| `price` | The market price for that slot, **in your currency per kWh** |
 | Operators | `+` `-` `*` `/`, parentheses, and a leading `-` |
 | Functions | `min(a, b)` and `max(a, b)` |
 
@@ -113,21 +113,21 @@ in.
 
 ### A worked example
 
-For a contract that takes the exchange price, adds 2%, adds a fixed 12.72
+For a contract that takes the market price, adds 2%, adds a fixed 12.72
 c/kWh of network costs and levies, and applies 6% VAT:
 
 ```
 Consumption:  ((price * 1.02) + 0.1272) * 1.06
 ```
 
-And for injection paid at 98% of the exchange price less a 1.5 c/kWh fee, never
+And for injection paid at 98% of the market price less a 1.5 c/kWh fee, never
 going below zero:
 
 ```
 Production:   max(price * 0.98 - 0.015, 0)
 ```
 
-At an exchange price of 0.1821 EUR/kWh those give **0.3317** to buy and
+At a market price of 0.1821 EUR/kWh those give **0.3317** to consume and
 **0.1635** to sell. The field shows you that as you type it:
 
 ```
@@ -158,7 +158,7 @@ formula, and it is why there is no separate "fixed tariff" setting to find.
 ### Why two formulas and not one
 
 Because the two go in genuinely different directions, and a single price would
-get both wrong at exactly the moment it matters — when the exchange price goes
+get both wrong at exactly the moment it matters — when the market price goes
 **negative**.
 
 At a market price of -0.05 EUR/kWh, the example formulas give:
@@ -169,19 +169,19 @@ At a market price of -0.05 EUR/kWh, the example formulas give:
 | Production | **0.0000 EUR/kWh** — earns you nothing |
 
 Network costs and VAT do not go away when the market does, so a negative
-exchange price rarely means free electricity. It very often *does* mean your
+market price rarely means free electricity. It very often *does* mean your
 injection is worth nothing, or less — which is exactly the case [PV
 curtailment](/guide/pv-curtailment) keys off. One number could not have told you
 both.
 
 ### Checking it against a bill
 
-Take an hour you have a real invoice line for, read the exchange price for that
+Take an hour you have a real invoice line for, read the market price for that
 slot off your integration, and put it through your formula by hand. If it does
 not land within a rounding error of the bill, the formula is wrong — and it is
 much easier to find out now than after a battery has been trading on it.
 
-The Settings section shows the exchange price next to both derived numbers for
+The Settings section shows the market price next to both derived numbers for
 exactly this reason.
 
 ## On the dashboard
@@ -190,15 +190,21 @@ Once configured, the home page grows a **Prices** card:
 
 ```
 Prices
-Buying              Selling             Exchange
-0.2470 EUR/kWh      0.0866 EUR/kWh      0.1037 EUR/kWh
+Production price    Consumption price   Market price
+0.0866 EUR/kWh      0.2470 EUR/kWh      0.1037 EUR/kWh
 
 07:30–07:45 · 192 slots · Aug 19 00:00 → Aug 21 00:00
 ```
 
-**Buying** and **Selling** are your two formulas applied to the current slot.
-**Exchange** is the raw market price they came from — it is there so the numbers
-stay checkable at a glance rather than being three results you have to trust.
+**Production price** and **Consumption price** are your two formulas applied to
+the current slot. **Market price** is the raw price they came from — it is there
+so the numbers stay checkable at a glance rather than being three results you
+have to trust.
+
+The chart can switch between **Production**, **Consumption**, and **Market**, as
+well as between **Today** and **Tomorrow** once tomorrow's prices are available.
+The curtailment threshold and its below/above highlighting appear only on the
+Production view, because that is the price curtailment acts on.
 
 Underneath: which quarter hour these are for, and how far the forecast reaches.
 
@@ -221,9 +227,9 @@ than showing a blank:
 ::: warning A broken formula shows a dash, not a fallback
 If one of your formulas stops producing a number — a division by zero, or a file
 edited by hand — that side shows a dash and the other keeps working. It
-deliberately does **not** fall back to the raw exchange price, because a market
-price displayed under the label "Buying" is wrong by the whole of your network
-costs and VAT, and looks entirely reasonable.
+deliberately does **not** fall back to the raw market price, because a market
+price displayed under the label "Consumption price" is wrong by the whole of
+your network costs and VAT, and looks entirely reasonable.
 :::
 
 Changes to a formula take effect immediately on the next page load — nothing is

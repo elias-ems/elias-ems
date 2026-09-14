@@ -46,7 +46,7 @@ as an age that keeps climbing on a value that ought to be moving.
 ## The prices card
 
 If you have configured a [price source](/guide/prices), the page also carries
-what a kWh costs and earns right now, next to the exchange price both were
+what a kWh costs and earns right now, next to the market price both were
 derived from, and the quarter hour they apply to.
 
 It rides the same live connection as everything else: the price sensor changes

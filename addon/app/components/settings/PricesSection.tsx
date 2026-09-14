@@ -142,7 +142,7 @@ export default function PricesSection({
   return (
     <Section
       title="Prices"
-      description="Where the day-ahead energy prices come from, and the arithmetic that turns an exchange price into what you actually pay and are paid. Nothing acts on them yet — this imports and shows them."
+      description="Where the day-ahead energy prices come from, and the arithmetic that turns a market price into what you actually pay and are paid. Nothing acts on them yet — this imports and shows them."
     >
       <Form method="post" style={{ ...formStyle, marginTop: "1rem" }}>
         <input type="hidden" name="intent" value="prices-save" />
@@ -202,8 +202,8 @@ export default function PricesSection({
                 </p>
                 {summary.spot && (
                   <p style={hintStyle}>
-                    Now: {summary.spot} on the exchange · {summary.consumption}{" "}
-                    to buy · {summary.production} to sell
+                    Now: market {summary.spot} · consumption {summary.consumption}{" "}
+                    · production {summary.production}
                   </p>
                 )}
               </>
@@ -211,8 +211,8 @@ export default function PricesSection({
 
             <FormulaField
               name="consumptionFormula"
-              label="Consumption — what a kWh off the grid costs"
-              hint="Arithmetic over `price`, the exchange price per kWh. e.g. ((price * 1.02) + 0.1272) * 1.06 for a slope, a fixed charge and VAT. `min` and `max` are available."
+              label="Consumption price — what a kWh off the grid costs"
+              hint="Arithmetic over `price`, the market price per kWh. e.g. ((price * 1.02) + 0.1272) * 1.06 for a slope, a fixed charge and VAT. `min` and `max` are available."
               defaultValue={config.consumptionFormula}
               error={errors.consumptionFormula}
               summary={effectiveSummary}
@@ -220,7 +220,7 @@ export default function PricesSection({
 
             <FormulaField
               name="productionFormula"
-              label="Production — what a kWh onto the grid earns"
+              label="Production price — what a kWh onto the grid earns"
               hint="Usually a different formula. e.g. max(price * 0.98 - 0.015, 0) to take a cut and never go below zero, or just 0.05 for a fixed injection tariff."
               defaultValue={config.productionFormula}
               error={errors.productionFormula}
