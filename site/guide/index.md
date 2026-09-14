@@ -38,7 +38,7 @@ configured entirely from its own pages — no YAML.
   connection to Home Assistant is degraded. See [The dashboard](/guide/dashboard).
 - **Diagnostics** — one log every feature writes to, readable on screen and
   downloadable as a text file. See [Diagnostics](/guide/diagnostics).
-- **Dynamic prices** — day-ahead exchange prices read off an integration you
+- **Dynamic prices** — day-ahead market prices read off an integration you
   already have, put through your own contract's arithmetic, so the dashboard
   shows what a kWh costs and earns for every quarter hour of today and tomorrow.
   See [Dynamic prices](/guide/prices).

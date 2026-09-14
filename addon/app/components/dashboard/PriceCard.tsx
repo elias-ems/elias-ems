@@ -1,10 +1,10 @@
 /**
  * What a kWh earns and costs right now, and the day it sits in.
  *
- * The selling price leads, and it is the largest thing on the page, because it
- * is the number both strategies are reacting to: curtailment compares it to a
- * threshold, and it is why the battery is soaking a surplus rather than the
- * grid taking it. The buying and exchange prices sit beside it — the exchange
+ * The production price leads, and it is the largest thing on the page, because
+ * it is the number both strategies are reacting to: curtailment compares it to
+ * a threshold, and it is why the battery is soaking a surplus rather than the
+ * grid taking it. The consumption and market prices sit beside it — the market
  * one especially, because it is what makes a formula checkable against a bill
  * and a mis-picked entity visible rather than merely plausible.
  */
@@ -21,6 +21,14 @@ import {
 } from "./chrome";
 import { AlertIcon, TagIcon } from "./Icons";
 import PriceChart from "./PriceChart";
+
+type PriceView = "production" | "consumption" | "market";
+
+const PRICE_VIEW_LABELS: Record<PriceView, string> = {
+  production: "Production price",
+  consumption: "Consumption price",
+  market: "Market price",
+};
 
 export default function PriceCard({
   prices,
@@ -43,6 +51,7 @@ export default function PriceCard({
   curtailing: boolean;
 }) {
   const [selectedDay, setSelectedDay] = useState<"today" | "tomorrow">("today");
+  const [priceView, setPriceView] = useState<PriceView>("production");
   const hasTomorrow = Boolean(
     prices.curveTomorrow && prices.curveTomorrow.length > 0,
   );
@@ -51,6 +60,8 @@ export default function PriceCard({
       ? prices.curveTomorrow
       : prices.curve;
   const activeNowMinutes = selectedDay === "today" ? prices.nowMinutes : null;
+  const chartCurve = curveForView(activeCurve, priceView);
+  const priceLabel = PRICE_VIEW_LABELS[priceView];
 
   // The question the card is really asking: is exporting worth doing right now?
   // Not "is the price negative" — the threshold is configurable because a
@@ -89,7 +100,7 @@ export default function PriceCard({
         ) : (
           <>
             <div>
-              <Label>Selling</Label>
+              <Label>Production price</Label>
               <div
                 style={{
                   ...monoStyle,
@@ -119,8 +130,11 @@ export default function PriceCard({
             </div>
 
             <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
-              <Figure label="Buying" value={stripUnit(prices.consumption)} />
-              <Figure label="Exchange" value={stripUnit(prices.spot)} />
+              <Figure
+                label="Consumption price"
+                value={stripUnit(prices.consumption)}
+              />
+              <Figure label="Market price" value={stripUnit(prices.spot)} />
               <Figure
                 label="Threshold"
                 value={stripUnit(thresholdDisplay)}
@@ -177,67 +191,34 @@ export default function PriceCard({
             gap: "0.5rem",
           }}
         >
-          <h2 style={eyebrowStyle}>
-            Selling price · {selectedDay === "tomorrow" ? "tomorrow" : "today"}
-          </h2>
-          {hasTomorrow && (
-            <div
-              style={{
-                display: "inline-flex",
-                background: "var(--color-border)",
-                padding: 2,
-                borderRadius: 6,
-                gap: 2,
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setSelectedDay("today")}
-                style={{
-                  border: "none",
-                  background:
-                    selectedDay === "today"
-                      ? "var(--color-surface)"
-                      : "transparent",
-                  color:
-                    selectedDay === "today"
-                      ? "var(--color-text)"
-                      : "var(--color-text-muted)",
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  fontSize: "0.6875rem",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedDay("tomorrow")}
-                style={{
-                  border: "none",
-                  background:
-                    selectedDay === "tomorrow"
-                      ? "var(--color-surface)"
-                      : "transparent",
-                  color:
-                    selectedDay === "tomorrow"
-                      ? "var(--color-text)"
-                      : "var(--color-text-muted)",
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  fontSize: "0.6875rem",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Tomorrow
-              </button>
-            </div>
-          )}
+          <h2 style={eyebrowStyle}>{priceLabel}</h2>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem" }}>
+            <SegmentedControl
+              label="Price view"
+              value={priceView}
+              options={[
+                ["production", "Production"],
+                ["consumption", "Consumption"],
+                ["market", "Market"],
+              ]}
+              onChange={(value) => setPriceView(value as PriceView)}
+            />
+            {hasTomorrow && (
+              <SegmentedControl
+                label="Forecast day"
+                value={selectedDay}
+                options={[
+                  ["today", "Today"],
+                  ["tomorrow", "Tomorrow"],
+                ]}
+                onChange={(value) =>
+                  setSelectedDay(value as "today" | "tomorrow")
+                }
+              />
+            )}
+          </div>
         </div>
-        {activeCurve.length > 0 ? (
+        {chartCurve.length > 0 ? (
           <>
             {/*
               The same chart at two plot sizes, one shown at a time. The wide
@@ -246,26 +227,34 @@ export default function PriceCard({
             */}
             <div className="dash-chart-wide">
               <PriceChart
-                curve={activeCurve}
+                curve={chartCurve}
                 nowMinutes={activeNowMinutes}
-                thresholdPerKwh={thresholdPerKwh}
+                thresholdPerKwh={
+                  priceView === "production" ? thresholdPerKwh : null
+                }
                 currency={prices.currency}
+                priceLabel={priceLabel}
+                dayLabel={selectedDay}
               />
             </div>
             <div className="dash-chart-narrow">
               <PriceChart
                 compact
-                curve={activeCurve}
+                curve={chartCurve}
                 nowMinutes={activeNowMinutes}
-                thresholdPerKwh={thresholdPerKwh}
+                thresholdPerKwh={
+                  priceView === "production" ? thresholdPerKwh : null
+                }
                 currency={prices.currency}
+                priceLabel={priceLabel}
+                dayLabel={selectedDay}
               />
             </div>
           </>
         ) : (
           <Empty>
             {prices.configured
-              ? "Nothing to chart yet — that entity has published no prices for today."
+              ? `Nothing to chart — no ${priceLabel.toLowerCase()} is available for ${selectedDay}.`
               : "The day's prices appear here once a source is configured."}
           </Empty>
         )}
@@ -322,6 +311,58 @@ function Figure({
   );
 }
 
+function SegmentedControl({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<[value: string, label: string]>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      style={{
+        display: "inline-flex",
+        background: "var(--color-border)",
+        padding: 2,
+        borderRadius: 6,
+        gap: 2,
+      }}
+    >
+      {options.map(([optionValue, optionLabel]) => {
+        const selected = optionValue === value;
+        return (
+          <button
+            key={optionValue}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(optionValue)}
+            style={{
+              border: "none",
+              background: selected ? "var(--color-surface)" : "transparent",
+              color: selected
+                ? "var(--color-text)"
+                : "var(--color-text-muted)",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: "0.6875rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {optionLabel}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Empty({ children }: { children: React.ReactNode }) {
   return <p style={ruleStyle}>{children}</p>;
 }
@@ -340,4 +381,28 @@ function stripUnit(display: string | null): string {
   if (display === null) return "—";
   const space = display.indexOf(" ");
   return space === -1 ? display : display.slice(0, space);
+}
+
+function curveForView(
+  curve: DashboardPrices["curve"],
+  view: PriceView,
+) {
+  return curve.flatMap((point) => {
+    const value =
+      view === "production"
+        ? point.productionPerKwh
+        : view === "consumption"
+          ? point.consumptionPerKwh
+          : point.marketPerKwh;
+
+    return value === null
+      ? []
+      : [
+          {
+            startMinutes: point.startMinutes,
+            endMinutes: point.endMinutes,
+            pricePerKwh: value,
+          },
+        ];
+  });
 }

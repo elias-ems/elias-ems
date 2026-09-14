@@ -118,8 +118,8 @@ describe("readDashboard", () => {
     await savePriceConfig({
       source: "home-assistant",
       forecastEntityId: "sensor.prices",
-      consumptionFormula: "price",
-      productionFormula: "price",
+      consumptionFormula: "price * 2",
+      productionFormula: "price * 0.5",
     });
 
     const today = new Date();
@@ -163,21 +163,24 @@ describe("readDashboard", () => {
     expect(readings.prices.curve[0]).toEqual({
       startMinutes: 0,
       endMinutes: 15,
-      sellingPerKwh: 0.1,
-      spotPerKwh: 0.1,
+      productionPerKwh: 0.05,
+      consumptionPerKwh: 0.2,
+      marketPerKwh: 0.1,
     });
     expect(readings.prices.curve[1]).toEqual({
       startMinutes: 15,
       endMinutes: 30,
-      sellingPerKwh: 0.101,
-      spotPerKwh: 0.101,
+      productionPerKwh: 0.0505,
+      consumptionPerKwh: 0.202,
+      marketPerKwh: 0.101,
     });
     expect(readings.prices.curveTomorrow).toHaveLength(96);
     expect(readings.prices.curveTomorrow[0]).toEqual({
       startMinutes: 0,
       endMinutes: 15,
-      sellingPerKwh: 0.2,
-      spotPerKwh: 0.2,
+      productionPerKwh: 0.1,
+      consumptionPerKwh: 0.4,
+      marketPerKwh: 0.2,
     });
   });
 });

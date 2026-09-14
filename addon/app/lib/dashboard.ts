@@ -70,14 +70,15 @@ export type DashboardBattery = {
  * Quarter-hourly (or hourly for legacy providers), using minutes-since-local-midnight
  * rather than timestamps, so the browser can plot knowing nothing about timezones.
  *
- * The *selling* leg, because that is the number curtailment's threshold is
- * compared against.
+ * All three price views share the same intervals. Contract-derived values can
+ * be null independently when their formula cannot produce a number.
  */
 export type PriceCurvePoint = {
   startMinutes: number;
   endMinutes: number;
-  sellingPerKwh: number;
-  spotPerKwh?: number;
+  productionPerKwh: number | null;
+  consumptionPerKwh: number | null;
+  marketPerKwh: number;
 };
 
 /**
@@ -94,7 +95,7 @@ export type DashboardPrices = {
   /** What a kWh costs and earns right now, with the contract applied. */
   consumption: string | null;
   production: string | null;
-  /** The exchange price the two were derived from, shown so they can be checked. */
+  /** The market price the two were derived from, shown so they can be checked. */
   spot: string | null;
   /**
    * The selling leg again, as a number.
@@ -116,9 +117,9 @@ export type DashboardPrices = {
    * rather than guessing at EUR.
    */
   currency: string;
-  /** Today's selling price interval by interval. Empty when there is nothing to draw. */
+  /** Today's prices interval by interval. Empty when there is nothing to draw. */
   curve: PriceCurvePoint[];
-  /** Tomorrow's selling price curve, when published. */
+  /** Tomorrow's price curves, when published. */
   curveTomorrow: PriceCurvePoint[];
   /** Where the current slot starts on that curve, in minutes past local midnight. */
   nowMinutes: number | null;

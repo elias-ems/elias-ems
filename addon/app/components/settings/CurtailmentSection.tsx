@@ -117,7 +117,7 @@ export default function CurtailmentSection({
           step="any"
           defaultValue={config.priceThresholdPerKwh}
           error={errors.priceThresholdPerKwh}
-          hint="Applied to what a kWh put on the grid earns, with your injection formula already applied — not the raw exchange price. 0 means “curtail only when exporting costs money”. Raise it if your contract charges a fee per exported kWh."
+          hint="Applied to what a kWh put on the grid earns, with your production formula already applied — not the raw market price. 0 means “curtail only when exporting costs money”. Raise it if your contract charges a fee per exported kWh."
         />
 
         <div>

@@ -85,8 +85,8 @@ function entry(
 }
 
 /**
- * A day with a solar glut in it: the selling price goes negative either side of
- * noon and peaks in the evening, with quarter-hourly 15-minute slots.
+ * A day with a solar glut in it: the production price goes negative either
+ * side of noon and peaks in the evening, with quarter-hourly 15-minute slots.
  */
 const PRICE_CURVE: PriceCurvePoint[] = Array.from({ length: 96 }, (_, i) => {
   const hour = i / 4;
@@ -95,12 +95,14 @@ const PRICE_CURVE: PriceCurvePoint[] = Array.from({ length: 96 }, (_, i) => {
     0.04 * Math.sin(((hour - 4) / 24) * 2 * Math.PI) -
     0.11 * Math.exp(-(((hour - 13) / 2.5) ** 2)) +
     0.09 * Math.exp(-(((hour - 19.5) / 2) ** 2));
-  const sellingPerKwh = Math.round(base * 10000) / 10000;
+  const productionPerKwh = Math.round(base * 10000) / 10000;
+  const marketPerKwh = Math.round((productionPerKwh + 0.003) * 10000) / 10000;
   return {
     startMinutes: i * 15,
     endMinutes: (i + 1) * 15,
-    sellingPerKwh,
-    spotPerKwh: Math.round((sellingPerKwh + 0.003) * 10000) / 10000,
+    productionPerKwh,
+    consumptionPerKwh: Math.round((marketPerKwh + 0.15) * 10000) / 10000,
+    marketPerKwh,
   };
 });
 
@@ -113,12 +115,15 @@ const PRICE_CURVE_TOMORROW: PriceCurvePoint[] = Array.from(
       0.04 * Math.sin(((hour - 5) / 24) * 2 * Math.PI) -
       0.08 * Math.exp(-(((hour - 14) / 3) ** 2)) +
       0.08 * Math.exp(-(((hour - 20) / 2) ** 2));
-    const sellingPerKwh = Math.round(base * 10000) / 10000;
+    const productionPerKwh = Math.round(base * 10000) / 10000;
+    const marketPerKwh =
+      Math.round((productionPerKwh + 0.003) * 10000) / 10000;
     return {
       startMinutes: i * 15,
       endMinutes: (i + 1) * 15,
-      sellingPerKwh,
-      spotPerKwh: Math.round((sellingPerKwh + 0.003) * 10000) / 10000,
+      productionPerKwh,
+      consumptionPerKwh: Math.round((marketPerKwh + 0.15) * 10000) / 10000,
+      marketPerKwh,
     };
   },
 );

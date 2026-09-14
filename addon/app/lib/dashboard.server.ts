@@ -203,12 +203,7 @@ function toCurve(
     const at = new Date(slot.start);
     if (Number.isNaN(at.getTime()) || at.toDateString() !== targetDay) continue;
 
-    // A slot whose selling leg does not evaluate is left out rather than
-    // charted as zero: the gap says "no number here", which is true, and a
-    // zero would sit exactly on the threshold line and read as a decision.
     const priced = priceSlot(slot, formulas);
-    const selling = priced.productionPerKwh;
-    if (selling === null) continue;
 
     const start = at.getHours() * 60 + at.getMinutes();
     const end = new Date(slot.end);
@@ -220,8 +215,9 @@ function toCurve(
     points.push({
       startMinutes: start,
       endMinutes,
-      sellingPerKwh: selling,
-      spotPerKwh: priced.spotPerKwh,
+      productionPerKwh: priced.productionPerKwh,
+      consumptionPerKwh: priced.consumptionPerKwh,
+      marketPerKwh: priced.spotPerKwh,
     });
   }
 

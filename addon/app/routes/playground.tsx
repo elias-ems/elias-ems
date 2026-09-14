@@ -88,6 +88,7 @@ import PricesSection from "../components/settings/PricesSection";
 import PvSection from "../components/settings/PvSection";
 import Section from "../components/settings/Section";
 import { targetEventType } from "../lib/batteries";
+import type { PriceCurvePoint } from "../lib/dashboard";
 import {
   batteryControlSummary,
   curtailmentSummary,
@@ -95,6 +96,14 @@ import {
 import { playgroundFixtures } from "../lib/playground-fixtures";
 import { pvLimitEventType } from "../lib/pv-entities";
 import type { Route } from "./+types/playground";
+
+function productionChart(curve: PriceCurvePoint[]) {
+  return curve.flatMap((point) =>
+    point.productionPerKwh === null
+      ? []
+      : [{ ...point, pricePerKwh: point.productionPerKwh }],
+  );
+}
 
 /**
  * One clock reading for the whole page.
@@ -948,19 +957,23 @@ export default function Playground({
         >
           <Variant label="Wide, threshold at 0" onCanvas>
             <PriceChart
-              curve={fixtures.prices.curve}
+              curve={productionChart(fixtures.prices.curve)}
               nowMinutes={fixtures.prices.nowMinutes}
               thresholdPerKwh={0}
               currency="EUR"
+              priceLabel="Production price"
+              dayLabel="today"
             />
           </Variant>
           <Variant label="Compact, threshold at 0.05" onCanvas>
             <div style={{ maxWidth: 300 }}>
               <PriceChart
-                curve={fixtures.prices.curve}
+                curve={productionChart(fixtures.prices.curve)}
                 nowMinutes={fixtures.prices.nowMinutes}
                 thresholdPerKwh={0.05}
                 currency="EUR"
+                priceLabel="Production price"
+                dayLabel="today"
                 compact
               />
             </div>
@@ -971,6 +984,8 @@ export default function Playground({
               nowMinutes={null}
               thresholdPerKwh={0}
               currency="EUR"
+              priceLabel="Production price"
+              dayLabel="today"
             />
           </Variant>
         </Specimen>
@@ -996,7 +1011,7 @@ export default function Playground({
           note="Splits into figures and chart above 1000px. Narrow the window past that to see the single-column version, and past 560px to see the chart swap geometry."
         >
           <Variant
-            label="Selling price negative — the case curtailment exists for"
+            label="Production price negative — the case curtailment exists for"
             onCanvas
           >
             <PriceCard

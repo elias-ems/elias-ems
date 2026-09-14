@@ -11,6 +11,21 @@ and it is testable on its own.
 
 Tracked in [issue #3](https://github.com/elias-ems/elias-ems/issues/3).
 
+## Terminology
+
+Use these names consistently in the UI and user-facing documentation:
+
+| Name | Meaning |
+| --- | --- |
+| **Market price** | The raw day-ahead price from the configured source, before applying the user's contract |
+| **Consumption price** | The cost of a kWh taken from the grid, after applying `consumptionFormula` |
+| **Production price** | The earnings from a kWh put onto the grid, after applying `productionFormula` |
+
+Prefer these flow-based names over **buying**, **selling**, and **exchange**.
+They match the stored configuration and remain unambiguous when a price is
+negative: the direction of energy flow does not change when money changes
+direction.
+
 ## What you configure
 
 On the **Settings** page, stored as `prices.json` under the add-on's data
@@ -30,7 +45,7 @@ energy-charts or ENTSO-E client later should be one more entry in
 change.
 
 Both formulas are required and default to `price` — the identity, which reports
-the raw exchange price. That default is honest rather than helpful: one
+the raw market price. That default is honest rather than helpful: one
 carrying a markup we guessed at would be a wrong number presented as a right
 one.
 
@@ -46,7 +61,7 @@ prices to a restart at 23:00 becomes a real failure.
 
 ## Why two formulas
 
-**The exchange price is an input to a contract, not the number on a bill.** A
+**The market price is an input to a contract, not the number on a bill.** A
 dynamic tariff is `(spot × slope + markup) × VAT + charges` for consumption and
 a *different* formula for injection — different markup, often a floor. Two
 consequences, and both are the kind that produce wrong decisions rather than
@@ -91,7 +106,7 @@ primary    := NUMBER | 'price' | '(' expression ')'
             | ('min' | 'max') '(' expression ',' expression ')'
 ```
 
-`price` is the exchange price **in the currency per kWh**, deliberately the
+`price` is the market price **in the currency per kWh**, deliberately the
 same unit evcc's `formula` uses, so a formula written for evcc ports over
 verbatim. Per MWh — the unit the raw APIs publish — would silently turn every
 ported formula into a 1000× error.
@@ -130,7 +145,7 @@ Two policies:
   the pure module is for — but the server check is the one that binds, since
   nothing stops a form being posted directly.
 - **A stored formula that no longer parses leaves its leg empty**, and does not
-  fall back to `price`. Reporting the raw exchange price under the label
+  fall back to `price`. Reporting the raw market price under the label
   "consumption" would be wrong by the whole of the grid fees and VAT: precisely
   the failure that is hardest to notice and most expensive to act on.
 
@@ -214,9 +229,13 @@ is obviously wrong in a way a stored number never would be.
 
 ## What it shows
 
-- **Home** — a **Prices** card: buying, selling, and the exchange price they
-  came from, with the quarter hour they are for and how far the forecast
-  reaches. It updates over the existing readings stream.
+- **Home** — a **Prices** card: production price, consumption price, and the
+  market price they came from, with the quarter hour they are for and how far
+  the forecast reaches. The chart switches between all three price views and
+  between today and tomorrow when tomorrow's forecast is available. The
+  curtailment threshold appears only on the production-price view, because that
+  is the price the strategy compares it with. It updates over the existing
+  readings stream.
 - **Diagnostics** — a `prices` origin, written **on save only**. The read path
   runs on every dashboard render and every stream push, so logging what it found
   would fill the buffer with one sentence; the card carries that state instead.

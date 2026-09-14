@@ -166,8 +166,8 @@ decides on what a kWh put on the grid earns.
 | --- | --- |
 | **Source** | *Not configured*, or *Home Assistant entity*. |
 | **Prices — the day-ahead sensor** | A sensor from a price integration you already have. |
-| **Consumption** | Arithmetic turning the exchange price into what a kWh costs you. |
-| **Production** | The same for what a kWh earns you — usually a different formula. |
+| **Consumption price** | Arithmetic turning the market price into what a kWh costs you. |
+| **Production price** | The same for what a kWh earns you — usually a different formula. |
 
 The two formulas are the substance of it, and they have a page of their own:
 [Dynamic prices →](/guide/prices)

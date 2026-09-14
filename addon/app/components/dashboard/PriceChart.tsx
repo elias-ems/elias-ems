@@ -1,6 +1,6 @@
 /**
- * Today's selling price, hour by hour, with the curtailment threshold drawn
- * across it.
+ * Today's production price, interval by interval, with the curtailment
+ * threshold drawn across it.
  *
  * The threshold line is the point of the chart. Everything below it is an hour
  * where putting a kWh on the grid costs money, which is exactly when curtailment
@@ -16,10 +16,15 @@
  * here asks what time it is or where the reader lives.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { PriceCurvePoint } from "../../lib/dashboard";
 import { captionStyle } from "./chrome";
 
 const MINUTES_PER_DAY = 1440;
+
+export type ChartPricePoint = {
+  startMinutes: number;
+  endMinutes: number;
+  pricePerKwh: number;
+};
 
 /**
  * The plot geometry, in user units.
@@ -143,13 +148,17 @@ export default function PriceChart({
   nowMinutes,
   thresholdPerKwh,
   currency,
+  priceLabel,
+  dayLabel,
   compact = false,
 }: {
-  curve: PriceCurvePoint[];
+  curve: ChartPricePoint[];
   nowMinutes: number | null;
-  /** Curtail below this. The line, and the top of the shaded band. */
-  thresholdPerKwh: number;
+  /** Curtail below this. Omitted for views unrelated to curtailment. */
+  thresholdPerKwh: number | null;
   currency: string;
+  priceLabel: string;
+  dayLabel: "today" | "tomorrow";
   /** The narrower plot, for a column a phone can spare. */
   compact?: boolean;
 }) {
@@ -165,9 +174,9 @@ export default function PriceChart({
     let maxPoint = curve[0];
     let sum = 0;
     for (const p of curve) {
-      if (p.sellingPerKwh < minPoint.sellingPerKwh) minPoint = p;
-      if (p.sellingPerKwh > maxPoint.sellingPerKwh) maxPoint = p;
-      sum += p.sellingPerKwh;
+      if (p.pricePerKwh < minPoint.pricePerKwh) minPoint = p;
+      if (p.pricePerKwh > maxPoint.pricePerKwh) maxPoint = p;
+      sum += p.pricePerKwh;
     }
     return {
       minPoint,
@@ -179,9 +188,10 @@ export default function PriceChart({
   if (curve.length === 0) return null;
 
   const g = compact ? COMPACT : wideGeometry(measured);
-  const values = curve.map((point) => point.sellingPerKwh);
-  const scale = buildScale(values, thresholdPerKwh, g.h);
-  const thresholdY = scale.y(thresholdPerKwh);
+  const values = curve.map((point) => point.pricePerKwh);
+  const baseline = thresholdPerKwh ?? 0;
+  const scale = buildScale(values, baseline, g.h);
+  const baselineY = scale.y(baseline);
   const nowX =
     nowMinutes === null ? null : (nowMinutes / MINUTES_PER_DAY) * g.w;
   const halfChip = g.nowChip / 2;
@@ -210,7 +220,7 @@ export default function PriceChart({
     hoverX !== null
       ? clamp(hoverX - tooltipWidth / 2, 0, g.w - tooltipWidth)
       : 0;
-  const hoverY = hovered ? scale.y(hovered.sellingPerKwh) : 0;
+  const hoverY = hovered ? scale.y(hovered.pricePerKwh) : 0;
   const tooltipY =
     hoverY > 52
       ? hoverY - tooltipHeight - 6
@@ -227,21 +237,28 @@ export default function PriceChart({
         }`}
         width="100%"
         role="img"
-        aria-label={describe(curve, thresholdPerKwh, currency)}
+        aria-label={describe(
+          curve,
+          thresholdPerKwh,
+          currency,
+          priceLabel,
+          dayLabel,
+        )}
         style={{ touchAction: "none" }}
         onPointerMove={(e) => selectAt(e.clientX, e.currentTarget)}
         onPointerDown={(e) => selectAt(e.clientX, e.currentTarget)}
         onPointerLeave={() => setHoveredIndex(null)}
       >
         <g transform={`translate(${g.padLeft},${g.padTop})`}>
-          {/* Everything under the threshold: the intervals exporting costs money. */}
-          <rect
-            x="0"
-            y={thresholdY}
-            width={g.w}
-            height={Math.max(0, g.h - thresholdY)}
-            fill="var(--color-import-soft)"
-          />
+          {thresholdPerKwh !== null && (
+            <rect
+              x="0"
+              y={baselineY}
+              width={g.w}
+              height={Math.max(0, g.h - baselineY)}
+              fill="var(--color-import-soft)"
+            />
+          )}
 
           {scale.ticks.map((tick) => (
             <line
@@ -255,7 +272,9 @@ export default function PriceChart({
           ))}
 
           {/* Subtle neutral zero baseline if 0 is in scale and threshold is non-zero */}
-          {thresholdPerKwh !== 0 && scale.inRange(0) && (
+          {thresholdPerKwh !== null &&
+            thresholdPerKwh !== 0 &&
+            scale.inRange(0) && (
             <line
               x1="0"
               y1={scale.y(0)}
@@ -265,7 +284,7 @@ export default function PriceChart({
               strokeDasharray="2 3"
               opacity="0.6"
             />
-          )}
+            )}
 
           {curve.map((point, index) => {
             const duration = Math.max(1, point.endMinutes - point.startMinutes);
@@ -274,8 +293,10 @@ export default function PriceChart({
             const gap = slotWidth > 15 ? 2.5 : slotWidth > 5 ? 1 : 0.5;
             const barWidth = Math.max(1, slotWidth - gap);
             const barX = x + (slotWidth - barWidth) / 2;
-            const top = scale.y(point.sellingPerKwh);
-            const below = point.sellingPerKwh < thresholdPerKwh;
+            const top = scale.y(point.pricePerKwh);
+            const below =
+              thresholdPerKwh !== null &&
+              point.pricePerKwh < thresholdPerKwh;
             const isNow =
               nowMinutes !== null &&
               point.startMinutes <= nowMinutes &&
@@ -294,11 +315,11 @@ export default function PriceChart({
               <rect
                 key={point.startMinutes}
                 x={barX}
-                y={Math.min(top, thresholdY)}
+                y={Math.min(top, baselineY)}
                 width={barWidth}
                 // A price sitting exactly on the threshold still gets a mark,
                 // so an interval never silently disappears from the row.
-                height={Math.max(1.5, Math.abs(top - thresholdY))}
+                height={Math.max(1.5, Math.abs(top - baselineY))}
                 rx={Math.min(1.5, Math.max(0.5, barWidth / 4))}
                 fill={fill}
                 opacity={
@@ -308,24 +329,28 @@ export default function PriceChart({
                 strokeWidth={isHovered ? 1 : 0}
               >
                 <title>
-                  {`${clock(point.startMinutes)}–${clock(point.endMinutes)}: ${point.sellingPerKwh.toFixed(4)} ${currency}/kWh (${
-                    below ? "below threshold" : "above threshold"
-                  })`}
+                  {`${clock(point.startMinutes)}–${clock(point.endMinutes)}: ${point.pricePerKwh.toFixed(4)} ${currency}/kWh${
+                    thresholdPerKwh === null
+                      ? ""
+                      : ` (${below ? "below" : "above"} threshold)`
+                  }`}
                 </title>
               </rect>
             );
           })}
 
           {/* Drawn over the bars: it is the line they are measured against. */}
-          <line
-            x1="0"
-            y1={thresholdY}
-            x2={g.w}
-            y2={thresholdY}
-            stroke="var(--color-import)"
-            strokeWidth="1.25"
-            strokeDasharray="4 3"
-          />
+          {thresholdPerKwh !== null && (
+            <line
+              x1="0"
+              y1={baselineY}
+              x2={g.w}
+              y2={baselineY}
+              stroke="var(--color-import)"
+              strokeWidth="1.25"
+              strokeDasharray="4 3"
+            />
+          )}
 
           {/* Hover guideline and floating inspection chip */}
           {hovered && hoverX !== null && (
@@ -367,21 +392,24 @@ export default function PriceChart({
                 fontSize={g.font}
                 fontWeight="600"
                 fill={
-                  hovered.sellingPerKwh < thresholdPerKwh
+                  thresholdPerKwh !== null &&
+                  hovered.pricePerKwh < thresholdPerKwh
                     ? "var(--color-import)"
                     : "var(--color-text)"
                 }
                 fontFamily="var(--font-mono)"
               >
-                {hovered.sellingPerKwh.toFixed(4)} {currency}
-                <tspan
-                  fill="var(--color-text-muted)"
-                  fontWeight="normal"
-                  fontSize={g.font - 1}
-                  dx={5}
-                >
-                  {hovered.sellingPerKwh < thresholdPerKwh ? "below" : "above"}
-                </tspan>
+                {hovered.pricePerKwh.toFixed(4)} {currency}
+                {thresholdPerKwh !== null && (
+                  <tspan
+                    fill="var(--color-text-muted)"
+                    fontWeight="normal"
+                    fontSize={g.font - 1}
+                    dx={5}
+                  >
+                    {hovered.pricePerKwh < thresholdPerKwh ? "below" : "above"}
+                  </tspan>
+                )}
               </text>
             </g>
           )}
@@ -451,7 +479,7 @@ export default function PriceChart({
               x={g.padLeft - 6}
               y={g.padTop + tick.y + 4}
               fill={
-                tick.value === thresholdPerKwh
+                thresholdPerKwh !== null && tick.value === thresholdPerKwh
                   ? "var(--color-import)"
                   : "var(--color-text-muted)"
               }
@@ -472,14 +500,18 @@ export default function PriceChart({
           marginTop: "0.375rem",
         }}
       >
-        <span>
-          <Swatch color="var(--color-import)" />
-          below threshold
-        </span>
-        <span>
-          <Swatch color="var(--color-chart-bar)" />
-          above threshold
-        </span>
+        {thresholdPerKwh !== null && (
+          <>
+            <span>
+              <Swatch color="var(--color-import)" />
+              below threshold
+            </span>
+            <span>
+              <Swatch color="var(--color-chart-bar)" />
+              above threshold
+            </span>
+          </>
+        )}
         {nowMinutes !== null && (
           <span>
             <Swatch color="var(--color-chart-bar-now)" />
@@ -487,7 +519,7 @@ export default function PriceChart({
           </span>
         )}
         <span style={{ marginLeft: "auto" }}>
-          {currency}/kWh after contract
+          {currency}/kWh
         </span>
       </div>
 
@@ -506,7 +538,7 @@ export default function PriceChart({
           <span>
             Min:{" "}
             <strong style={{ color: "var(--color-text)" }}>
-              {stats.minPoint.sellingPerKwh.toFixed(4)}
+              {stats.minPoint.pricePerKwh.toFixed(4)}
             </strong>{" "}
             ({clock(stats.minPoint.startMinutes)}–
             {clock(stats.minPoint.endMinutes)})
@@ -514,7 +546,7 @@ export default function PriceChart({
           <span>
             Max:{" "}
             <strong style={{ color: "var(--color-text)" }}>
-              {stats.maxPoint.sellingPerKwh.toFixed(4)}
+              {stats.maxPoint.pricePerKwh.toFixed(4)}
             </strong>{" "}
             ({clock(stats.maxPoint.startMinutes)}–
             {clock(stats.maxPoint.endMinutes)})
@@ -619,19 +651,25 @@ function round(value: number): number {
 }
 
 function describe(
-  curve: PriceCurvePoint[],
-  threshold: number,
+  curve: ChartPricePoint[],
+  threshold: number | null,
   currency: string,
+  priceLabel: string,
+  dayLabel: "today" | "tomorrow",
 ): string {
-  const below = curve.filter((point) => point.sellingPerKwh < threshold);
+  if (threshold === null) {
+    return `${priceLabel} by interval ${dayLabel}, in ${currency}/kWh.`;
+  }
+
+  const below = curve.filter((point) => point.pricePerKwh < threshold);
   const cheapest = curve.reduce((low, point) =>
-    point.sellingPerKwh < low.sellingPerKwh ? point : low,
+    point.pricePerKwh < low.pricePerKwh ? point : low,
   );
 
   const intervals =
     below.length === 0
-      ? "No interval today is below it."
+      ? `No interval ${dayLabel} is below it.`
       : `${below.length} of ${curve.length} intervals are below it, the lowest at ${clock(cheapest.startMinutes)}.`;
 
-  return `Today's selling price by interval, against a curtailment threshold of ${threshold.toFixed(4)} ${currency}/kWh. ${intervals}`;
+  return `${priceLabel} by interval ${dayLabel}, against a curtailment threshold of ${threshold.toFixed(4)} ${currency}/kWh. ${intervals}`;
 }
