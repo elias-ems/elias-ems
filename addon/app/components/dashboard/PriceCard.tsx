@@ -323,12 +323,13 @@ function SegmentedControl({
   onChange: (value: string) => void;
 }) {
   return (
-    <div
-      role="group"
+    <fieldset
       aria-label={label}
       style={{
         display: "inline-flex",
         background: "var(--color-border)",
+        border: "none",
+        margin: 0,
         padding: 2,
         borderRadius: 6,
         gap: 2,
@@ -345,9 +346,7 @@ function SegmentedControl({
             style={{
               border: "none",
               background: selected ? "var(--color-surface)" : "transparent",
-              color: selected
-                ? "var(--color-text)"
-                : "var(--color-text-muted)",
+              color: selected ? "var(--color-text)" : "var(--color-text-muted)",
               padding: "2px 8px",
               borderRadius: 4,
               fontSize: "0.6875rem",
@@ -359,7 +358,7 @@ function SegmentedControl({
           </button>
         );
       })}
-    </div>
+    </fieldset>
   );
 }
 
@@ -383,10 +382,7 @@ function stripUnit(display: string | null): string {
   return space === -1 ? display : display.slice(0, space);
 }
 
-function curveForView(
-  curve: DashboardPrices["curve"],
-  view: PriceView,
-) {
+function curveForView(curve: DashboardPrices["curve"], view: PriceView) {
   return curve.flatMap((point) => {
     const value =
       view === "production"

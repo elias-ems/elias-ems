@@ -275,15 +275,15 @@ export default function PriceChart({
           {thresholdPerKwh !== null &&
             thresholdPerKwh !== 0 &&
             scale.inRange(0) && (
-            <line
-              x1="0"
-              y1={scale.y(0)}
-              x2={g.w}
-              y2={scale.y(0)}
-              stroke="var(--color-border)"
-              strokeDasharray="2 3"
-              opacity="0.6"
-            />
+              <line
+                x1="0"
+                y1={scale.y(0)}
+                x2={g.w}
+                y2={scale.y(0)}
+                stroke="var(--color-border)"
+                strokeDasharray="2 3"
+                opacity="0.6"
+              />
             )}
 
           {curve.map((point, index) => {
@@ -295,8 +295,7 @@ export default function PriceChart({
             const barX = x + (slotWidth - barWidth) / 2;
             const top = scale.y(point.pricePerKwh);
             const below =
-              thresholdPerKwh !== null &&
-              point.pricePerKwh < thresholdPerKwh;
+              thresholdPerKwh !== null && point.pricePerKwh < thresholdPerKwh;
             const isNow =
               nowMinutes !== null &&
               point.startMinutes <= nowMinutes &&
@@ -518,9 +517,7 @@ export default function PriceChart({
             current slot
           </span>
         )}
-        <span style={{ marginLeft: "auto" }}>
-          {currency}/kWh
-        </span>
+        <span style={{ marginLeft: "auto" }}>{currency}/kWh</span>
       </div>
 
       {stats && (

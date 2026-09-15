@@ -116,8 +116,7 @@ const PRICE_CURVE_TOMORROW: PriceCurvePoint[] = Array.from(
       0.08 * Math.exp(-(((hour - 14) / 3) ** 2)) +
       0.08 * Math.exp(-(((hour - 20) / 2) ** 2));
     const productionPerKwh = Math.round(base * 10000) / 10000;
-    const marketPerKwh =
-      Math.round((productionPerKwh + 0.003) * 10000) / 10000;
+    const marketPerKwh = Math.round((productionPerKwh + 0.003) * 10000) / 10000;
     return {
       startMinutes: i * 15,
       endMinutes: (i + 1) * 15,

@@ -202,8 +202,8 @@ export default function PricesSection({
                 </p>
                 {summary.spot && (
                   <p style={hintStyle}>
-                    Now: market {summary.spot} · consumption {summary.consumption}{" "}
-                    · production {summary.production}
+                    Now: market {summary.spot} · consumption{" "}
+                    {summary.consumption} · production {summary.production}
                   </p>
                 )}
               </>
