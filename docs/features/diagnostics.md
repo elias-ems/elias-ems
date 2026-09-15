@@ -180,8 +180,8 @@ mojibake.
 
 ## The Tools page
 
-[tools.tsx](../../addon/app/routes/tools.tsx), sitting between Home and Settings
-in the top bar. It exists as the place for the things you do *to* an
+[tools.tsx](../../addon/app/routes/tools.tsx), reached as **Tools** from the top
+bar's overflow menu. It exists as the place for the things you do *to* an
 installation rather than the things you configure on it, which is why the
 download lives here and not on the home page. Diagnostics is the first of its
 two sections; the second is **Debug**, holding nothing but a link to the

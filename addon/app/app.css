@@ -236,8 +236,43 @@ input {
   font-size: 1.25rem;
 }
 
-.app-header nav a {
+.app-header nav > a,
+.app-header-more > summary {
   padding: 0 1rem;
+}
+
+.app-header-more {
+  position: relative;
+  align-self: stretch;
+}
+
+.app-header-more > summary {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 500;
+  list-style: none;
+}
+
+.app-header-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.app-header-more > div {
+  position: absolute;
+  right: 0;
+  min-width: 8rem;
+  padding: 0.35rem 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 0 0 4px 4px;
+  background: var(--color-surface);
+}
+
+.app-header-more > div a {
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  color: var(--color-text);
 }
 
 @media (max-width: 480px) {
@@ -250,8 +285,18 @@ input {
     font-size: 1.0625rem;
   }
 
-  .app-header nav a {
-    padding: 0 0.35rem;
+  .app-header-title {
+    display: none;
+  }
+
+  .app-header nav {
+    width: 100%;
+    justify-content: space-around;
+  }
+
+  .app-header nav > a,
+  .app-header-more > summary {
+    padding: 0 0.5rem;
     font-size: 0.875rem;
   }
 }

@@ -116,7 +116,7 @@ describe("navigation links", () => {
     expect(reloaded.status).toBe(200);
   });
 
-  it.each(["Tools", "Settings"])(
+  it.each(["Plans", "History", "Tools", "Settings"])(
     "points %s under the prefix too",
     async (label) => {
       const href = html.match(

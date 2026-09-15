@@ -272,6 +272,7 @@ test("battery control can be configured, enabled, and watched deciding", async (
  */
 test("the Tools page shows the log and downloads it", async ({ page }) => {
   await page.goto("./");
+  await page.locator("summary", { hasText: "More" }).click();
   await page
     .getByRole("navigation")
     .getByRole("link", { name: "Tools" })
@@ -536,6 +537,7 @@ test("the top bar tightens on a phone and not before", async ({ page }) => {
 
   await expect(bar).toHaveCSS("padding-left", "8px");
   await expect(title).toHaveCSS("font-size", "17px");
+  await expect(title).toHaveCSS("display", "none");
   await expect(tab).toHaveCSS("padding-left", "8px");
   await expect(tab).toHaveCSS("font-size", "14px");
 

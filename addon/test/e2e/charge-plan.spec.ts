@@ -79,6 +79,13 @@ for (const modeled of [false, true]) {
         .toBe("preview");
       await page.goto(stack.baseUrl);
       await expect(
+        page.getByRole("link", { name: "View full plan" }),
+      ).toBeVisible();
+      await page.getByRole("link", { name: "View full plan" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Energy plans" }),
+      ).toBeVisible();
+      await expect(
         page.getByRole("img", {
           name: "Charge ceiling and Expected charging over time, W",
         }),
