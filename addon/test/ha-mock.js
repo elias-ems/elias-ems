@@ -233,7 +233,8 @@ export async function startHaMock({
   }
 
   const server = http.createServer((req, res) => {
-    const { pathname } = new URL(req.url, "http://127.0.0.1");
+    const requestUrl = new URL(req.url, "http://127.0.0.1");
+    const { pathname } = requestUrl;
     requests.push({ method: req.method, path: pathname });
 
     if (req.headers.authorization !== `Bearer ${token}`) {
@@ -242,6 +243,19 @@ export async function startHaMock({
 
     if (pathname === "/core/api/states") {
       return sendJson(res, 200, current);
+    }
+
+    if (pathname.startsWith("/core/api/history/period/")) {
+      const requested = new Set(
+        (requestUrl.searchParams.get("filter_entity_id") || "").split(","),
+      );
+      return sendJson(
+        res,
+        200,
+        current
+          .filter((state) => requested.has(state.entity_id))
+          .map((state) => [state]),
+      );
     }
 
     if (

@@ -224,8 +224,8 @@ input {
  * layout below: if a property changes with the viewport, it lives here whole.
  *
  * 480px is where the slack runs out rather than a device width. At full size
- * the name and three tabs need 341px, which a 375px phone has and a 320px one
- * does not; tightened, they need 261px.
+ * the name and page tabs need more than a narrow phone has; tightened, they
+ * still keep a useful touch target without pushing the bar wider than 320px.
  */
 .app-header {
   padding: 0 1rem;
@@ -251,7 +251,7 @@ input {
   }
 
   .app-header nav a {
-    padding: 0 0.5rem;
+    padding: 0 0.35rem;
     font-size: 0.875rem;
   }
 }
@@ -303,6 +303,21 @@ input {
   display: flex;
   flex-direction: column;
   gap: 1.125rem;
+}
+
+.history-grid {
+  display: grid;
+  gap: 1.25rem;
+}
+
+@media (min-width: 1100px) {
+  .history-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .history-grid > :first-child {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 640px) {

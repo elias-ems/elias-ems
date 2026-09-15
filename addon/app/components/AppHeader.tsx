@@ -10,7 +10,7 @@
  *
  * Its spacing — the bar's padding and gap, the title's size, each tab's padding
  * and size — is the one part not styled here. Those five change at 480px, where
- * the name plus three tabs runs out of slack, and an inline style has nowhere
+ * the name plus the page tabs run out of slack, and an inline style has nowhere
  * to put a media query; they live in the `Top bar` block of app.css the same way
  * the dashboard's breakpoints do. Everything that does *not* move with the
  * viewport stays below.
@@ -67,6 +67,9 @@ export default function AppHeader() {
       <nav style={navStyle}>
         <NavLink to="/" end style={linkStyle}>
           Home
+        </NavLink>
+        <NavLink to="/history" style={linkStyle}>
+          History
         </NavLink>
         <NavLink to="/tools" style={linkStyle}>
           Tools

@@ -689,6 +689,15 @@ not persisted**: at a five-second interval the loop produces thousands of lines
 an hour, and an empty log after a restart is intended. Download it from Tools if
 a particular stretch is worth keeping.
 
+## History
+
+The **History** page reads the configured batteries' state-of-charge, power and
+energy entities from Home Assistant's Recorder. It offers 24-hour, three-day
+and seven-day views; the add-on does not keep a second copy of the readings.
+Each measurement gets its own scale so a battery's watt-level power movement
+does not flatten its percentage curve; Recorder states without a usable numeric
+value are omitted.
+
 ## How it's stored
 
 [store.server.ts](../../addon/app/lib/store.server.ts) holds the shared JSON
