@@ -696,7 +696,10 @@ energy entities from Home Assistant's Recorder. It offers 24-hour, three-day
 and seven-day views; the add-on does not keep a second copy of the readings.
 Each measurement gets its own scale so a battery's watt-level power movement
 does not flatten its percentage curve; Recorder states without a usable numeric
-value are omitted.
+value are omitted. To keep range changes responsive without keeping stale data
+indefinitely, 24-hour reads are cached in memory for one minute and longer
+ranges for five minutes. The current charts remain visible and say which range
+is loading while an uncached read is in progress.
 
 ## How it's stored
 
