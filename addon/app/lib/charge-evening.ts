@@ -26,6 +26,7 @@ export function replay(
   let deadlineEnergy: number | undefined;
   let switches = 0;
   let gridImportKwh = 0;
+  let stepped = false;
   const points = data.slots.map((original, i) => {
     const slot = {
       ...original,
@@ -48,7 +49,8 @@ export function replay(
           }
         : undefined,
     };
-    const next = simulateCharge(slot, energy, limits[i], data.model);
+    const next = simulateCharge(slot, energy, limits[i], data.model, stepped);
+    stepped = next.stepped;
     energy = next.energy;
     cost += next.cost;
     if (i && limits[i] !== limits[i - 1]) switches++;
