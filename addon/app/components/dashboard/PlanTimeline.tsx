@@ -3,7 +3,7 @@ import type { ChargePlanPoint } from "../../lib/charge-plan";
 
 const colors = ["var(--color-battery)", "var(--color-text)"];
 
-export type PlanTimelineKind = "power" | "soc" | "price";
+export type PlanTimelineKind = "power" | "soc" | "price" | "solar";
 
 /**
  * Two stepped planning series on a shared time axis.
@@ -41,19 +41,30 @@ export default function PlanTimeline({
   const series =
     kind === "power"
       ? [points.map((p) => p.limitW), points.map((p) => p.chargeW)]
-      : kind === "soc"
-        ? [points.map((p) => p.soc), points.map((p) => p.baselineSoc)]
-        : [points.map((p) => p.buy), points.map((p) => p.sell)];
+      : kind === "solar"
+        ? [
+            points.map((p) => p.solarW),
+            points.map((p) => p.generatedSolarW ?? p.solarW),
+          ]
+        : kind === "soc"
+          ? [points.map((p) => p.soc), points.map((p) => p.baselineSoc)]
+          : [points.map((p) => p.buy), points.map((p) => p.sell)];
   const labels =
     kind === "power"
       ? ["Charge ceiling", "Expected charging"]
-      : kind === "soc"
-        ? ["Planned SoC", "Unrestricted SoC"]
-        : ["Purchase price", "Export price"];
+      : kind === "solar"
+        ? ["Forecast solar", "Generated solar"]
+        : kind === "soc"
+          ? ["Planned SoC", "Unrestricted SoC"]
+          : ["Purchase price", "Export price"];
   const max = kind === "soc" ? 100 : Math.max(0.01, ...series.flat());
   const min = Math.min(0, ...series.flat());
   const unit =
-    kind === "power" ? "W" : kind === "soc" ? "%" : `${currency}/kWh`;
+    kind === "power" || kind === "solar"
+      ? "W"
+      : kind === "soc"
+        ? "%"
+        : `${currency}/kWh`;
   const left = compact ? 42 : 70;
   const plotWidth = Math.max(compact ? 278 : 780, points.length * 34);
   const width = left + plotWidth + (compact ? 12 : 30);

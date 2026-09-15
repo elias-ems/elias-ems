@@ -44,11 +44,13 @@ Elias never modifies Energy dashboard preferences.
 PV curtailment no longer suppresses the preview. Curtailment is modeled at
 equilibrium when every forecast solar source matches a configured, rated array.
 The model covers the grid target, minimum limit, uncurtailable and fixed-step
-arrays, and both marginal-price strategies. Because Home Assistant supplies one
-aggregate solar forecast, forecast output is apportioned by rated power (a
-common-irradiance assumption). Controller transients are not predicted.
+arrays, and both marginal-price strategies. Each Energy dashboard solar source
+retains its selected forecast and is matched by its energy counter to an array.
+Individual inverter floors and ceilings apply to that array's forecast; output
+is not split by inverter rating. Controller transients are not predicted.
 
-An unmatched or unrated solar source, or a configured flexible-charger override,
+An unmatched or unrated solar source, a forecast provider shared between arrays,
+or a configured flexible-charger override,
 shows an explicitly **hypothetical preview assuming uncurtailed solar**. Writes
 are blocked until that configuration can be modeled or curtailment is disabled.
 Another active battery strategy likewise makes the preview hypothetical. Other
@@ -100,6 +102,9 @@ that reserve unreachable.
 Home shows the recommended ceiling, requested and reported limits, next change,
 expected charging, planned versus unrestricted SoC, and purchase/export prices.
 The expandable schedule includes solar and household demand. Cost difference is
+shown alongside expected PV generation and curtailed energy over the plan.
+The schedule separates forecast solar, generated solar after limits, and curtailed
+power. Cost difference is
 modeled over published prices, not measured savings; plans may end with different
 stored energy. Forecast source count, coverage, history sample count, and solar
 margin make the assumptions visible.
