@@ -74,6 +74,15 @@ export async function readEnergyForecast(
   }
   return {
     preferences: prefs,
+    solarBySource: prefs.energy_sources
+      .filter((source) => source.type === "solar")
+      .map((source) => ({
+        energyEntityId: source.stat_energy_from,
+        hours: combineSolar(
+          [...new Set(source.config_entry_solar_forecast || [])],
+          forecasts,
+        ),
+      })),
     solar,
     profile: historyCache.profile,
     sources: ids,

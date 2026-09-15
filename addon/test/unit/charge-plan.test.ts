@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { replay } from "../../app/lib/charge-evening";
 import {
   type ChargeInterval,
   type ChargeModel,
@@ -36,6 +37,101 @@ const slot = (
 });
 
 describe("native self-consumption charging plan", () => {
+  it("soft ceilings allow export independently of the meter target", () => {
+    const result = simulateCharge(
+      {
+        ...slot(0, 3000, 100, 0.02),
+        curtailment: {
+          fixedW: 0,
+          availableW: 3000,
+          floorW: 0,
+          ceilingW: 2000,
+          gridTargetW: 500,
+          exportAllowanceW: 0,
+        },
+      },
+      1,
+      0,
+      model,
+    );
+    expect(result.solarW).toBe(2000);
+    expect(result.curtailedW).toBe(1000);
+    expect(result.cost).toBeCloseTo(-0.038);
+  });
+
+  it("applies inverter ceilings separately to asymmetric forecasts", () => {
+    const result = simulateCharge(
+      {
+        ...slot(0, 4100, 100, 0.02),
+        curtailment: {
+          fixedW: 0,
+          availableW: 4100,
+          floorW: 0,
+          gridTargetW: 0,
+          exportAllowanceW: 0,
+          modulatingArrays: [
+            { availableW: 100, floorW: 0, ceilingW: 2000 },
+            { availableW: 4000, floorW: 0, ceilingW: 2000 },
+          ],
+        },
+      },
+      1,
+      0,
+      model,
+    );
+    expect(result.solarW).toBe(2100);
+    expect(result.curtailedW).toBe(2000);
+  });
+
+  it("reduces forecast availability before applying a fixed step in evening replay", () => {
+    const forecast: ChargeInterval = {
+      ...slot(0, 4000, 1500, -0.02),
+      curtailment: {
+        fixedW: 1000,
+        availableW: 0,
+        floorW: 0,
+        gridTargetW: 0,
+        exportAllowanceW: 0,
+        fixedArrays: [{ availableW: 4000, ceilingW: 1000 }],
+      },
+    };
+    const result = replay(
+      { slots: [forecast], model, terminalReserveKwh: 0 },
+      [1000],
+      {
+        deadline: new Date(forecast.end).toISOString(),
+        targetSoc: 100,
+        solarHaircut: 0.2,
+        switchCost: 0,
+        passes: 1,
+      },
+      0.2,
+    );
+    expect(result.points[0].generatedSolarW).toBe(1000);
+    expect(result.points[0].curtailedW).toBe(2200);
+    expect(result.gridImportKwh).toBeCloseTo(0.5);
+    expect(result.energyCost).toBeCloseTo(0.2);
+  });
+
+  it("keeps forecast inputs intact and replays reported curtailment exactly", async () => {
+    const forecast: ChargeInterval = {
+      ...slot(0, 2500, 500, -0.1),
+      curtailment: {
+        fixedW: 0,
+        availableW: 2500,
+        floorW: 0,
+        gridTargetW: 0,
+        exportAllowanceW: 0,
+      },
+    };
+    const plan = await optimizeCharge([forecast], model);
+    const point = plan.points[0];
+    const replayed = simulateCharge(point, 0, point.limitW, model);
+    expect(point.solarW).toBe(2500);
+    expect(point.generatedSolarW).toBe(replayed.solarW);
+    expect(point.curtailedW).toBe(replayed.curtailedW);
+    expect(point.soc).toBeCloseTo(replayed.energy * 100);
+  });
   it("models threshold curtailment without charging a negative-price export penalty", () => {
     const forecast = {
       ...slot(0, 2000, 500, -0.2),

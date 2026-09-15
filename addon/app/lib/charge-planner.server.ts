@@ -138,9 +138,8 @@ export async function calculateChargePlan(
   ]);
   const solarSources =
     energy.preferences?.energy_sources.filter((s) => s.type === "solar") || [];
-  // Forecasts are aggregate, so array output is apportioned by rated power.
-  // This is the same common-irradiance approximation used by many multi-array
-  // forecasts; controller transients remain deliberately outside the model.
+  // Keep each source's forecast attached to its inverter. Shared providers
+  // cannot be attributed to two different arrays without double-counting.
   const mappedArrays = solarSources.map((source) =>
     arrays.find((array) => array.energyEntityId === source.stat_energy_from),
   );
@@ -148,6 +147,16 @@ export async function calculateChargePlan(
     curtailment.enabled &&
     !curtailment.carChargingEntityId &&
     solarSources.length > 0 &&
+    new Set(
+      solarSources.flatMap((source) => [
+        ...new Set(source.config_entry_solar_forecast || []),
+      ]),
+    ).size ===
+      solarSources.reduce(
+        (sum, source) =>
+          sum + new Set(source.config_entry_solar_forecast || []).size,
+        0,
+      ) &&
     mappedArrays.every((array) => (array?.ratedPowerW ?? 0) > 0);
   const controlBlocker =
     curtailment.enabled && !curtailmentModeled
@@ -156,7 +165,7 @@ export async function calculateChargePlan(
   report(
     "curtailment",
     curtailmentModeled
-      ? "PV limits are modeled at equilibrium from array ratings; controller transients are not predicted."
+      ? "PV limits are modeled using each array's forecast and inverter rating; controller transients are not predicted."
       : controlBlocker || "Disabled",
   );
   if (!prices.read.forecast || prices.read.error)
@@ -198,11 +207,16 @@ export async function calculateChargePlan(
         "Forecast or price coverage has a gap. Waiting for complete data.",
       );
     const next = Math.min(end, p.end, (Math.floor(t / 900_000) + 1) * 900_000);
-    const totalRatedW = mappedArrays.reduce(
-      (sum, array) => sum + (array?.ratedPowerW ?? 0),
-      0,
-    );
-    const irradiance = totalRatedW > 0 ? Math.min(1, pv / totalRatedW) : 0;
+    const arrayForecastW = (array: (typeof mappedArrays)[number]) => {
+      const source = energy.solarBySource.find(
+        (source) => source.energyEntityId === array?.energyEntityId,
+      );
+      const wh = source?.hours.find((item) => item.start === hour)?.wh ?? 0;
+      return (
+        wh *
+        (control.chargeAlgorithm === "evening-target" ? 1 : 1 - margin / 100)
+      );
+    };
     const above = p.productionPerKwh - curtailment.priceThresholdPerKwh;
     const band =
       above >= 0 && curtailment.strategy !== "threshold"
@@ -212,7 +226,7 @@ export async function calculateChargePlan(
       curtailmentModeled && (above < 0 || band !== undefined);
     const fixedW = mappedArrays.reduce((sum, array) => {
       if (!array) return sum;
-      const availableW = (array.ratedPowerW ?? 0) * irradiance;
+      const availableW = arrayForecastW(array);
       if (!array.curtailable) return sum + availableW;
       if (array.controlMode !== "stepped") return sum;
       // Stepped arrays participate below the threshold and are released in all
@@ -235,7 +249,10 @@ export async function calculateChargePlan(
       (sum, array) => sum + (array?.ratedPowerW ?? 0),
       0,
     );
-    const availableW = modulatingRatedW * irradiance;
+    const availableW = modulating.reduce(
+      (sum, array) => sum + arrayForecastW(array),
+      0,
+    );
     const floorW = Math.min(
       availableW,
       (modulatingRatedW * curtailment.minLimitPercent) / 100,
@@ -244,7 +261,35 @@ export async function calculateChargePlan(
       curtailment: activelyCurtailed
         ? {
             fixedW,
+            fixedArrays: mappedArrays
+              .filter(
+                (array) =>
+                  array &&
+                  (!array.curtailable || array.controlMode === "stepped"),
+              )
+              .map((array) => ({
+                availableW: arrayForecastW(array),
+                ceilingW:
+                  (array?.ratedPowerW ?? 0) *
+                  (array?.curtailable && above < 0
+                    ? (array.stepLimitPercent ?? 100) / 100
+                    : 1),
+              })),
             availableW,
+            modulatingArrays: modulating.map((array) => ({
+              availableW: arrayForecastW(array),
+              floorW:
+                ((array?.ratedPowerW ?? 0) * curtailment.minLimitPercent) / 100,
+              ceilingW:
+                above >= 0 && curtailment.strategy === "soft-ceiling" && band
+                  ? ((array?.ratedPowerW ?? 0) *
+                      Math.max(
+                        curtailment.minLimitPercent,
+                        band.ceilingPercent,
+                      )) /
+                    100
+                  : undefined,
+            })),
             floorW,
             ceilingW:
               above >= 0 && curtailment.strategy === "soft-ceiling" && band

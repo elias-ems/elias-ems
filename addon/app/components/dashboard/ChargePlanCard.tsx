@@ -81,7 +81,7 @@ function BatteryPlan({
             {status.calculatedAt !== null &&
               `Calculated ${stamp(status.calculatedAt)}.`}
           </p>
-          {(["power", "soc", "price"] as const).map((kind) => (
+          {(["power", "solar", "soc", "price"] as const).map((kind) => (
             <PlanTimeline
               key={kind}
               points={status.plan?.points || []}
@@ -90,6 +90,33 @@ function BatteryPlan({
               currency={status.currency}
             />
           ))}
+          <p style={hintStyle}>
+            Expected PV generation:{" "}
+            {status.plan.points
+              .reduce(
+                (sum, point) =>
+                  sum +
+                  ((point.generatedSolarW ?? point.solarW) *
+                    (point.end - point.start)) /
+                    3_600_000 /
+                    1000,
+                0,
+              )
+              .toFixed(2)}{" "}
+            kWh
+            {" · "}Curtailed solar:{" "}
+            {status.plan.points
+              .reduce(
+                (sum, point) =>
+                  sum +
+                  ((point.curtailedW ?? 0) * (point.end - point.start)) /
+                    3_600_000 /
+                    1000,
+                0,
+              )
+              .toFixed(2)}{" "}
+            kWh within this plan.
+          </p>
           <p style={hintStyle}>
             Modeled cost difference versus unrestricted self-consumption:{" "}
             <strong>
@@ -110,7 +137,7 @@ function BatteryPlan({
             {status.plan.terminalReserveKwh.toFixed(2)} kWh above the native
             reserve.
           </p>
-          <details>
+          <details style={{ minWidth: 0 }}>
             <summary style={{ cursor: "pointer" }}>
               Forecast and schedule details · {status.plan.points.length}{" "}
               intervals
@@ -133,12 +160,10 @@ function BatteryPlan({
                 }}
               >
                 <caption style={hintStyle}>
-                  SoC is at the end of each interval. Solar includes the
-                  configured margin
-                  {status.plan.points.some((point) => point.curtailment)
-                    ? " and modeled PV curtailment"
-                    : ""}
-                  .
+                  SoC is at the end of each interval. Forecast solar is before
+                  curtailment; generated solar is what remains after PV limits.
+                  Evening plans show nominal solar and also test the configured
+                  reduced-solar scenario.
                 </caption>
                 <thead>
                   <tr>
@@ -146,7 +171,9 @@ function BatteryPlan({
                       "Time",
                       "Ceiling W",
                       "Charge W",
-                      "Solar W",
+                      "Forecast solar W",
+                      "Generated solar W",
+                      "Curtailed W",
                       "Load W",
                       "SoC %",
                     ].map((label) => (
@@ -172,21 +199,35 @@ function BatteryPlan({
                       <td style={{ whiteSpace: "nowrap", padding: "0.4rem" }}>
                         {stamp(p.start)}
                       </td>
-                      {[p.limitW, p.chargeW, p.solarW, p.loadW, p.soc].map(
-                        (value, i) => (
-                          <td
-                            key={
-                              ["ceiling", "charge", "solar", "load", "soc"][i]
-                            }
-                            style={{
-                              padding: "0.4rem",
-                              borderTop: "1px solid var(--color-border)",
-                            }}
-                          >
-                            {Math.round(value)}
-                          </td>
-                        ),
-                      )}
+                      {[
+                        p.limitW,
+                        p.chargeW,
+                        p.solarW,
+                        p.generatedSolarW ?? p.solarW,
+                        p.curtailedW ?? 0,
+                        p.loadW,
+                        p.soc,
+                      ].map((value, i) => (
+                        <td
+                          key={
+                            [
+                              "ceiling",
+                              "charge",
+                              "solar",
+                              "generated",
+                              "curtailed",
+                              "load",
+                              "soc",
+                            ][i]
+                          }
+                          style={{
+                            padding: "0.4rem",
+                            borderTop: "1px solid var(--color-border)",
+                          }}
+                        >
+                          {Math.round(value)}
+                        </td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>

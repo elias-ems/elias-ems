@@ -27,19 +27,41 @@ export function replay(
   let switches = 0;
   let gridImportKwh = 0;
   const points = data.slots.map((original, i) => {
-    const slot = { ...original, solarW: original.solarW * (1 - haircut) };
+    const slot = {
+      ...original,
+      solarW: original.solarW * (1 - haircut),
+      curtailment: original.curtailment
+        ? {
+            ...original.curtailment,
+            fixedW: original.curtailment.fixedW * (1 - haircut),
+            fixedArrays: original.curtailment.fixedArrays?.map((array) => ({
+              ...array,
+              availableW: array.availableW * (1 - haircut),
+            })),
+            modulatingArrays: original.curtailment.modulatingArrays?.map(
+              (array) => ({
+                ...array,
+                availableW: array.availableW * (1 - haircut),
+              }),
+            ),
+            availableW: original.curtailment.availableW * (1 - haircut),
+          }
+        : undefined,
+    };
     const next = simulateCharge(slot, energy, limits[i], data.model);
     energy = next.energy;
     cost += next.cost;
     if (i && limits[i] !== limits[i - 1]) switches++;
     gridImportKwh +=
-      (Math.max(0, slot.loadW - slot.solarW - next.dischargeW) *
+      (Math.max(0, slot.loadW - next.solarW - next.dischargeW) *
         (slot.end - slot.start)) /
       3600000 /
       1000;
     if (slot.end === Date.parse(settings.deadline)) deadlineEnergy = energy;
     return {
       ...original,
+      generatedSolarW: next.solarW,
+      curtailedW: next.curtailedW,
       limitW: limits[i],
       chargeW: next.chargeW,
       dischargeW: next.dischargeW,

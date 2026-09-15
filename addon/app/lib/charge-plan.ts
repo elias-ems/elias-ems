@@ -11,6 +11,12 @@ export type ChargeInterval = {
   curtailment?: {
     /** Generation which this controller cannot change. */
     fixedW: number;
+    fixedArrays?: { availableW: number; ceilingW: number }[];
+    modulatingArrays?: {
+      availableW: number;
+      floorW: number;
+      ceilingW?: number;
+    }[];
     /** Forecast generation available from the modulating arrays. */
     availableW: number;
     /** Lowest combined output the modulating arrays may be commanded to. */
@@ -36,6 +42,8 @@ export type ChargeModel = {
   wearPerKwh: number;
 };
 export type ChargePlanPoint = ChargeInterval & {
+  generatedSolarW?: number;
+  curtailedW?: number;
   limitW: number;
   chargeW: number;
   dischargeW: number;
@@ -87,14 +95,30 @@ export function simulateCharge(
       limitW,
       roomW,
     );
+    const fixedW = c.fixedArrays
+      ? c.fixedArrays.reduce(
+          (sum, array) => sum + Math.min(array.availableW, array.ceilingW),
+          0,
+        )
+      : c.fixedW;
     const wantedW =
-      slot.loadW + chargeW - c.gridTargetW + c.exportAllowanceW - c.fixedW;
-    const modulatingW = Math.min(
-      c.availableW,
-      c.ceilingW ?? Infinity,
-      Math.max(c.floorW, wantedW),
-    );
-    solarW = c.fixedW + modulatingW;
+      slot.loadW + chargeW - c.gridTargetW + c.exportAllowanceW - fixedW;
+    const modulatingW = c.modulatingArrays
+      ? c.modulatingArrays.reduce((sum, array) => {
+          const shareW =
+            c.availableW > 0
+              ? (Math.max(0, wantedW) * array.availableW) / c.availableW
+              : 0;
+          return (
+            sum +
+            Math.min(
+              array.availableW,
+              array.ceilingW ?? Math.max(array.floorW, shareW),
+            )
+          );
+        }, 0)
+      : Math.min(c.availableW, c.ceilingW ?? Math.max(c.floorW, wantedW));
+    solarW = fixedW + modulatingW;
   }
   const surplus = ((solarW - slot.loadW) * hours) / 1000;
   const charge = Math.max(
@@ -116,6 +140,7 @@ export function simulateCharge(
   return {
     energy: energy + charge * m.efficiency - discharge / m.efficiency,
     solarW,
+    curtailedW: Math.max(0, slot.solarW - solarW),
     chargeW: (charge * 1000) / hours,
     dischargeW: (discharge * 1000) / hours,
     cost:
@@ -230,7 +255,8 @@ export async function optimizeCharge(
     baselineCost += original.cost;
     return {
       ...slot,
-      solarW: next.solarW,
+      generatedSolarW: next.solarW,
+      curtailedW: next.curtailedW,
       limitW: selected,
       chargeW: next.chargeW,
       dischargeW: next.dischargeW,
@@ -251,7 +277,8 @@ export async function optimizeCharge(
       const next = simulateCharge(point, stored, limits[0], m);
       stored = next.energy;
       point.limitW = limits[0];
-      point.solarW = next.solarW;
+      point.generatedSolarW = next.solarW;
+      point.curtailedW = next.curtailedW;
       point.chargeW = next.chargeW;
       point.dischargeW = next.dischargeW;
       point.soc = point.baselineSoc;
