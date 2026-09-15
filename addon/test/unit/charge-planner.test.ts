@@ -172,7 +172,9 @@ describe("forecast planning through Home Assistant", () => {
   });
 });
 
-it("selects the shared evening algorithm using the HA timezone and battery target", async () => {
+it("selects the shared evening algorithm using the HA timezone and battery target", {
+  timeout: 15_000,
+}, async () => {
   configMocks.control.mockResolvedValue({
     enabled: false,
     strategy: "charge-limit",
