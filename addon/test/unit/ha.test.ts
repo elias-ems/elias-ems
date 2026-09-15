@@ -1,6 +1,10 @@
 import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fetchHaState, fetchHaStates } from "../../app/lib/ha.server";
+import {
+  fetchHaHistory,
+  fetchHaState,
+  fetchHaStates,
+} from "../../app/lib/ha.server";
 import { startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
@@ -70,6 +74,21 @@ describe("fetchHaState", () => {
     expect(ha.requests.map((request) => request.path)).toContain(
       "/core/api/states/sensor.odd%20id%2Fwith%20slash",
     );
+  });
+});
+
+describe("fetchHaHistory", () => {
+  it("groups Recorder states under the requested entity", async () => {
+    const history = await fetchHaHistory(
+      ["sensor.battery_power"],
+      new Date(Date.now() - 86_400_000),
+      new Date(),
+    );
+
+    expect(history["sensor.battery_power"]).toHaveLength(1);
+    expect(history["sensor.battery_power"][0]).toMatchObject({
+      entity_id: "sensor.battery_power",
+    });
   });
 });
 

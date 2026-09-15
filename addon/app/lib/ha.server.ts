@@ -143,6 +143,35 @@ export async function fetchHaState(entityId: string): Promise<HaState | null> {
   return response.body();
 }
 
+/** Recorded state changes for the requested entities, grouped by entity id. */
+export async function fetchHaHistory(
+  entityIds: string[],
+  from: Date,
+  to: Date,
+): Promise<Record<string, HaState[]>> {
+  if (entityIds.length === 0) return {};
+  const query = new URLSearchParams({
+    filter_entity_id: entityIds.join(","),
+    end_time: to.toISOString(),
+  });
+  query.set("minimal_response", "");
+  query.set("no_attributes", "");
+  const response = await haFetch<HaState[][]>(
+    `/history/period/${encodeURIComponent(from.toISOString())}?${query}`,
+  );
+  if (!response.ok)
+    throw new Error(
+      `Home Assistant history request failed: ${response.status}`,
+    );
+
+  const result: Record<string, HaState[]> = {};
+  for (const states of await response.body()) {
+    const entityId = states.find((state) => state.entity_id)?.entity_id;
+    if (entityId) result[entityId] = states;
+  }
+  return result;
+}
+
 /**
  * Fires an event on Home Assistant's bus — how this add-on asks for anything
  * to change.
