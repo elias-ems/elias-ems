@@ -13,6 +13,7 @@ import type { HaState } from "./ha.server";
 import { readPrices } from "./price-source.server";
 import { parsePriceFormulas, priceSlot } from "./prices";
 import { listPvEntities } from "./pv-entities.server";
+import { publishedLimitPercent } from "./pv-limits.server";
 import { readStates } from "./states.server";
 
 export function numericState(state: HaState | null | undefined): number | null {
@@ -193,6 +194,7 @@ export async function calculateChargePlan(
     priced.at(-1)?.end || now,
   );
   const slots: ChargeInterval[] = [];
+  let initialEpisode = true;
   for (let t = now; t < end; ) {
     const hour = Math.floor(t / 3_600_000) * 3_600_000;
     const pv = solar.get(hour);
@@ -218,6 +220,7 @@ export async function calculateChargePlan(
       );
     };
     const above = p.productionPerKwh - curtailment.priceThresholdPerKwh;
+    if (above >= 0) initialEpisode = false;
     const band =
       above >= 0 && curtailment.strategy !== "threshold"
         ? curtailment.bands.find((candidate) => above < candidate.abovePerKwh)
@@ -261,6 +264,7 @@ export async function calculateChargePlan(
       curtailment: activelyCurtailed
         ? {
             fixedW,
+            deadbandW: curtailment.deadbandW,
             fixedArrays: mappedArrays
               .filter(
                 (array) =>
@@ -269,11 +273,17 @@ export async function calculateChargePlan(
               )
               .map((array) => ({
                 availableW: arrayForecastW(array),
-                ceilingW:
-                  (array?.ratedPowerW ?? 0) *
-                  (array?.curtailable && above < 0
-                    ? (array.stepLimitPercent ?? 100) / 100
-                    : 1),
+                ceilingW: array?.ratedPowerW ?? 0,
+                stepW:
+                  array?.curtailable && above < 0
+                    ? ((array.ratedPowerW ?? 0) *
+                        (array.stepLimitPercent ?? 100)) /
+                      100
+                    : undefined,
+                initiallyStepped:
+                  initialEpisode &&
+                  array !== undefined &&
+                  (publishedLimitPercent(array.id) ?? 100) < 100,
               })),
             availableW,
             modulatingArrays: modulating.map((array) => ({

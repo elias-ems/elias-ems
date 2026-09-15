@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { replay } from "../../app/lib/charge-evening";
+import { evening, replay } from "../../app/lib/charge-evening";
 import {
   type ChargeInterval,
   type ChargeModel,
@@ -37,6 +37,77 @@ const slot = (
 });
 
 describe("native self-consumption charging plan", () => {
+  it("starts a fixed step only on surplus, holds through demand, and releases on price recovery", () => {
+    const forecast: ChargeInterval = {
+      ...slot(0, 1000, 500, -0.1),
+      curtailment: {
+        fixedW: 0,
+        availableW: 0,
+        floorW: 0,
+        gridTargetW: 0,
+        exportAllowanceW: 0,
+        deadbandW: 50,
+        fixedArrays: [{ availableW: 1000, ceilingW: 2000, stepW: 200 }],
+      },
+    };
+    const absorbed = simulateCharge(forecast, 0, 1000, model);
+    expect(absorbed.stepped).toBe(false);
+    expect(absorbed.chargeW).toBe(500);
+    const exported = simulateCharge(forecast, 1, 1000, model);
+    expect(exported.stepped).toBe(true);
+    expect(exported.solarW).toBe(200);
+    const demand = simulateCharge(
+      { ...forecast, loadW: 1500 },
+      1,
+      1000,
+      model,
+      true,
+    );
+    expect(demand.stepped).toBe(true);
+    expect(demand.solarW).toBe(200);
+    const released = simulateCharge(
+      { ...forecast, curtailment: undefined },
+      0,
+      1000,
+      model,
+      true,
+    );
+    expect(released.stepped).toBe(false);
+    expect(released.solarW).toBe(1000);
+  });
+
+  it("both planners preserve episode history in their final schedules", async () => {
+    const slots: ChargeInterval[] = [0, 1, 2].map((i) => ({
+      ...slot(i, 1000, 500, -0.1),
+      curtailment: {
+        fixedW: 0,
+        availableW: 0,
+        floorW: 0,
+        gridTargetW: 0,
+        exportAllowanceW: 0,
+        deadbandW: 50,
+        fixedArrays: [{ availableW: 1000, ceilingW: 2000, stepW: 200 }],
+      },
+    }));
+    const full = { ...model, soc: 100 };
+    const settings = {
+      deadline: new Date(slots[2].end).toISOString(),
+      targetSoc: 100,
+      solarHaircut: 0.2,
+      switchCost: 0,
+      passes: 1,
+      spikeBufferKwh: 0,
+    };
+    for (const plan of [
+      await optimizeCharge(slots, full),
+      await evening({ slots, model: full, terminalReserveKwh: 0 }, settings),
+    ]) {
+      expect(plan.points.map((p) => p.generatedSolarW)).toEqual([
+        200, 200, 200,
+      ]);
+      expect(plan.points.at(-1)?.soc).toBeCloseTo(10);
+    }
+  });
   it("soft ceilings allow export independently of the meter target", () => {
     const result = simulateCharge(
       {

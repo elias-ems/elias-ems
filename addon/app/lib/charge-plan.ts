@@ -11,7 +11,13 @@ export type ChargeInterval = {
   curtailment?: {
     /** Generation which this controller cannot change. */
     fixedW: number;
-    fixedArrays?: { availableW: number; ceilingW: number }[];
+    fixedArrays?: {
+      availableW: number;
+      ceilingW: number;
+      stepW?: number;
+      initiallyStepped?: boolean;
+    }[];
+    deadbandW?: number;
     modulatingArrays?: {
       availableW: number;
       floorW: number;
@@ -77,11 +83,13 @@ export function simulateCharge(
   energy: number,
   limitW: number,
   m: ChargeModel,
+  stepped = false,
 ) {
   const hours = (slot.end - slot.start) / 3_600_000;
   const floor = (m.capacityKwh * m.minSoc) / 100;
   const ceiling = (m.capacityKwh * m.maxSoc) / 100;
   let solarW = slot.solarW;
+  let nextStepped = false;
   if (slot.curtailment) {
     const c = slot.curtailment;
     const roomW = Math.max(
@@ -95,9 +103,27 @@ export function simulateCharge(
       limitW,
       roomW,
     );
+    const hasSteps =
+      c.fixedArrays?.some((array) => array.stepW !== undefined) ?? false;
+    // All released stepped arrays receive the same episode-start signal. Once
+    // triggered it persists across intervals until the price releases them.
+    nextStepped =
+      hasSteps &&
+      (stepped ||
+        (slot.solarW - slot.loadW - chargeW + c.gridTargetW > 0 &&
+          slot.solarW - slot.loadW - chargeW + c.gridTargetW >=
+            (c.deadbandW ?? 0)));
     const fixedW = c.fixedArrays
       ? c.fixedArrays.reduce(
-          (sum, array) => sum + Math.min(array.availableW, array.ceilingW),
+          (sum, array) =>
+            sum +
+            Math.min(
+              array.availableW,
+              array.stepW !== undefined &&
+                (nextStepped || array.initiallyStepped)
+                ? array.stepW
+                : array.ceilingW,
+            ),
           0,
         )
       : c.fixedW;
@@ -138,6 +164,7 @@ export function simulateCharge(
     ),
   );
   return {
+    stepped: nextStepped,
     energy: energy + charge * m.efficiency - discharge / m.efficiency,
     solarW,
     curtailedW: Math.max(0, slot.solarW - solarW),
@@ -210,22 +237,28 @@ export async function optimizeCharge(
   ].reverse();
   const reserve = Math.min(ceiling - floor, terminalReserveKwh);
   const reservePrice = Math.max(0, ...slots.map((s) => s.buy)) * m.efficiency;
-  const values: Float64Array[] = new Array(slots.length + 1);
-  values[slots.length] = Float64Array.from(
+  const values: Float64Array[][] = new Array(slots.length + 1);
+  const terminalValues = Float64Array.from(
     { length: count + 1 },
     (_, j) => Math.max(0, floor + reserve - (low + j * width)) * reservePrice,
   );
+  values[slots.length] = [terminalValues, terminalValues];
   const future = (row: Float64Array, energy: number) => {
     const position = Math.max(0, Math.min(count, (energy - low) / width));
     const j = Math.min(count - 1, Math.floor(position));
     return row[j] + (row[j + 1] - row[j]) * (position - j);
   };
-  const choose = (slot: ChargeInterval, energy: number, row: Float64Array) => {
+  const choose = (
+    slot: ChargeInterval,
+    energy: number,
+    rows: Float64Array[],
+    stepped = false,
+  ) => {
     let best = Infinity;
     let selected = limits[0];
     for (const limit of limits) {
-      const next = simulateCharge(slot, energy, limit, m);
-      const score = next.cost + future(row, next.energy);
+      const next = simulateCharge(slot, energy, limit, m, stepped);
+      const score = next.cost + future(rows[Number(next.stepped)], next.energy);
       if (score < best - 1e-9) {
         best = score;
         selected = limit;
@@ -234,9 +267,12 @@ export async function optimizeCharge(
     return { best, selected };
   };
   for (let i = slots.length - 1; i >= 0; i--) {
-    values[i] = Float64Array.from(
-      { length: count + 1 },
-      (_, j) => choose(slots[i], low + j * width, values[i + 1]).best,
+    values[i] = [false, true].map((stepped) =>
+      Float64Array.from(
+        { length: count + 1 },
+        (_, j) =>
+          choose(slots[i], low + j * width, values[i + 1], stepped).best,
+      ),
     );
     if (i % 8 === 0)
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -245,10 +281,20 @@ export async function optimizeCharge(
   let baseline = energy;
   let cost = 0;
   let baselineCost = 0;
+  let stepped = false;
+  let baselineStepped = false;
   const points = slots.map((slot, i) => {
-    const { selected } = choose(slot, energy, values[i + 1]);
-    const next = simulateCharge(slot, energy, selected, m);
-    const original = simulateCharge(slot, baseline, limits[0], m);
+    const { selected } = choose(slot, energy, values[i + 1], stepped);
+    const next = simulateCharge(slot, energy, selected, m, stepped);
+    const original = simulateCharge(
+      slot,
+      baseline,
+      limits[0],
+      m,
+      baselineStepped,
+    );
+    stepped = next.stepped;
+    baselineStepped = original.stepped;
     energy = next.energy;
     baseline = original.energy;
     cost += next.cost;
@@ -273,8 +319,10 @@ export async function optimizeCharge(
     baselineCost + terminalCost(baseline) + 1e-9
   ) {
     let stored = (m.capacityKwh * m.soc) / 100;
+    let fallbackStepped = false;
     for (const point of points) {
-      const next = simulateCharge(point, stored, limits[0], m);
+      const next = simulateCharge(point, stored, limits[0], m, fallbackStepped);
+      fallbackStepped = next.stepped;
       stored = next.energy;
       point.limitW = limits[0];
       point.generatedSolarW = next.solarW;

@@ -48,6 +48,12 @@ arrays, and both marginal-price strategies. Each Energy dashboard solar source
 retains its selected forecast and is matched by its energy counter to an array.
 Individual inverter floors and ceilings apply to that array's forecast; output
 is not split by inverter rating. Controller transients are not predicted.
+Fixed-step arrays enter their step when forecast export exceeds the configured
+deadband after battery acceptance, and hold it until the price recovers. Both
+algorithms carry this episode state; live planning seeds existing steps from
+the controller's last published limits. Device behavior after a restart, before
+any limit has been published, is assumed released. Sub-interval ramps and
+whole-percent feedback quantization remain outside the equilibrium forecast.
 
 An unmatched or unrated solar source, a forecast provider shared between arrays,
 or a configured flexible-charger override,
@@ -101,8 +107,9 @@ that reserve unreachable.
 
 Home shows the recommended ceiling, requested and reported limits, next change,
 expected charging, planned versus unrestricted SoC, and purchase/export prices.
-The expandable schedule includes solar and household demand. Cost difference is
-shown alongside expected PV generation and curtailed energy over the plan.
+The PV timeline compares forecast and generated solar. The expandable schedule
+includes solar and household demand, with expected generation and curtailed
+energy totals over the plan.
 The schedule separates forecast solar, generated solar after limits, and curtailed
 power. Cost difference is
 modeled over published prices, not measured savings; plans may end with different
