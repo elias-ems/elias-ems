@@ -103,18 +103,19 @@ This is a soft terminal value based on available purchase prices, not a promise
 of a particular morning SoC. Native discharge and insufficient surplus can make
 that reserve unreachable.
 
-## Home
+## Home and Plans
 
 Home shows the recommended ceiling, requested and reported limits, next change,
-expected charging, planned versus unrestricted SoC, and purchase/export prices.
-The PV timeline compares forecast and generated solar. The expandable schedule
-includes solar and household demand, with expected generation and curtailed
-energy totals over the plan.
-The schedule separates forecast solar, generated solar after limits, and curtailed
-power. Cost difference is
-modeled over published prices, not measured savings; plans may end with different
-stored energy. Forecast source count, coverage, history sample count, and solar
-margin make the assumptions visible.
+expected generation and curtailment totals, and the modeled cost difference. It
+links to the **Plans** page for the complete forward-looking view.
+
+Plans shows expected charging, planned versus unrestricted SoC, purchase/export
+prices, and forecast versus generated solar after PV limits. Its expandable
+schedule includes household demand and separates forecast solar, generated solar
+and curtailed power. Cost difference is modeled over published prices, not
+measured savings; plans may end with different stored energy. Forecast source
+count, coverage, history sample count and solar margin make the assumptions
+visible.
 The live limit is fetched before planning, so a forecast or source-selection
 failure does not falsely mark an available entity unavailable. **Planning inputs**
 lists solar, history, price and battery checks separately.

@@ -243,7 +243,7 @@ export default function Index({ loaderData }: Route.ComponentProps) {
         curtailing={curtailment.enabled}
       />
 
-      <ChargePlanCard initial={loaderData.chargeLimits} />
+      <ChargePlanCard initial={loaderData.chargeLimits} detailed={false} />
 
       <GridCard
         configured={grid.configured}

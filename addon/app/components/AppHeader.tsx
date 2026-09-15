@@ -16,7 +16,7 @@
  * viewport stays below.
  */
 import type { CSSProperties } from "react";
-import { NavLink } from "react-router";
+import { NavLink, useLocation } from "react-router";
 
 const headerStyle: CSSProperties = {
   display: "flex",
@@ -59,6 +59,8 @@ const linkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
 });
 
 export default function AppHeader() {
+  const location = useLocation();
+
   return (
     <header className="app-header" style={headerStyle}>
       <span className="app-header-title" style={titleStyle}>
@@ -68,15 +70,29 @@ export default function AppHeader() {
         <NavLink to="/" end style={linkStyle}>
           Home
         </NavLink>
+        <NavLink to="/plans" style={linkStyle}>
+          Plans
+        </NavLink>
         <NavLink to="/history" style={linkStyle}>
           History
-        </NavLink>
-        <NavLink to="/tools" style={linkStyle}>
-          Tools
         </NavLink>
         <NavLink to="/settings" style={linkStyle}>
           Settings
         </NavLink>
+        <details
+          // Close the menu after navigation. The root layout persists between
+          // routes, so an uncontrolled details element would otherwise remain
+          // open over the destination page.
+          key={location.pathname}
+          className="app-header-more"
+        >
+          <summary aria-label="More pages">More</summary>
+          <div>
+            <NavLink to="/tools" style={linkStyle}>
+              Tools
+            </NavLink>
+          </div>
+        </details>
       </nav>
     </header>
   );

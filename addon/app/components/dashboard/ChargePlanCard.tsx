@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import type {
   ChargeLimitStatus,
   ChargeLimitsData,
@@ -11,9 +12,11 @@ import PlanTimeline from "./PlanTimeline";
 function BatteryPlan({
   status,
   now,
+  detailed,
 }: {
   status: ChargeLimitStatus;
   now: number;
+  detailed: boolean;
 }) {
   const first = status.plan?.points[0];
   const expired = status.validUntil !== null && now > status.validUntil;
@@ -81,15 +84,6 @@ function BatteryPlan({
             {status.calculatedAt !== null &&
               `Calculated ${stamp(status.calculatedAt)}.`}
           </p>
-          {(["power", "solar", "soc", "price"] as const).map((kind) => (
-            <PlanTimeline
-              key={kind}
-              points={status.plan?.points || []}
-              times={status.times}
-              kind={kind}
-              currency={status.currency}
-            />
-          ))}
           <p style={hintStyle}>
             Expected PV generation:{" "}
             {status.plan.points
@@ -126,114 +120,134 @@ function BatteryPlan({
             within published prices. This is a forecast, not measured savings;
             the two plans can end with different stored energy.
           </p>
-          <p style={hintStyle}>
-            {status.sources} Energy dashboard forecast source
-            {status.sources === 1 ? "" : "s"} · {status.historyHours} complete
-            hours of consumption history · solar forecast margin{" "}
-            {status.solarMarginPercent}% for planning.{" "}
-            {status.forecastEnd !== null &&
-              `Solar coverage ends ${stamp(status.forecastEnd)}.`}{" "}
-            Energy valued beyond the price horizon:{" "}
-            {status.plan.terminalReserveKwh.toFixed(2)} kWh above the native
-            reserve.
-          </p>
-          <details style={{ minWidth: 0 }}>
-            <summary style={{ cursor: "pointer" }}>
-              Forecast and schedule details · {status.plan.points.length}{" "}
-              intervals
-            </summary>
-            <div
-              style={{
-                marginTop: "0.75rem",
-                maxHeight: "clamp(16rem, 52vh, 36rem)",
-                overflow: "auto",
-                border: "1px solid var(--color-border)",
-                borderRadius: 4,
-              }}
-            >
-              <table
-                style={{
-                  width: "100%",
-                  fontSize: "0.8rem",
-                  textAlign: "right",
-                  borderCollapse: "collapse",
-                }}
-              >
-                <caption style={hintStyle}>
-                  SoC is at the end of each interval. Forecast solar is before
-                  curtailment; generated solar is what remains after PV limits.
-                  Evening plans show nominal solar and also test the configured
-                  reduced-solar scenario.
-                </caption>
-                <thead>
-                  <tr>
-                    {[
-                      "Time",
-                      "Ceiling W",
-                      "Charge W",
-                      "Forecast solar W",
-                      "Generated solar W",
-                      "Curtailed W",
-                      "Load W",
-                      "SoC %",
-                    ].map((label) => (
-                      <th
-                        key={label}
-                        style={{
-                          position: "sticky",
-                          top: 0,
-                          zIndex: 1,
-                          padding: "0.5rem 0.4rem",
-                          background: "var(--color-surface)",
-                          borderBottom: "1px solid var(--color-border)",
-                        }}
-                      >
-                        {label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {status.plan.points.map((p) => (
-                    <tr key={p.start}>
-                      <td style={{ whiteSpace: "nowrap", padding: "0.4rem" }}>
-                        {stamp(p.start)}
-                      </td>
-                      {[
-                        p.limitW,
-                        p.chargeW,
-                        p.solarW,
-                        p.generatedSolarW ?? p.solarW,
-                        p.curtailedW ?? 0,
-                        p.loadW,
-                        p.soc,
-                      ].map((value, i) => (
-                        <td
-                          key={
-                            [
-                              "ceiling",
-                              "charge",
-                              "solar",
-                              "generated",
-                              "curtailed",
-                              "load",
-                              "soc",
-                            ][i]
-                          }
-                          style={{
-                            padding: "0.4rem",
-                            borderTop: "1px solid var(--color-border)",
-                          }}
-                        >
-                          {Math.round(value)}
-                        </td>
+          {!detailed && (
+            <Link to="/plans" style={{ justifySelf: "start" }}>
+              View full plan
+            </Link>
+          )}
+          {detailed && (
+            <>
+              {(["power", "solar", "soc", "price"] as const).map((kind) => (
+                <PlanTimeline
+                  key={kind}
+                  points={status.plan?.points || []}
+                  times={status.times}
+                  kind={kind}
+                  currency={status.currency}
+                />
+              ))}
+              <p style={hintStyle}>
+                {status.sources} Energy dashboard forecast source
+                {status.sources === 1 ? "" : "s"} · {status.historyHours}{" "}
+                complete hours of consumption history · solar forecast margin{" "}
+                {status.solarMarginPercent}% for planning.{" "}
+                {status.forecastEnd !== null &&
+                  `Solar coverage ends ${stamp(status.forecastEnd)}.`}{" "}
+                Energy valued beyond the price horizon:{" "}
+                {status.plan.terminalReserveKwh.toFixed(2)} kWh above the native
+                reserve.
+              </p>
+              <details style={{ minWidth: 0 }}>
+                <summary style={{ cursor: "pointer" }}>
+                  Forecast and schedule details · {status.plan.points.length}{" "}
+                  intervals
+                </summary>
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    maxHeight: "clamp(16rem, 52vh, 36rem)",
+                    overflow: "auto",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: 4,
+                  }}
+                >
+                  <table
+                    style={{
+                      width: "100%",
+                      fontSize: "0.8rem",
+                      textAlign: "right",
+                      borderCollapse: "collapse",
+                    }}
+                  >
+                    <caption style={hintStyle}>
+                      SoC is at the end of each interval. Forecast solar is
+                      before curtailment; generated solar is what remains after
+                      PV limits. Evening plans show nominal solar and also test
+                      the configured reduced-solar scenario.
+                    </caption>
+                    <thead>
+                      <tr>
+                        {[
+                          "Time",
+                          "Ceiling W",
+                          "Charge W",
+                          "Forecast solar W",
+                          "Generated solar W",
+                          "Curtailed W",
+                          "Load W",
+                          "SoC %",
+                        ].map((label) => (
+                          <th
+                            key={label}
+                            style={{
+                              position: "sticky",
+                              top: 0,
+                              zIndex: 1,
+                              padding: "0.5rem 0.4rem",
+                              background: "var(--color-surface)",
+                              borderBottom: "1px solid var(--color-border)",
+                            }}
+                          >
+                            {label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {status.plan.points.map((p) => (
+                        <tr key={p.start}>
+                          <td
+                            style={{ whiteSpace: "nowrap", padding: "0.4rem" }}
+                          >
+                            {stamp(p.start)}
+                          </td>
+                          {[
+                            p.limitW,
+                            p.chargeW,
+                            p.solarW,
+                            p.generatedSolarW ?? p.solarW,
+                            p.curtailedW ?? 0,
+                            p.loadW,
+                            p.soc,
+                          ].map((value, i) => (
+                            <td
+                              key={
+                                [
+                                  "ceiling",
+                                  "charge",
+                                  "solar",
+                                  "generated",
+                                  "curtailed",
+                                  "load",
+                                  "soc",
+                                ][i]
+                              }
+                              style={{
+                                padding: "0.4rem",
+                                borderTop: "1px solid var(--color-border)",
+                              }}
+                            >
+                              {Math.round(value)}
+                            </td>
+                          ))}
+                        </tr>
                       ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </>
+          )}
         </>
       )}
     </section>
@@ -242,8 +256,10 @@ function BatteryPlan({
 
 export default function ChargePlanCard({
   initial,
+  detailed = true,
 }: {
   initial: ChargeLimitsData;
+  detailed?: boolean;
 }) {
   const { data, failing } = usePolledJson<ChargeLimitsData>(
     "/api/charge-limits",
@@ -267,7 +283,12 @@ export default function ChargePlanCard({
         </p>
       )}
       {(data || initial).batteries.map((status) => (
-        <BatteryPlan key={status.batteryId} status={status} now={now} />
+        <BatteryPlan
+          key={status.batteryId}
+          status={status}
+          now={now}
+          detailed={detailed}
+        />
       ))}
     </>
   );

@@ -73,7 +73,11 @@ it("plans in the background, serves Home through ingress and restores on a setti
   expect(Number(state.state)).toBe(status?.batteries[0].requestedW);
   const html = await fetch(stack.baseUrl).then((r) => r.text());
   expect(html).toContain("Recommended charge ceiling");
-  expect(html).toContain("Forecast and schedule details");
+  expect(html).toContain("View full plan");
+  expect(html).not.toContain("Forecast and schedule details");
+  const plans = await fetch(`${stack.baseUrl}plans`).then((r) => r.text());
+  expect(plans).toContain("Energy plans");
+  expect(plans).toContain("Forecast and schedule details");
 
   const body = new URLSearchParams({
     intent: "control-save",
