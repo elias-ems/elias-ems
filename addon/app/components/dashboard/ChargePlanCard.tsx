@@ -114,8 +114,8 @@ function BatteryPlan({
           {!detailed && (
             <p style={hintStyle}>
               Expected PV generation: {generatedSolarKwh.toFixed(2)} kWh
-              {" · "}Curtailed solar: {curtailedSolarKwh.toFixed(2)} kWh
-              within this plan.
+              {" · "}Curtailed solar: {curtailedSolarKwh.toFixed(2)} kWh within
+              this plan.
             </p>
           )}
           <p style={hintStyle}>
@@ -148,8 +148,8 @@ function BatteryPlan({
               <h3 style={sectionHeadingStyle}>PV</h3>
               <p style={{ ...hintStyle, margin: 0 }}>
                 Forecast generation: {generatedSolarKwh.toFixed(2)} kWh
-                {" · "}Modeled curtailment: {curtailedSolarKwh.toFixed(2)}
-                {" "}kWh within this plan.
+                {" · "}Modeled curtailment: {curtailedSolarKwh.toFixed(2)} kWh
+                within this plan.
               </p>
               <PlanTimeline
                 points={status.plan.points}
