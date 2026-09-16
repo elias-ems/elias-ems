@@ -491,7 +491,8 @@ test("the playground renders every specimen and swallows what its forms post", a
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
 
-  await page.goto("./tools");
+  await page.goto("./");
+  await page.getByLabel("More pages").click();
   await page.getByRole("link", { name: "Component playground" }).click();
 
   await expect(
@@ -530,16 +531,18 @@ test("the playground renders every specimen and swallows what its forms post", a
 });
 
 /**
- * A developer's page, so it is reachable from the Debug section of Tools and
- * from nothing else. If it ever appears in the top bar, every user of the
- * add-on has a fourth tab full of fixtures.
+ * A developer's page belongs in More, not among the primary navigation tabs.
  */
-test("the playground is not in the top bar", async ({ page }) => {
+test("the playground is in More, not the primary navigation", async ({ page }) => {
   await page.goto("./playground");
 
   await expect(
-    page.getByRole("navigation").getByRole("link", { name: "Playground" }),
+    page.locator("nav > a", { hasText: "Component playground" }),
   ).toHaveCount(0);
+  await page.getByLabel("More pages").click();
+  await expect(
+    page.getByRole("link", { name: "Component playground" }),
+  ).toBeVisible();
 });
 
 /**
