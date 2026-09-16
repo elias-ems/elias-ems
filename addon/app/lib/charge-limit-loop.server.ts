@@ -325,7 +325,9 @@ export async function chargeLimitTick(now = Date.now()) {
         sources: result.sources,
         historyHours: result.historyHours,
         solarMarginPercent: result.solarMarginPercent,
-        message: [blocked, result.plan.reason].filter(Boolean).join(" "),
+        message: [blocked, result.planningNote, result.plan.reason]
+          .filter(Boolean)
+          .join(" "),
       });
       if (!result.reserveCovered) {
         status.message +=

@@ -151,3 +151,18 @@ Recorder, prices, and writable number endpoints.
 
 Sources: [Home Assistant Energy API implementation](https://github.com/home-assistant/core/blob/dev/homeassistant/components/energy/websocket_api.py),
 [Helios forecast contract](https://github.com/ReikanYsora/Helios-Forecast/blob/main/CONTRACT.md).
+
+Curtailment compatibility errors identify unmatched Energy dashboard counters,
+missing inverter ratings and shared forecast providers.
+Soft ceilings, nonzero grid targets, minimum limits and fixed-step inverters are
+modeled; a stepped setting of 5% means a fixed 5% cap during the episode, not
+5% increments. Matching energy counters and separate per-array forecasts are
+required even if current PV generation is unrestricted.
+
+A configured EV charging override no longer blocks battery charge-limit control.
+Planning assumes ordinary curtailment without future EV override activations;
+the live PV controller still applies its configured override. The plan card and
+decisions disclose that EV charging is not forecast and the evening target may
+not be reached. Historical household demand can already include EV consumption;
+no additional predicted EV session is added. Replanning uses updated battery SoC,
+but does not guarantee recovery of energy consumed by an unexpected EV session.

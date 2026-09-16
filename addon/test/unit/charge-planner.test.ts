@@ -67,7 +67,9 @@ describe("forecast planning through Home Assistant", () => {
       "../../app/lib/charge-planner.server"
     );
     const result = await calculateChargePlan(chargeBatteryFixture as Battery);
-    expect(result.controlBlocker).toContain("Hypothetical");
+    expect(result.controlBlocker).toContain(
+      "No PV entity matches Energy dashboard counter pv",
+    );
     expect(result.plan.points.length).toBeGreaterThan(0);
     expect(result.reportedW).toBe(2000);
   });
@@ -107,6 +109,9 @@ describe("forecast planning through Home Assistant", () => {
       enabled: true,
       strategy: "soft-ceiling",
       priceThresholdPerKwh: -1,
+      gridTargetW: -250,
+      minLimitPercent: 2,
+      deadbandW: 50,
     });
     configMocks.arrays.mockResolvedValue([
       {
@@ -114,7 +119,7 @@ describe("forecast planning through Home Assistant", () => {
         curtailable: true,
         controlMode: "stepped",
         ratedPowerW: 5000,
-        stepLimitPercent: 20,
+        stepLimitPercent: 5,
       },
     ]);
     const { calculateChargePlan } = await import(
@@ -199,4 +204,41 @@ it("selects the shared evening algorithm using the HA timezone and battery targe
   expect(
     result.plan.points.every((p) => p.limitW >= 0 && p.limitW <= 2000),
   ).toBe(true);
+});
+
+it("keeps ordinary curtailment planning available with an unpredictable EV override", async () => {
+  configMocks.curtailment.mockResolvedValue({
+    ...DEFAULT_CURTAILMENT_CONFIG,
+    enabled: true,
+    strategy: "soft-ceiling",
+    carChargingEntityId: "binary_sensor.ev_charging",
+    chargerPowerW: 11000,
+    gridTargetW: -250,
+    minLimitPercent: 2,
+  });
+  configMocks.arrays.mockResolvedValue([
+    {
+      energyEntityId: "pv",
+      curtailable: true,
+      controlMode: "modulating",
+      ratedPowerW: 5000,
+    },
+  ]);
+  const { calculateChargePlan } = await import(
+    "../../app/lib/charge-planner.server"
+  );
+  const report = vi.fn();
+  const result = await calculateChargePlan(
+    chargeBatteryFixture as Battery,
+    Date.now(),
+    report,
+  );
+  expect(result.controlBlocker).toBeNull();
+  expect(result.curtailmentModeled).toBe(true);
+  expect(result.planningNote).toContain("EV charging is not forecast");
+  expect(report).toHaveBeenCalledWith("ev-charging", result.planningNote);
+  configMocks.arrays.mockResolvedValue([]);
+  expect(
+    (await calculateChargePlan(chargeBatteryFixture as Battery)).controlBlocker,
+  ).toContain("No PV entity matches");
 });
