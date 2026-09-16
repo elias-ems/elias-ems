@@ -5,9 +5,9 @@ import { algorithms } from "./algorithms/index.mjs";
 import { benchmarkHtml } from "./report.mjs";
 
 const [
-  input = "gym/datasets/household-2026-09-11/input.json",
+  input = "addon/app/lib/benchmark-data/input.json",
   output = "gym/results/benchmark",
-  settings = "gym/experiment.json",
+  settings = "addon/app/lib/benchmark-data/experiment.json",
 ] = process.argv.slice(2);
 await mkdir(output, { recursive: true });
 const reports = [];

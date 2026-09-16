@@ -5,12 +5,12 @@ import { evening, replay } from "../algorithms/evening.mjs";
 
 const data = JSON.parse(
   await readFile(
-    new URL("../datasets/household-2026-09-11/input.json", import.meta.url),
+    new URL("../../addon/app/lib/benchmark-data/input.json", import.meta.url),
     "utf8",
   ),
 );
 const settings = JSON.parse(
-  await readFile(new URL("../experiment.json", import.meta.url), "utf8"),
+  await readFile(new URL("../../addon/app/lib/benchmark-data/experiment.json", import.meta.url), "utf8"),
 );
 
 test("evening search reaches target in both scenarios with intermediate stable limits", async () => {

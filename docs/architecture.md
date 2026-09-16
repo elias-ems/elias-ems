@@ -1,6 +1,14 @@
 # Architecture
 
 The root `gym/` directory provides an offline battery-planner experiment harness.
+The same benchmark is available in the EMS under **More → Benchmark**. Its
+explicit Run all algorithms action evaluates every entry in the shared
+`benchmark-algorithms.ts` registry against the fixed input and experiment settings
+in `addon/app/lib/benchmark-data/`, bundled into the server build. The gym reads
+those same files. The page compares energy cost, deadline and final charge,
+target shortfall, ceiling changes and runtime for nominal and reduced solar,
+with interval schedules below. Concurrent requests share one run; results are
+returned to the requesting page without changing live settings or stored plans.
 It runs the production pure optimizer directly with versioned JSON datasets;
 the approved household dataset and frozen reference output are committed.
 The test runs today's prepared inputs; yesterday is retained as historical context.

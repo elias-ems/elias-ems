@@ -13,7 +13,7 @@ test("offline runner is reproducible and preserves curation", async () => {
     const run = () =>
       execFileSync(
         process.execPath,
-        ["gym/run.mjs", "gym/datasets/household-2026-09-11/input.json", output],
+        ["gym/run.mjs", "addon/app/lib/benchmark-data/input.json", output],
         { cwd: root },
       );
     run();

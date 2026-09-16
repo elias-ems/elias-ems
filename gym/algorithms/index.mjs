@@ -1,14 +1,8 @@
-import { optimizeCharge } from "../../addon/app/lib/charge-plan.ts";
-import { evening } from "./evening.mjs";
+import { benchmarkAlgorithms } from "../../addon/app/lib/benchmark-algorithms.ts";
 
-export const algorithms = {
-  "cost-optimized": {
-    run: (data) =>
-      optimizeCharge(data.slots, data.model, data.terminalReserveKwh),
-    source: new URL("../../addon/app/lib/charge-plan.ts", import.meta.url),
-  },
-  "evening-target": {
-    run: evening,
-    source: new URL("../../addon/app/lib/charge-evening.ts", import.meta.url),
-  },
-};
+export const algorithms = Object.fromEntries(
+  Object.entries(benchmarkAlgorithms).map(([id, algorithm]) => [id, {
+    ...algorithm,
+    source: new URL(`../../addon/app/lib/${algorithm.sourceFile}`, import.meta.url),
+  }]),
+);

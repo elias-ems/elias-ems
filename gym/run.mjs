@@ -7,10 +7,10 @@ import { replay, validateSettings } from "./algorithms/evening.mjs";
 import { algorithms } from "./algorithms/index.mjs";
 
 const [
-  input = "gym/datasets/household-2026-09-11/input.json",
+  input = "addon/app/lib/benchmark-data/input.json",
   output = "gym/results/latest",
   selectedAlgorithm,
-  settingsFile = "gym/experiment.json",
+  settingsFile = "addon/app/lib/benchmark-data/experiment.json",
 ] = process.argv.slice(2);
 if (!input)
   throw new Error("Usage: node gym/run.mjs <dataset.json> [output-directory]");

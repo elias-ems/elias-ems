@@ -88,6 +88,9 @@ export default function AppHeader() {
         >
           <summary aria-label="More pages">More</summary>
           <div>
+            <NavLink to="/benchmark" style={linkStyle}>
+              Benchmark
+            </NavLink>
             <NavLink to="/tools" style={linkStyle}>
               Tools
             </NavLink>
