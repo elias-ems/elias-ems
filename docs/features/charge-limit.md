@@ -111,9 +111,10 @@ links to the **Plans** page for the complete forward-looking view.
 
 Plans separates the forecast into Battery, PV and Prices sections. The PV
 section shows forecast versus generated solar after PV limits and totals the
-modeled generation and curtailment over the plan. Its expandable
-schedule includes household demand and separates forecast solar, generated solar
-and curtailed power. Cost difference is modeled over published prices, not
+modeled generation and curtailment over the plan. A prominent view switch
+exchanges those charts for the full schedule table and remembers the last choice
+in the browser. The schedule includes household demand and separates forecast
+solar, generated solar and curtailed power. Cost difference is modeled over published prices, not
 measured savings; plans may end with different stored energy. Forecast source
 count, coverage, history sample count and solar margin make the assumptions
 visible.

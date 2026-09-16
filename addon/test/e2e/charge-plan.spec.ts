@@ -103,7 +103,7 @@ for (const modeled of [false, true]) {
       if (modeled) {
         await expect(page.getByText(/Hypothetical preview/)).toHaveCount(0);
         await expect(page.getByText(/Modeled curtailment:/)).toBeVisible();
-        await page.getByText(/Forecast and schedule details/).click();
+        await page.getByRole("button", { name: "Schedule table" }).click();
         await expect(
           page.getByRole("columnheader", {
             name: "Generated solar W",
@@ -113,6 +113,26 @@ for (const modeled of [false, true]) {
         await expect(
           page.getByRole("columnheader", { name: "Curtailed W", exact: true }),
         ).toBeVisible();
+        await expect(
+          page.getByRole("img", {
+            name: "Charge ceiling and Expected charging over time, W",
+          }),
+        ).toHaveCount(0);
+        await page.reload();
+        await expect(
+          page.getByRole("button", { name: "Schedule table" }),
+        ).toHaveAttribute("aria-pressed", "true");
+        await expect(
+          page.getByRole("columnheader", {
+            name: "Generated solar W",
+            exact: true,
+          }),
+        ).toBeVisible();
+        await page.getByRole("button", { name: "Charts" }).click();
+        await page.reload();
+        await expect(
+          page.getByRole("button", { name: "Charts" }),
+        ).toHaveAttribute("aria-pressed", "true");
         const response = await page.request.get(`${baseUrl}api/charge-limits`);
         const status = await response.json();
         expect(

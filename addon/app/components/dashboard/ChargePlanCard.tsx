@@ -9,14 +9,20 @@ import { hintStyle } from "../form";
 import { cardStyle, eyebrowStyle, monoStyle } from "./chrome";
 import PlanTimeline from "./PlanTimeline";
 
+type PlanView = "charts" | "table";
+
+const PLAN_VIEW_STORAGE_KEY = "elias-plans-view";
+
 function BatteryPlan({
   status,
   now,
   detailed,
+  view,
 }: {
   status: ChargeLimitStatus;
   now: number;
   detailed: boolean;
+  view: PlanView;
 }) {
   const first = status.plan?.points[0];
   const expired = status.validUntil !== null && now > status.validUntil;
@@ -134,37 +140,41 @@ function BatteryPlan({
           )}
           {detailed && (
             <>
-              <h3 style={sectionHeadingStyle}>Battery</h3>
-              {(["power", "soc"] as const).map((kind) => (
-                <PlanTimeline
-                  key={kind}
-                  points={status.plan?.points || []}
-                  times={status.times}
-                  kind={kind}
-                  currency={status.currency}
-                />
-              ))}
+              {view === "charts" && (
+                <>
+                  <h3 style={sectionHeadingStyle}>Battery</h3>
+                  {(["power", "soc"] as const).map((kind) => (
+                    <PlanTimeline
+                      key={kind}
+                      points={status.plan?.points || []}
+                      times={status.times}
+                      kind={kind}
+                      currency={status.currency}
+                    />
+                  ))}
 
-              <h3 style={sectionHeadingStyle}>PV</h3>
-              <p style={{ ...hintStyle, margin: 0 }}>
-                Forecast generation: {generatedSolarKwh.toFixed(2)} kWh
-                {" · "}Modeled curtailment: {curtailedSolarKwh.toFixed(2)} kWh
-                within this plan.
-              </p>
-              <PlanTimeline
-                points={status.plan.points}
-                times={status.times}
-                kind="solar"
-                currency={status.currency}
-              />
+                  <h3 style={sectionHeadingStyle}>PV</h3>
+                  <p style={{ ...hintStyle, margin: 0 }}>
+                    Forecast generation: {generatedSolarKwh.toFixed(2)} kWh
+                    {" · "}Modeled curtailment: {curtailedSolarKwh.toFixed(2)}{" "}
+                    kWh within this plan.
+                  </p>
+                  <PlanTimeline
+                    points={status.plan.points}
+                    times={status.times}
+                    kind="solar"
+                    currency={status.currency}
+                  />
 
-              <h3 style={sectionHeadingStyle}>Prices</h3>
-              <PlanTimeline
-                points={status.plan.points}
-                times={status.times}
-                kind="price"
-                currency={status.currency}
-              />
+                  <h3 style={sectionHeadingStyle}>Prices</h3>
+                  <PlanTimeline
+                    points={status.plan.points}
+                    times={status.times}
+                    kind="price"
+                    currency={status.currency}
+                  />
+                </>
+              )}
               <p style={hintStyle}>
                 {status.sources} Energy dashboard forecast source
                 {status.sources === 1 ? "" : "s"} · {status.historyHours}{" "}
@@ -176,14 +186,9 @@ function BatteryPlan({
                 {status.plan.terminalReserveKwh.toFixed(2)} kWh above the native
                 reserve.
               </p>
-              <details style={{ minWidth: 0 }}>
-                <summary style={{ cursor: "pointer" }}>
-                  Forecast and schedule details · {status.plan.points.length}{" "}
-                  intervals
-                </summary>
+              {view === "table" && (
                 <div
                   style={{
-                    marginTop: "0.75rem",
                     maxHeight: "clamp(16rem, 52vh, 36rem)",
                     overflow: "auto",
                     border: "1px solid var(--color-border)",
@@ -199,10 +204,12 @@ function BatteryPlan({
                     }}
                   >
                     <caption style={hintStyle}>
-                      SoC is at the end of each interval. Forecast solar is
-                      before curtailment; generated solar is what remains after
-                      PV limits. Evening plans show nominal solar and also test
-                      the configured reduced-solar scenario.
+                      Forecast and schedule details ·{" "}
+                      {status.plan.points.length} intervals. SoC is at the end
+                      of each interval. Forecast solar is before curtailment;
+                      generated solar is what remains after PV limits. Evening
+                      plans show nominal solar and also test the configured
+                      reduced-solar scenario.
                     </caption>
                     <thead>
                       <tr>
@@ -274,12 +281,66 @@ function BatteryPlan({
                     </tbody>
                   </table>
                 </div>
-              </details>
+              )}
             </>
           )}
         </>
       )}
     </section>
+  );
+}
+
+function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: PlanView;
+  onChange: (view: PlanView) => void;
+}) {
+  return (
+    <fieldset
+      aria-label="Plan view"
+      style={{
+        justifySelf: "start",
+        display: "inline-flex",
+        background: "var(--color-border)",
+        border: "none",
+        margin: 0,
+        padding: 3,
+        borderRadius: 8,
+        gap: 3,
+      }}
+    >
+      {(
+        [
+          ["charts", "Charts"],
+          ["table", "Schedule table"],
+        ] as const
+      ).map(([option, label]) => {
+        const selected = option === value;
+        return (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(option)}
+            style={{
+              border: "none",
+              background: selected ? "var(--color-surface)" : "transparent",
+              color: selected ? "var(--color-text)" : "var(--color-text-muted)",
+              padding: "0.5rem 0.85rem",
+              borderRadius: 6,
+              font: "inherit",
+              fontSize: "0.875rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </fieldset>
   );
 }
 
@@ -299,11 +360,30 @@ export default function ChargePlanCard({
     },
   );
   const [now, setNow] = useState(0);
+  const [view, setView] = useState<PlanView>("charts");
   useEffect(() => {
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(PLAN_VIEW_STORAGE_KEY);
+      if (stored === "charts" || stored === "table") setView(stored);
+    } catch {
+      // Storage may be disabled; the in-memory switch still works.
+    }
+  }, []);
+
+  const changeView = (next: PlanView) => {
+    setView(next);
+    try {
+      localStorage.setItem(PLAN_VIEW_STORAGE_KEY, next);
+    } catch {
+      // Storage may be disabled; keep the choice for this page load.
+    }
+  };
+
   return (
     <>
       {failing && (
@@ -311,12 +391,14 @@ export default function ChargePlanCard({
           Battery plan updates are unavailable; showing the last received plan.
         </p>
       )}
+      {detailed && <ViewToggle value={view} onChange={changeView} />}
       {(data || initial).batteries.map((status) => (
         <BatteryPlan
           key={status.batteryId}
           status={status}
           now={now}
           detailed={detailed}
+          view={view}
         />
       ))}
     </>
