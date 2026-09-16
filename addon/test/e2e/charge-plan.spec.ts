@@ -90,6 +90,7 @@ for (const modeled of [false, true]) {
           name: "Charge ceiling and Expected charging over time, W",
         }),
       ).toBeVisible();
+      await expect(page.getByRole("heading", { name: "PV" })).toBeVisible();
       await expect(
         page.getByText("Preview only — the battery's settings are unchanged."),
       ).toBeVisible();
@@ -101,7 +102,7 @@ for (const modeled of [false, true]) {
         ).toBeVisible();
       if (modeled) {
         await expect(page.getByText(/Hypothetical preview/)).toHaveCount(0);
-        await expect(page.getByText(/Expected PV generation:/)).toBeVisible();
+        await expect(page.getByText(/Modeled curtailment:/)).toBeVisible();
         await page.getByText(/Forecast and schedule details/).click();
         await expect(
           page.getByRole("columnheader", {

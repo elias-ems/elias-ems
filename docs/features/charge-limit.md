@@ -109,8 +109,9 @@ Home shows the recommended ceiling, requested and reported limits, next change,
 expected generation and curtailment totals, and the modeled cost difference. It
 links to the **Plans** page for the complete forward-looking view.
 
-Plans shows expected charging, planned versus unrestricted SoC, purchase/export
-prices, and forecast versus generated solar after PV limits. Its expandable
+Plans separates the forecast into Battery, PV and Prices sections. The PV
+section shows forecast versus generated solar after PV limits and totals the
+modeled generation and curtailment over the plan. Its expandable
 schedule includes household demand and separates forecast solar, generated solar
 and curtailed power. Cost difference is modeled over published prices, not
 measured savings; plans may end with different stored energy. Forecast source
