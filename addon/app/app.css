@@ -272,7 +272,6 @@ input {
 .app-header-more > div a {
   min-height: 2.75rem;
   padding: 0 1rem;
-  color: var(--color-text);
 }
 
 @media (max-width: 480px) {

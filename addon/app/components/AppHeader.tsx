@@ -58,6 +58,13 @@ const linkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
   boxShadow: isActive ? "inset 0 -3px 0 var(--color-header-text)" : "none",
 });
 
+const menuLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
+  ...linkStyle({ isActive }),
+  color: "var(--color-text)",
+  boxShadow: "none",
+  fontWeight: isActive ? 700 : 500,
+});
+
 export default function AppHeader() {
   const location = useLocation();
 
@@ -88,10 +95,10 @@ export default function AppHeader() {
         >
           <summary aria-label="More pages">More</summary>
           <div>
-            <NavLink to="/benchmark" style={linkStyle}>
+            <NavLink to="/benchmark" style={menuLinkStyle}>
               Benchmark
             </NavLink>
-            <NavLink to="/tools" style={linkStyle}>
+            <NavLink to="/tools" style={menuLinkStyle}>
               Tools
             </NavLink>
           </div>
