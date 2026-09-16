@@ -46,6 +46,45 @@ const test = base.extend<{ noFailedRequests: void }>({
   ],
 });
 
+test("benchmark runs all algorithms from More behind ingress", async ({
+  page,
+}) => {
+  await page.goto("./");
+  await page.getByLabel("More pages").click();
+  await page.getByRole("link", { name: "Benchmark", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Benchmark", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Run all algorithms" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Results", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("table", { name: "Measured solar", exact: true })
+      .getByRole("row"),
+  ).toHaveCount(3);
+  await expect(
+    page
+      .getByRole("table", { name: "20% less solar", exact: true })
+      .getByRole("row"),
+  ).toHaveCount(3);
+  await page.getByText("Compare interval schedules", { exact: true }).click();
+  await expect(
+    page.getByRole("table", { name: /Charge ceilings/ }).getByRole("row"),
+  ).toHaveCount(53);
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(390);
+    await expect(
+      page.getByRole("button", { name: "Run all algorithms" }),
+    ).toBeVisible();
+  }
+});
+
 test("the page hydrates behind the ingress prefix", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

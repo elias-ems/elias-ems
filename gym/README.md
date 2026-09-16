@@ -5,9 +5,13 @@ Run commands from the repository root; no Home Assistant connection is needed.
 
 ## Fixed dataset
 
-`datasets/household-2026-09-11/` contains the approved, committed inputs:
+The EMS exposes this benchmark under **More → Benchmark**, with a **Run all
+algorithms** button. The CLI and EMS share the algorithm registry, fixed input
+and experiment settings. The input and settings live in
+`addon/app/lib/benchmark-data/` so they ship with the add-on; the historical
+context and frozen reference remain in `gym/datasets/household-2026-09-11/`.
 
-- `input.json`: today, 11 September 2026, 07:00–20:00 Brussels (52 quarter-hours).
+- `addon/app/lib/benchmark-data/input.json`: 11 September 2026, 07:00–20:00 Brussels (52 quarter-hours).
   This is the only dataset used by the default runner and automated test.
 - `yesterday.json`: 10 September, the full local day (96 quarter-hours), retained
   as historical context. The pure optimizer does not read this file.
@@ -27,7 +31,7 @@ are outside this test.
 node gym/run.mjs
 node --test gym/test/*.test.mjs
 # Preserve a particular experiment separately:
-node gym/run.mjs gym/datasets/household-2026-09-11/input.json gym/results/candidate-1
+node gym/run.mjs addon/app/lib/benchmark-data/input.json gym/results/candidate-1
 ```
 
 Runs write `report.json`, `schedule.csv` and `curation.md` to `results/latest`
@@ -69,11 +73,13 @@ under `data/` remain ignored; the approved normalized dataset is versioned.
 
 ```sh
 node gym/benchmark.mjs
-node gym/run.mjs gym/datasets/household-2026-09-11/input.json gym/results/evening-target evening-target
+node gym/run.mjs addon/app/lib/benchmark-data/input.json gym/results/evening-target evening-target
 ```
 
-The registry in `algorithms/index.mjs` exposes `cost-optimized` (existing dynamic programming
-optimizer) and `evening-target` (evening deadline algorithm). Add candidates there.
+The shared registry in `addon/app/lib/benchmark-algorithms.ts` exposes
+`cost-optimized` (existing dynamic programming optimizer) and `evening-target`
+(evening deadline algorithm). Add candidates there; `algorithms/index.mjs`
+adapts that registry for CLI source hashing.
 The runner takes input, output directory, algorithm name and optional settings
 file; the benchmark takes input, output directory and optional settings file.
 
