@@ -6,7 +6,9 @@ Run commands from the repository root; no Home Assistant connection is needed.
 ## Fixed dataset
 
 The EMS exposes this benchmark under **More → Benchmark**, with a **Run all
-algorithms** button. The CLI and EMS share the algorithm registry, fixed input
+algorithms** button. The page allows temporary edits to interval solar, demand and tariffs for
+reruns. Reset restores the bundled input; page edits do not change CLI files.
+The CLI and EMS share the algorithm registry, fixed input
 and experiment settings. The input and settings live in
 `addon/app/lib/benchmark-data/` so they ship with the add-on; the historical
 context and frozen reference remain in `gym/datasets/household-2026-09-11/`.

@@ -1,6 +1,7 @@
 import { benchmarkAlgorithms } from "./benchmark-algorithms";
 import settings from "./benchmark-data/experiment.json";
 import input from "./benchmark-data/input.json";
+import type { BenchmarkValues } from "./benchmark-input";
 import { replay, validateSettings } from "./charge-evening";
 import { deviceLimit } from "./charge-plan";
 
@@ -12,7 +13,7 @@ export function benchmarkDataset() {
   };
 }
 
-async function run() {
+async function run(input: ReturnType<typeof benchmarkDataset>["input"]) {
   validateSettings(input, settings);
   const results = [];
   for (const [id, algorithm] of Object.entries(benchmarkAlgorithms)) {
@@ -51,14 +52,25 @@ async function run() {
       }),
     });
   }
-  return { results, completedAt: new Date().toISOString() };
+  return { results, input, completedAt: new Date().toISOString() };
 }
 
 // Coalesce concurrent requests so several open tabs don't run duplicate searches.
-let pending: ReturnType<typeof run> | undefined;
-export function runBenchmark() {
-  pending ??= run().finally(() => {
-    pending = undefined;
-  });
-  return pending;
+const pending = new Map<string, ReturnType<typeof run>>();
+export function runBenchmark(values?: BenchmarkValues[]) {
+  const snapshot = structuredClone(input);
+  if (values)
+    snapshot.slots = snapshot.slots.map((slot, index) => ({
+      ...slot,
+      ...values[index],
+    }));
+  const key = JSON.stringify(snapshot);
+  let task = pending.get(key);
+  if (!task) {
+    task = run(snapshot).finally(() => {
+      pending.delete(key);
+    });
+    pending.set(key, task);
+  }
+  return task;
 }

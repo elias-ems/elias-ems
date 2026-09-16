@@ -73,6 +73,39 @@ test("benchmark runs all algorithms from More behind ingress", async ({
   await expect(
     page.getByRole("table", { name: /Charge ceilings/ }).getByRole("row"),
   ).toHaveCount(53);
+  const demand = page.getByRole("spinbutton", {
+    name: "07:00–07:15 Demand (W)",
+    exact: true,
+  });
+  const originalDemand = await demand.inputValue();
+  await demand.fill("10000");
+  await expect(
+    page.getByText("Inputs changed since the displayed results.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Run with these inputs" }).click();
+  await expect(
+    page.getByText("Run used an edited dataset;", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Inputs changed since the displayed results.", {
+      exact: false,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("table", { name: /Charge ceilings/ })
+      .getByRole("row")
+      .nth(1),
+  ).toContainText("10000");
+  await page.getByRole("button", { name: "Reset to bundled dataset" }).click();
+  await expect(demand).toHaveValue(originalDemand);
+  await expect(
+    page.getByText("Inputs changed since the displayed results.", {
+      exact: false,
+    }),
+  ).toBeVisible();
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
     await page.setViewportSize({ width: 390, height: 844 });
