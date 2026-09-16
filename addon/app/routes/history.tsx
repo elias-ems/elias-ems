@@ -56,50 +56,11 @@ export default function History({ loaderData }: Route.ComponentProps) {
         </p>
       </div>
 
-      <nav
-        aria-label="History range"
-        style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}
-      >
-        {ranges.map((range) => (
-          <NavLink
-            key={range.hours}
-            to={`?hours=${range.hours}`}
-            aria-current={selectedHours === range.hours ? "page" : undefined}
-            aria-disabled={loading}
-            onClick={(event) => {
-              if (loading) event.preventDefault();
-            }}
-            style={{
-              padding: "0.45rem 0.75rem",
-              borderRadius: 999,
-              border: "1px solid var(--color-border-strong)",
-              background:
-                selectedHours === range.hours
-                  ? "var(--color-battery-soft)"
-                  : "var(--color-surface)",
-              color:
-                selectedHours === range.hours
-                  ? "var(--color-battery)"
-                  : "var(--color-text-muted)",
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              textDecoration: "none",
-              cursor: loading ? "wait" : "pointer",
-              opacity: loading && selectedHours !== range.hours ? 0.6 : 1,
-            }}
-          >
-            {range.label}
-          </NavLink>
-        ))}
-      </nav>
-
       <p
         aria-live="polite"
+        className="visually-hidden"
         style={{
-          ...ruleStyle,
-          minHeight: "1.2em",
           margin: 0,
-          color: loading ? "var(--color-battery)" : "transparent",
         }}
       >
         {loading ? `Loading ${pendingLabel ?? "history"}…` : "History loaded"}
@@ -126,13 +87,30 @@ export default function History({ loaderData }: Route.ComponentProps) {
       >
         {batteries.map((battery) => (
           <section key={battery.id} style={{ ...cardStyle, padding: "1rem" }}>
-            <h2 style={{ margin: "0 0 0.25rem", fontSize: "1.125rem" }}>
-              {battery.title}
-            </h2>
-            <p style={{ ...ruleStyle, marginBottom: "1rem" }}>
-              Operating window {battery.minChargePercent}–
-              {battery.maxChargePercent}%
-            </p>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "0.75rem",
+                marginBottom: "1rem",
+              }}
+            >
+              <div>
+                <h2 style={{ margin: "0 0 0.25rem", fontSize: "1.125rem" }}>
+                  {battery.title}
+                </h2>
+                <p style={{ ...ruleStyle, margin: 0 }}>
+                  Operating window {battery.minChargePercent}–
+                  {battery.maxChargePercent}%
+                </p>
+              </div>
+              <HistoryRangeControl
+                selectedHours={selectedHours}
+                loading={loading}
+              />
+            </div>
             <div className="history-grid">
               <div>
                 <h3 style={eyebrowStyle}>State of charge</h3>
@@ -174,5 +152,55 @@ export default function History({ loaderData }: Route.ComponentProps) {
         ))}
       </div>
     </main>
+  );
+}
+
+function HistoryRangeControl({
+  selectedHours,
+  loading,
+}: {
+  selectedHours: HistoryRangeHours;
+  loading: boolean;
+}) {
+  return (
+    <nav
+      aria-label="History range"
+      style={{
+        display: "inline-flex",
+        background: "var(--color-border)",
+        padding: 2,
+        borderRadius: 6,
+        gap: 2,
+      }}
+    >
+      {ranges.map((range) => {
+        const selected = selectedHours === range.hours;
+        return (
+          <NavLink
+            key={range.hours}
+            to={`?hours=${range.hours}`}
+            aria-current={selected ? "page" : undefined}
+            aria-disabled={loading}
+            onClick={(event) => {
+              if (loading) event.preventDefault();
+            }}
+            style={{
+              border: "none",
+              background: selected ? "var(--color-surface)" : "transparent",
+              color: selected ? "var(--color-text)" : "var(--color-text-muted)",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: "0.6875rem",
+              fontWeight: 600,
+              textDecoration: "none",
+              cursor: loading ? "wait" : "pointer",
+              opacity: loading && !selected ? 0.6 : 1,
+            }}
+          >
+            {range.label}
+          </NavLink>
+        );
+      })}
+    </nav>
   );
 }
