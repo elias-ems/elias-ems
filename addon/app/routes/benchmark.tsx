@@ -1,17 +1,32 @@
-import type { CSSProperties } from "react";
+import { type CSSProperties, useState } from "react";
 import { useFetcher } from "react-router";
+import BenchmarkDataset, {
+  draftValues,
+  serializeDraft,
+} from "../components/BenchmarkDataset";
 import { cardStyle, ruleStyle } from "../components/dashboard/chrome";
 import { benchmarkDataset, runBenchmark } from "../lib/benchmark.server";
+import {
+  BenchmarkInputError,
+  parseBenchmarkValues,
+} from "../lib/benchmark-input";
 import type { Route } from "./+types/benchmark";
 
 export function loader() {
   return benchmarkDataset();
 }
 
-export async function action() {
+export async function action({ request }: Route.ActionArgs) {
   try {
-    return { report: await runBenchmark(), error: null };
+    const form = await request.formData();
+    const values = parseBenchmarkValues(
+      form.get("dataset"),
+      benchmarkDataset().input.slots.length,
+    );
+    return { report: await runBenchmark(values), error: null };
   } catch (error) {
+    if (error instanceof BenchmarkInputError)
+      return { report: null, error: error.message };
     console.error("Benchmark failed", error);
     return {
       report: null,
@@ -39,6 +54,11 @@ export default function Benchmark({ loaderData }: Route.ComponentProps) {
   const busy = fetcher.state !== "idle";
   const report = fetcher.data?.report;
   const { input, settings, algorithms } = loaderData;
+  const [draft, setDraft] = useState(() => draftValues(input.slots));
+  const serialized = serializeDraft(draft);
+  const edited = serialized !== serializeDraft(draftValues(input.slots));
+  const stale =
+    report && serialized !== serializeDraft(draftValues(report.input.slots));
   const time = (value: number | string) =>
     new Intl.DateTimeFormat("en-GB", {
       timeZone: input.timeZone,
@@ -52,7 +72,10 @@ export default function Benchmark({ loaderData }: Route.ComponentProps) {
     >
       <div>
         <h1 style={{ margin: 0, fontSize: "1.5rem" }}>Benchmark</h1>
-        <p>Compare every algorithm against the same static dataset.</p>
+        <p>
+          Compare every algorithm against the bundled dataset or your edited
+          copy.
+        </p>
         <p style={ruleStyle}>
           11 September 2026 · {time(input.slots[0].start)}–
           {time(input.slots[input.slots.length - 1].end)} · {input.timeZone} ·{" "}
@@ -70,9 +93,11 @@ export default function Benchmark({ loaderData }: Route.ComponentProps) {
         <p>
           Each schedule is evaluated with measured solar and{" "}
           {settings.solarHaircut * 100}% less solar. Settings are fixed and
-          independent of your live configuration.
+          independent of your live configuration. Interval values can be edited
+          below.
         </p>
-        <fetcher.Form method="post">
+        <fetcher.Form method="post" id="benchmark-run">
+          <input type="hidden" name="dataset" value={serialized} />
           <button
             type="submit"
             disabled={busy}
@@ -87,13 +112,33 @@ export default function Benchmark({ loaderData }: Route.ComponentProps) {
         </fetcher.Form>
         <p role="status" aria-live="polite">
           {busy
-            ? "Running the fixed dataset. This may take a few seconds."
+            ? "Running the submitted dataset. This may take a few seconds."
             : report
               ? `Completed at ${time(report.completedAt)} (${input.timeZone}).`
               : "Ready to run."}
         </p>
         {fetcher.data?.error && <p role="alert">{fetcher.data.error}</p>}
+        <p>
+          {edited ? "Using an edited dataset." : "Using the bundled dataset."}
+        </p>
+        {stale && (
+          <p role="status">
+            Inputs changed since the displayed results. Run all algorithms again
+            to update them.
+          </p>
+        )}
       </section>
+      <BenchmarkDataset
+        draft={draft}
+        onChange={setDraft}
+        reset={() => setDraft(draftValues(input.slots))}
+        disabled={busy}
+        intervals={input.slots.map(
+          (slot) => `${time(slot.start)}–${time(slot.end)}`,
+        )}
+        model={input.model}
+        reserve={input.terminalReserveKwh}
+      />
       {report && (
         <section
           aria-label="Benchmark results"
@@ -101,6 +146,12 @@ export default function Benchmark({ loaderData }: Route.ComponentProps) {
           style={{ minWidth: 0 }}
         >
           <h2>Results{busy ? " — previous run" : ""}</h2>
+          <p>
+            {serializeDraft(draftValues(report.input.slots)) ===
+            serializeDraft(draftValues(input.slots))
+              ? "Run used the bundled dataset."
+              : "Run used an edited dataset; original measurement assumptions may no longer apply."}
+          </p>
           <p style={ruleStyle}>
             Lower energy cost is better, but compare deadline charge and target
             shortfall too: the algorithms have different objectives. Runtime is
@@ -181,6 +232,16 @@ export default function Benchmark({ loaderData }: Route.ComponentProps) {
                     <th scope="col" style={cell}>
                       Interval
                     </th>
+                    {[
+                      "Solar (W)",
+                      "Demand (W)",
+                      "Import (€/kWh)",
+                      "Export (€/kWh)",
+                    ].map((label) => (
+                      <th key={label} scope="col" style={cell}>
+                        {label}
+                      </th>
+                    ))}
                     {report.results.map((r) => (
                       <th key={r.id} scope="col" style={cell}>
                         {r.label} · ceiling / charge
@@ -189,11 +250,15 @@ export default function Benchmark({ loaderData }: Route.ComponentProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {input.slots.map((slot, index) => (
+                  {report.input.slots.map((slot, index) => (
                     <tr key={slot.start}>
                       <th scope="row" style={cell}>
                         {time(slot.start)}–{time(slot.end)}
                       </th>
+                      <td style={cell}>{slot.solarW}</td>
+                      <td style={cell}>{slot.loadW}</td>
+                      <td style={cell}>{slot.buy}</td>
+                      <td style={cell}>{slot.sell}</td>
                       {report.results.map((r) => (
                         <td key={r.id} style={cell}>
                           {r.scenarios[0].points[index].limitW} W /{" "}

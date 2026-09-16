@@ -7,8 +7,13 @@ explicit Run all algorithms action evaluates every entry in the shared
 in `addon/app/lib/benchmark-data/`, bundled into the server build. The gym reads
 those same files. The page compares energy cost, deadline and final charge,
 target shortfall, ceiling changes and runtime for nominal and reduced solar,
-with interval schedules below. Concurrent requests share one run; results are
-returned to the requesting page without changing live settings or stored plans.
+with interval schedules below. The input table exposes solar, demand and both
+tariffs for each interval, with battery model and reserve alongside. Edits are
+local to the open page and can be reset to the bundled dataset. The action
+validates the submitted values, keeps times/model/settings fixed, and returns
+the input snapshot with its results. Subsequent edits mark those results stale.
+Concurrent requests with identical inputs share one run; different inputs stay
+isolated. Runs do not change live settings, stored plans or bundled files.
 It runs the production pure optimizer directly with versioned JSON datasets;
 the approved household dataset and frozen reference output are committed.
 The test runs today's prepared inputs; yesterday is retained as historical context.
