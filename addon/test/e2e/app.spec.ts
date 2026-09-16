@@ -586,6 +586,21 @@ test("the top bar tightens on a phone and not before", async ({ page }) => {
   expect(await documentWidth(page)).toEqual({ wants: 320, has: 320 });
 });
 
+test("the More menu shows its page titles on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 800 });
+  await page.goto("./");
+  await page.getByLabel("More pages").click();
+
+  const menu = page.locator(".app-header-more > div");
+  const benchmark = menu.getByRole("link", { name: "Benchmark" });
+  const tools = menu.getByRole("link", { name: "Tools" });
+
+  await expect(benchmark).toBeVisible();
+  await expect(tools).toBeVisible();
+  await expect(benchmark).toHaveCSS("color", "rgb(31, 41, 51)");
+  await expect(menu).toHaveCSS("background-color", "rgb(255, 255, 255)");
+});
+
 /**
  * Runs after the battery is configured, which is what puts a row on the page to
  * measure. A saved row is mostly entity ids, and an id is one long token a
