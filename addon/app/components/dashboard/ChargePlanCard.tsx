@@ -22,6 +22,33 @@ function BatteryPlan({
   const expired = status.validUntil !== null && now > status.validUntil;
   const next = status.plan?.points.find((p) => p.limitW !== first?.limitW);
   const stamp = (t: number) => status.times[String(t)] || "";
+  const generatedSolarKwh = status.plan
+    ? status.plan.points.reduce(
+        (sum, point) =>
+          sum +
+          ((point.generatedSolarW ?? point.solarW) *
+            (point.end - point.start)) /
+            3_600_000 /
+            1000,
+        0,
+      )
+    : 0;
+  const curtailedSolarKwh = status.plan
+    ? status.plan.points.reduce(
+        (sum, point) =>
+          sum +
+          ((point.curtailedW ?? 0) * (point.end - point.start)) /
+            3_600_000 /
+            1000,
+        0,
+      )
+    : 0;
+  const sectionHeadingStyle = {
+    ...eyebrowStyle,
+    marginTop: "0.55rem",
+    paddingTop: "0.8rem",
+    borderTop: "1px solid var(--color-border)",
+  };
   return (
     <section
       style={{
@@ -84,33 +111,13 @@ function BatteryPlan({
             {status.calculatedAt !== null &&
               `Calculated ${stamp(status.calculatedAt)}.`}
           </p>
-          <p style={hintStyle}>
-            Expected PV generation:{" "}
-            {status.plan.points
-              .reduce(
-                (sum, point) =>
-                  sum +
-                  ((point.generatedSolarW ?? point.solarW) *
-                    (point.end - point.start)) /
-                    3_600_000 /
-                    1000,
-                0,
-              )
-              .toFixed(2)}{" "}
-            kWh
-            {" · "}Curtailed solar:{" "}
-            {status.plan.points
-              .reduce(
-                (sum, point) =>
-                  sum +
-                  ((point.curtailedW ?? 0) * (point.end - point.start)) /
-                    3_600_000 /
-                    1000,
-                0,
-              )
-              .toFixed(2)}{" "}
-            kWh within this plan.
-          </p>
+          {!detailed && (
+            <p style={hintStyle}>
+              Expected PV generation: {generatedSolarKwh.toFixed(2)} kWh
+              {" · "}Curtailed solar: {curtailedSolarKwh.toFixed(2)} kWh
+              within this plan.
+            </p>
+          )}
           <p style={hintStyle}>
             Modeled cost difference versus unrestricted self-consumption:{" "}
             <strong>
@@ -127,7 +134,8 @@ function BatteryPlan({
           )}
           {detailed && (
             <>
-              {(["power", "solar", "soc", "price"] as const).map((kind) => (
+              <h3 style={sectionHeadingStyle}>Battery</h3>
+              {(["power", "soc"] as const).map((kind) => (
                 <PlanTimeline
                   key={kind}
                   points={status.plan?.points || []}
@@ -136,6 +144,27 @@ function BatteryPlan({
                   currency={status.currency}
                 />
               ))}
+
+              <h3 style={sectionHeadingStyle}>PV</h3>
+              <p style={{ ...hintStyle, margin: 0 }}>
+                Forecast generation: {generatedSolarKwh.toFixed(2)} kWh
+                {" · "}Modeled curtailment: {curtailedSolarKwh.toFixed(2)}
+                {" "}kWh within this plan.
+              </p>
+              <PlanTimeline
+                points={status.plan.points}
+                times={status.times}
+                kind="solar"
+                currency={status.currency}
+              />
+
+              <h3 style={sectionHeadingStyle}>Prices</h3>
+              <PlanTimeline
+                points={status.plan.points}
+                times={status.times}
+                kind="price"
+                currency={status.currency}
+              />
               <p style={hintStyle}>
                 {status.sources} Energy dashboard forecast source
                 {status.sources === 1 ? "" : "s"} · {status.historyHours}{" "}
