@@ -144,24 +144,43 @@ export async function calculateChargePlan(
   const mappedArrays = solarSources.map((source) =>
     arrays.find((array) => array.energyEntityId === source.stat_energy_from),
   );
+  const incompatibilities: string[] = [];
+  // The live PV controller still owns the EV override. Its future activation
+  // is unknown, so plan ordinary curtailment and disclose that assumption.
+  const planningNote =
+    curtailment.enabled && curtailment.carChargingEntityId
+      ? "EV charging is not forecast; actual charging may differ and the evening target may not be reached. The live PV charging override remains active."
+      : null;
+  if (planningNote) report("ev-charging", planningNote);
+  if (!solarSources.length)
+    incompatibilities.push(
+      "No solar sources are configured in the Energy dashboard.",
+    );
+  const providers = solarSources.flatMap((source) => [
+    ...new Set(source.config_entry_solar_forecast || []),
+  ]);
+  if (new Set(providers).size !== providers.length)
+    incompatibilities.push(
+      "A forecast provider is shared by multiple solar sources; separate per-array forecasts are required to avoid double-counting.",
+    );
+  solarSources.forEach((source, i) => {
+    const array = mappedArrays[i];
+    if (!array)
+      incompatibilities.push(
+        `No PV entity matches Energy dashboard counter ${source.stat_energy_from || "(missing counter)"}. Select that energy entity in the PV configuration.`,
+      );
+    else if (
+      !(Number.isFinite(array.ratedPowerW) && (array.ratedPowerW ?? 0) > 0)
+    )
+      incompatibilities.push(
+        `Set a positive inverter rating for PV counter ${source.stat_energy_from}.`,
+      );
+  });
   const curtailmentModeled =
-    curtailment.enabled &&
-    !curtailment.carChargingEntityId &&
-    solarSources.length > 0 &&
-    new Set(
-      solarSources.flatMap((source) => [
-        ...new Set(source.config_entry_solar_forecast || []),
-      ]),
-    ).size ===
-      solarSources.reduce(
-        (sum, source) =>
-          sum + new Set(source.config_entry_solar_forecast || []).size,
-        0,
-      ) &&
-    mappedArrays.every((array) => (array?.ratedPowerW ?? 0) > 0);
+    curtailment.enabled && incompatibilities.length === 0;
   const controlBlocker =
     curtailment.enabled && !curtailmentModeled
-      ? "Hypothetical preview: assumes uncurtailed solar. This PV curtailment configuration is not yet modeled; charge-limit control is blocked."
+      ? `Hypothetical preview: assumes uncurtailed solar. Charge-limit control is blocked. ${incompatibilities.join(" ")}`
       : null;
   report(
     "curtailment",
@@ -395,6 +414,7 @@ export async function calculateChargePlan(
   }
   return {
     controlBlocker,
+    planningNote,
     curtailmentModeled,
     plan,
     model,
