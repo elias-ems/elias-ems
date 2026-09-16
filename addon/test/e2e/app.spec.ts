@@ -566,7 +566,9 @@ test("the playground renders every specimen and swallows what its forms post", a
 /**
  * A developer's page belongs in More, not among the primary navigation tabs.
  */
-test("the playground is in More, not the primary navigation", async ({ page }) => {
+test("the playground is in More, not the primary navigation", async ({
+  page,
+}) => {
   await page.goto("./playground");
 
   await expect(
