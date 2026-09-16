@@ -101,6 +101,9 @@ export default function AppHeader() {
             <NavLink to="/tools" style={menuLinkStyle}>
               Tools
             </NavLink>
+            <NavLink to="/playground" style={linkStyle}>
+              Component playground
+            </NavLink>
           </div>
         </details>
       </nav>
