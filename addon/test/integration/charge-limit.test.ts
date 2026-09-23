@@ -19,7 +19,13 @@ beforeAll(async () => {
   );
   await writeFile(
     path.join(directory, "batteries.json"),
-    JSON.stringify([{ ...chargeBatteryFixture, chargeLimitMode: "active" }]),
+    JSON.stringify([
+      {
+        ...chargeBatteryFixture,
+        chargeLimitMode: "active",
+        dischargeLimitEntityId: "number.ac_output",
+      },
+    ]),
   );
   await writeFile(
     path.join(directory, "prices.json"),
@@ -43,6 +49,7 @@ beforeAll(async () => {
     haStates: [
       ...(await defaultStates()),
       { ...chargeEntityFixture, state: "200" },
+      { ...chargeEntityFixture, entity_id: "number.ac_output", state: "1700" },
     ],
     haCommandResults: chargeForecastFixture(),
   });
@@ -73,6 +80,11 @@ it("plans in the background, serves Home through ingress and restores on a setti
   expect(Number(state.state)).toBe(status?.batteries[0].requestedW);
   const html = await fetch(stack.baseUrl).then((r) => r.text());
   expect(html).toContain("Recommended charge ceiling");
+  expect(html).toContain("Recommended AC output ceiling");
+  const output = await fetch(`${stack.ha.apiUrl}/states/number.ac_output`, {
+    headers: { Authorization: `Bearer ${stack.ha.token}` },
+  }).then((r) => r.json());
+  expect(Number(output.state)).toBe(status?.batteries[0].requestedDischargeW);
   expect(html).toContain("View full plan");
   expect(html).not.toContain("Forecast and schedule details");
   const plans = await fetch(`${stack.baseUrl}plans`).then((r) => r.text());
@@ -98,4 +110,9 @@ it("plans in the background, serves Home through ingress and restores on a setti
     { headers: { Authorization: `Bearer ${stack.ha.token}` } },
   ).then((r) => r.json());
   expect(Number(restored.state)).toBe(200);
+  const restoredOutput = await fetch(
+    `${stack.ha.apiUrl}/states/number.ac_output`,
+    { headers: { Authorization: `Bearer ${stack.ha.token}` } },
+  ).then((r) => r.json());
+  expect(Number(restoredOutput.state)).toBe(1700);
 });

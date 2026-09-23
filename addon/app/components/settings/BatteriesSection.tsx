@@ -152,7 +152,7 @@ export default function BatteriesSection({
               <SteeredField defaultChecked={battery?.steered ?? true} />
               <p style={hintStyle}>
                 A configured charge limit automatically produces a Home preview.
-                Enable Optimize charge limit under Battery control to apply it.
+                Enable Optimize charge limits under Battery control to apply it.
               </p>
               <EntityAutocomplete
                 name="chargeLimitEntityId"
@@ -161,6 +161,14 @@ export default function BatteriesSection({
                 defaultValue={battery?.chargeLimitEntityId}
                 error={errors.chargeLimitEntityId}
                 hint="Select the entity that limits power entering the battery. Verify its behavior in Preview; entity names vary by integration."
+              />
+              <EntityAutocomplete
+                name="dischargeLimitEntityId"
+                label="Maximum AC output power (W) — optional"
+                domain="number"
+                defaultValue={battery?.dischargeLimitEntityId}
+                error={errors.dischargeLimitEntityId}
+                hint="Select the battery discharge power limit to save energy during cheaper hours for higher-priced demand. Use a battery output limit, not a whole-inverter or grid export limit. Leave empty for native discharge. The minimum charge percentage stays unchanged."
               />
               <Field
                 name="chargeEfficiencyPercent"

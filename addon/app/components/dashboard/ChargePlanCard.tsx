@@ -26,7 +26,11 @@ function BatteryPlan({
 }) {
   const first = status.plan?.points[0];
   const expired = status.validUntil !== null && now > status.validUntil;
-  const next = status.plan?.points.find((p) => p.limitW !== first?.limitW);
+  const next = status.plan?.points.find(
+    (p) =>
+      p.limitW !== first?.limitW ||
+      p.dischargeLimitW !== first?.dischargeLimitW,
+  );
   const stamp = (t: number) => status.times[String(t)] || "";
   const generatedSolarKwh = status.plan
     ? status.plan.points.reduce(
@@ -90,6 +94,34 @@ function BatteryPlan({
           <span style={hintStyle}>Requested: {status.requestedW} W</span>
         )}
       </div>
+      {first?.dischargeLimitW !== undefined && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "1.5rem",
+            alignItems: "baseline",
+          }}
+        >
+          <strong style={{ ...monoStyle, fontSize: "2rem" }}>
+            {Math.round(first.dischargeLimitW)} W
+          </strong>
+          <span style={hintStyle}>
+            Recommended AC output ceiling{expired ? " (previous plan)" : ""}
+          </span>
+          <span style={hintStyle}>
+            Reported:{" "}
+            {status.reportedDischargeW == null
+              ? "unavailable"
+              : `${status.reportedDischargeW} W`}
+          </span>
+          {status.requestedDischargeW != null && (
+            <span style={hintStyle}>
+              Requested: {status.requestedDischargeW} W
+            </span>
+          )}
+        </div>
+      )}
       <p style={{ ...hintStyle, margin: 0 }}>{status.message}</p>
       {status.checks && (
         <details>
@@ -112,7 +144,7 @@ function BatteryPlan({
         <>
           <p style={hintStyle}>
             {next
-              ? `Next change: ${next.limitW} W at ${stamp(next.start)}.`
+              ? `Next change: charge ${next.limitW} W${next.dischargeLimitW === undefined ? "" : `, AC output ${next.dischargeLimitW} W`} at ${stamp(next.start)}.`
               : "No further limit change within this plan."}{" "}
             {status.calculatedAt !== null &&
               `Calculated ${stamp(status.calculatedAt)}.`}
@@ -143,7 +175,15 @@ function BatteryPlan({
               {view === "charts" && (
                 <>
                   <h3 style={sectionHeadingStyle}>Battery</h3>
-                  {(["power", "soc"] as const).map((kind) => (
+                  {(
+                    [
+                      "power",
+                      ...(first?.dischargeLimitW === undefined
+                        ? []
+                        : ["discharge" as const]),
+                      "soc",
+                    ] as const
+                  ).map((kind) => (
                     <PlanTimeline
                       key={kind}
                       points={status.plan?.points || []}
@@ -215,7 +255,9 @@ function BatteryPlan({
                       <tr>
                         {[
                           "Time",
-                          "Ceiling W",
+                          "Charge ceiling W",
+                          "AC output ceiling W",
+                          "Discharge W",
                           "Charge W",
                           "Forecast solar W",
                           "Generated solar W",
@@ -249,6 +291,8 @@ function BatteryPlan({
                           </td>
                           {[
                             p.limitW,
+                            p.dischargeLimitW ?? null,
+                            p.dischargeW,
                             p.chargeW,
                             p.solarW,
                             p.generatedSolarW ?? p.solarW,
@@ -260,6 +304,8 @@ function BatteryPlan({
                               key={
                                 [
                                   "ceiling",
+                                  "output-ceiling",
+                                  "discharge",
                                   "charge",
                                   "solar",
                                   "generated",
@@ -273,7 +319,7 @@ function BatteryPlan({
                                 borderTop: "1px solid var(--color-border)",
                               }}
                             >
-                              {Math.round(value)}
+                              {value === null ? "Native" : Math.round(value)}
                             </td>
                           ))}
                         </tr>

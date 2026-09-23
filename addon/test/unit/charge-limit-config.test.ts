@@ -37,6 +37,8 @@ describe("charge-limit settings", () => {
   });
   it.each([
     { steered: "on" },
+    { dischargeLimitEntityId: "sensor.power" },
+    { dischargeLimitEntityId: chargeBatteryFixture.chargeLimitEntityId },
     { chargeLimitEntityId: "sensor.power" },
     { chargeLimitEntityId: "" },
     { maxChargePowerW: "" },

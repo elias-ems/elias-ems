@@ -768,27 +768,34 @@ tick currently in flight, since advancing a clock only *starts* one.
   and a retention policy, not the [diagnostics](diagnostics.md) buffer made
   durable.
 
-## Charge planning algorithm selection
+## Optimize charge limits
 
-Battery control exposes **Cost optimized** (default for existing configurations)
-and **Evening target**, independently of whether automatic writes are enabled.
-Both preview and active charge-limit control use the selection. Net zero energy
-control is unaffected.
+**Evening target** is the single production planner for both preview and active
+control. Older stored algorithm selections are ignored and removed on save.
+The previous cost optimizer remains available in the offline gym and Benchmark
+page for comparison.
+
+The planner controls the maximum charging power and, when configured, the
+battery's **Maximum AC output power (W)**. It reserves energy during cheaper
+hours by limiting discharge, then allows more discharge during expensive demand,
+including the morning before solar recovery. The configured native minimum SoC
+(e.g. 5%) remains unchanged. Without an output entity, discharge stays native.
 
 Evening target uses the battery maximum SoC and the next configured hour in Home
 Assistant's timezone (18:00 by default). Missing coverage through that deadline
-leaves planning unavailable; it does not invent prices or silently use another
-algorithm. The solar margin defines a second reduced-solar scenario, applied once.
-The planner preserves the maximum reachable deadline energy when full is impossible,
-reports the reachable SoC in diagnostics, and minimizes scenario cost plus a
-switching preference (0.002 currency units per change by default) and end reserve
-penalty. It is a bounded local search, not a guarantee of global optimality or a
-weather guarantee. Both implementations are also selectable in the offline gym.
+leaves planning unavailable; it does not invent prices or switch algorithms.
+The solar margin defines a second reduced-solar scenario, applied once. The
+planner preserves the maximum reachable deadline energy in both scenarios when
+full is impossible, accounting for both available controls. Reaching the evening
+target takes priority over savings: scarce solar can mean retaining energy even
+during expensive demand. This is a bounded local search, not a guarantee of
+global optimality or morning availability under unexpected consumption.
 
-Evening target also has a daytime spike buffer, default 0.54 kWh above the
-native minimum, capped at usable capacity. Set 0 to disable. It adds a soft
-penalty for missing buffer energy during solar hours before the deadline,
-valued at the import price per hour. This is a reserve preference, not a
-calibrated spike probability or a guarantee of savings. Native discharge is
-unchanged, so the battery can spend the buffer on unexpected demand. On a
+A daytime spike buffer defaults to 0.54 kWh above the native minimum, capped at
+usable capacity. Set 0 to disable. A soft penalty values missing buffer energy
+at the import price per hour during solar hours before the deadline. It is a
+reserve preference, not a hard SoC floor or calibrated spike probability. On a
 3.6 kWh battery with a 5% minimum, the default targets 20% SoC.
+
+See [charge-limit optimization](charge-limit.md) for setup, forecasting and
+restoration of both power limits.

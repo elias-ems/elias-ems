@@ -46,12 +46,12 @@ if (
 )
   throw new Error("Candidate returned an invalid charge schedule");
 // Re-score with the shared simulator; never treat a candidate's claimed cost as truth.
-const score = (limits) => {
+const score = (limits, outputLimits) => {
   let energy = (data.model.capacityKwh * data.model.soc) / 100;
   let cost = 0;
   let switches = 0;
   for (const [i, slot] of data.slots.entries()) {
-    const step = simulateCharge(slot, energy, limits[i], data.model);
+    const step = simulateCharge(slot, energy, limits[i], data.model, false, outputLimits?.[i]);
     energy = step.energy;
     cost += step.cost;
     if (i && limits[i] !== limits[i - 1]) switches++;
@@ -76,7 +76,9 @@ const score = (limits) => {
     switches,
   };
 };
-const optimized = score(plan.points.map((p) => p.limitW));
+const outputLimits = plan.points.some((p) => p.dischargeLimitW !== undefined)
+  ? plan.points.map((p) => p.dischargeLimitW ?? data.model.dischargeW) : undefined;
+const optimized = score(plan.points.map((p) => p.limitW), outputLimits);
 const unrestricted = score(
   plan.points.map(() => deviceLimit(data.model.maxW, data.model)),
 );
@@ -90,6 +92,7 @@ const report = {
       plan.points.map((p) => p.limitW),
       settings,
       haircut,
+      outputLimits,
     );
     return {
       solarHaircut: haircut,

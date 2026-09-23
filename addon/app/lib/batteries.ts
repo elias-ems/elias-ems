@@ -19,6 +19,7 @@ export type BatteryFields = {
   /** Separate from target-power steering; legacy records default to off. */
   chargeLimitMode?: "off" | "preview" | "active";
   chargeLimitEntityId?: string;
+  dischargeLimitEntityId?: string;
   chargeEfficiencyPercent?: number;
   solarMarginPercent?: number;
   chargeWearPerKwh?: number;
@@ -135,6 +136,7 @@ export function normalizeBattery(battery: Battery): Battery {
       ? battery.chargeLimitMode
       : "off",
     chargeLimitEntityId: battery.chargeLimitEntityId?.trim() || "",
+    dischargeLimitEntityId: battery.dischargeLimitEntityId?.trim() || "",
     chargeEfficiencyPercent: toFiniteNumber(
       battery.chargeEfficiencyPercent,
       95,
@@ -275,6 +277,8 @@ export function parseBattery(
   const chargeLimitMode = formData.get("chargeLimitMode")?.toString() || "off";
   const chargeLimitEntityId =
     formData.get("chargeLimitEntityId")?.toString().trim() || "";
+  const dischargeLimitEntityId =
+    formData.get("dischargeLimitEntityId")?.toString().trim() || "";
   const chargeEfficiencyPercent =
     readNumber(formData, "chargeEfficiencyPercent") ??
     (formData.get("chargeEfficiencyPercent") ? NaN : 95);
@@ -289,6 +293,17 @@ export function parseBattery(
   if (chargeLimitEntityId && !/^number\.[a-z0-9_]+$/.test(chargeLimitEntityId))
     errors.chargeLimitEntityId =
       "Choose a number entity controlling maximum charging power in W.";
+  if (dischargeLimitEntityId) {
+    if (!/^number\.[a-z0-9_]+$/.test(dischargeLimitEntityId))
+      errors.dischargeLimitEntityId =
+        "Choose a number entity controlling maximum AC output power in W.";
+    else if (dischargeLimitEntityId === chargeLimitEntityId)
+      errors.dischargeLimitEntityId =
+        "Charge and discharge limits must use different entities.";
+    if (!chargeLimitEntityId)
+      errors.chargeLimitEntityId =
+        "Configure the charge limit alongside the discharge limit.";
+  }
   if (chargeLimitMode !== "off") {
     if (!chargeLimitEntityId)
       errors.chargeLimitEntityId = "Pick the maximum charge limit entity.";
@@ -383,6 +398,7 @@ export function parseBattery(
       steered,
       chargeLimitMode: chargeLimitMode as "off" | "preview" | "active",
       chargeLimitEntityId,
+      dischargeLimitEntityId,
       chargeEfficiencyPercent,
       solarMarginPercent,
       chargeWearPerKwh,

@@ -242,3 +242,121 @@ describe("charge limit execution and recovery", () => {
     );
   });
 });
+
+describe("paired charge and AC output limits", () => {
+  let output: number;
+  beforeEach(async () => {
+    output = 2000;
+    await saveBattery({
+      ...battery,
+      dischargeLimitEntityId: "number.ac_output",
+    });
+    mocks.fetch.mockImplementation(async (id: string) => ({
+      entity_id: id,
+      state: String(id === "number.ac_output" ? output : current),
+      attributes: { min: 0, max: 2000, step: 10, unit_of_measurement: "W" },
+    }));
+    mocks.set.mockImplementation(async (id: string, w: number) => {
+      if (id === "number.ac_output") output = w;
+      else current = w;
+    });
+    const calculate = mocks.calculate.getMockImplementation();
+    mocks.calculate.mockImplementation(async () => {
+      const result = await calculate?.();
+      result.plan.points[0].dischargeLimitW = 100;
+      result.reportedDischargeW = output;
+      return result;
+    });
+  });
+  it("writes, monitors and independently restores both original values", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    expect(current).toBe(400);
+    expect(output).toBe(100);
+    await loop.chargeLimitTick(now + 30_000);
+    expect(
+      (await loop.readChargeLimits()).batteries[0].reportedDischargeW,
+    ).toBe(100);
+    expect(mocks.set).toHaveBeenCalledTimes(2);
+    await loop.releaseChargeLimit(battery.id);
+    expect(current).toBe(2000);
+    expect(output).toBe(2000);
+    expect(
+      JSON.parse(
+        await readFile(
+          path.join(directory, "charge-limit-leases.json"),
+          "utf8",
+        ),
+      ),
+    ).toEqual([]);
+  });
+  it("rolls back the charge cap if the output write fails", async () => {
+    mocks.set.mockImplementation(async (id: string, w: number) => {
+      if (id === "number.ac_output") throw new Error("Output unavailable");
+      current = w;
+    });
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    expect(current).toBe(2000);
+    expect(output).toBe(2000);
+    expect((await loop.readChargeLimits()).batteries[0].state).toBe("error");
+  });
+  it("preserves a manual output edit and releases the charge cap", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    output = 900;
+    await loop.chargeLimitTick(now + 90_000);
+    expect(output).toBe(900);
+    expect(current).toBe(2000);
+    await loop.chargeLimitTick(now + 300_000);
+    expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
+    expect(output).toBe(900);
+    await loop.releaseChargeLimit(battery.id);
+    expect(output).toBe(900);
+  });
+  it("recovers both limits after restart", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    vi.resetModules();
+    await writeFile(
+      path.join(directory, "control.json"),
+      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
+    );
+    const restarted = await import("../../app/lib/charge-limit-loop.server");
+    await restarted.chargeLimitTick(now + 30_000);
+    expect(current).toBe(2000);
+    expect(output).toBe(2000);
+  });
+  it("restores output even if charge restoration fails, then retries charge", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    const fetch = mocks.fetch.getMockImplementation();
+    if (!fetch) throw new Error("Missing HA fetch mock");
+    mocks.fetch.mockImplementation(async (id: string) =>
+      id === "number.charge_limit" ? null : fetch?.(id),
+    );
+    await expect(loop.releaseChargeLimit(battery.id)).rejects.toThrow(
+      "unavailable",
+    );
+    expect(output).toBe(2000);
+    expect(current).toBe(400);
+    const records = JSON.parse(
+      await readFile(path.join(directory, "charge-limit-leases.json"), "utf8"),
+    );
+    expect(records).toHaveLength(1);
+    expect(records[0].entityId).toBe("number.charge_limit");
+    expect(records[0].restoring).toBe(true);
+    mocks.fetch.mockImplementation(fetch);
+    await loop.releaseChargeLimit(battery.id);
+    expect(current).toBe(2000);
+  });
+  it("never writes either limit in preview", async () => {
+    await writeFile(
+      path.join(directory, "control.json"),
+      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
+    );
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    expect(mocks.set).not.toHaveBeenCalled();
+  });
+});

@@ -47,6 +47,7 @@ const postedBattery = {
 const storedBattery = {
   chargeLimitMode: "off" as const,
   chargeLimitEntityId: "",
+  dischargeLimitEntityId: "",
   chargeEfficiencyPercent: 95,
   solarMarginPercent: 20,
   chargeWearPerKwh: 0,

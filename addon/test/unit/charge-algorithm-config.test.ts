@@ -5,7 +5,7 @@ import {
 } from "../../app/lib/control";
 
 describe("charge algorithm settings", () => {
-  it("round trips both algorithms with evening settings", () => {
+  it("ignores retired algorithm choices and round trips evening settings", () => {
     for (const algorithm of ["cost-optimized", "evening-target"]) {
       const form = new FormData();
       Object.entries({
@@ -22,7 +22,6 @@ describe("charge algorithm settings", () => {
       expect(result.ok).toBe(true);
       if (result.ok)
         expect(normalizeControlConfig(result.config)).toMatchObject({
-          chargeAlgorithm: algorithm,
           eveningHour: 19,
           ceilingSwitchCost: 0.003,
           spikeBufferKwh: 0.54,
@@ -31,9 +30,13 @@ describe("charge algorithm settings", () => {
       expect(parseControlConfig(form).ok).toBe(false);
     }
   });
-  it("does not opt existing configurations into evening planning", () => {
-    expect(
-      normalizeControlConfig({ strategy: "charge-limit" }).chargeAlgorithm,
-    ).not.toBe("evening-target");
+  it("drops the retired selector from saved configuration", () => {
+    const legacy = {
+      strategy: "charge-limit" as const,
+      chargeAlgorithm: "cost-optimized",
+    };
+    expect(normalizeControlConfig(legacy)).not.toHaveProperty(
+      "chargeAlgorithm",
+    );
   });
 });

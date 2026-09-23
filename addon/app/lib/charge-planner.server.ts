@@ -1,10 +1,6 @@
 import type { Battery } from "./batteries";
 import { evening } from "./charge-evening";
-import {
-  type ChargeInterval,
-  type ChargeModel,
-  optimizeCharge,
-} from "./charge-plan";
+import type { ChargeInterval, ChargeModel } from "./charge-plan";
 import { readControlConfig } from "./control-config.server";
 import { readCurtailmentConfig } from "./curtailment-config.server";
 import { localHour } from "./energy-forecast";
@@ -26,6 +22,7 @@ export function chargeModel(
   battery: Battery,
   state: HaState | null | undefined,
   soc: number | null,
+  dischargeState?: HaState | null,
 ): ChargeModel {
   const a = state?.attributes;
   const min = a?.min;
@@ -60,6 +57,37 @@ export function chargeModel(
     throw new Error(
       "The hardware charge ceiling is below the entity's minimum.",
     );
+  let dischargeRange = {};
+  if (battery.dischargeLimitEntityId) {
+    const d = dischargeState?.attributes;
+    if (
+      battery.dischargeLimitEntityId === battery.chargeLimitEntityId ||
+      dischargeState?.entity_id !== battery.dischargeLimitEntityId ||
+      !dischargeState?.entity_id.startsWith("number.") ||
+      d?.unit_of_measurement !== "W" ||
+      typeof d.min !== "number" ||
+      typeof d.max !== "number" ||
+      typeof d.step !== "number" ||
+      ![d.min, d.max, d.step].every(Number.isFinite) ||
+      d.min < 0 ||
+      d.max <= d.min ||
+      d.step <= 0 ||
+      numericState(dischargeState) === null
+    )
+      throw new Error(
+        "The maximum AC output limit must be a distinct available number entity in W with valid min, max and step attributes.",
+      );
+    const maxOutput = Math.min(d.max, battery.maxDischargePowerW);
+    if (maxOutput < d.min)
+      throw new Error(
+        "The hardware discharge ceiling is below the entity's minimum.",
+      );
+    dischargeRange = {
+      dischargeW: maxOutput,
+      dischargeMinW: d.min,
+      dischargeStepW: d.step,
+    };
+  }
   return {
     capacityKwh: battery.capacityKwh,
     minSoc: battery.minChargePercent,
@@ -69,6 +97,7 @@ export function chargeModel(
     maxW,
     stepW: step,
     dischargeW: battery.maxDischargePowerW,
+    ...dischargeRange,
     efficiency: (battery.chargeEfficiencyPercent ?? 95) / 100,
     wearPerKwh: battery.chargeWearPerKwh ?? 0,
   };
@@ -108,19 +137,24 @@ export async function calculateChargePlan(
     ),
     checked(
       "battery",
-      readStates([battery.socEntityId, battery.chargeLimitEntityId || ""]).then(
-        (readings) => {
-          const soc = readings.states.get(battery.socEntityId)?.state;
-          if (soc?.attributes?.unit_of_measurement !== "%")
-            throw new Error("The SoC entity must report percent.");
-          chargeModel(
-            battery,
-            readings.states.get(battery.chargeLimitEntityId || "")?.state,
-            numericState(soc),
-          );
-          return readings;
-        },
-      ),
+      readStates([
+        battery.socEntityId,
+        battery.chargeLimitEntityId || "",
+        ...(battery.dischargeLimitEntityId
+          ? [battery.dischargeLimitEntityId]
+          : []),
+      ]).then((readings) => {
+        const soc = readings.states.get(battery.socEntityId)?.state;
+        if (soc?.attributes?.unit_of_measurement !== "%")
+          throw new Error("The SoC entity must report percent.");
+        chargeModel(
+          battery,
+          readings.states.get(battery.chargeLimitEntityId || "")?.state,
+          numericState(soc),
+          readings.states.get(battery.dischargeLimitEntityId || "")?.state,
+        );
+        return readings;
+      }),
     ),
   ] as const);
   const [e, p, r] = results;
@@ -132,7 +166,15 @@ export async function calculateChargePlan(
   const socState = readings.states.get(battery.socEntityId)?.state;
   if (socState?.attributes?.unit_of_measurement !== "%")
     throw new Error("The SoC entity must report percent.");
-  const model = chargeModel(battery, state, numericState(socState));
+  const dischargeState = readings.states.get(
+    battery.dischargeLimitEntityId || "",
+  )?.state;
+  const model = chargeModel(
+    battery,
+    state,
+    numericState(socState),
+    dischargeState,
+  );
   const [curtailment, arrays] = await Promise.all([
     readCurtailmentConfig(),
     listPvEntities(),
@@ -195,13 +237,7 @@ export async function calculateChargePlan(
   const margin = battery.solarMarginPercent ?? 20;
   if (!Number.isFinite(margin) || margin < 0 || margin > 80)
     throw new Error("Invalid solar forecast margin.");
-  const solar = new Map(
-    energy.solar.map((s) => [
-      s.start,
-      s.wh *
-        (control.chargeAlgorithm === "evening-target" ? 1 : 1 - margin / 100),
-    ]),
-  );
+  const solar = new Map(energy.solar.map((s) => [s.start, s.wh]));
   const priced = prices.read.forecast.slots.map((s) => ({
     ...priceSlot(s, parsePriceFormulas(prices.config)),
     start: Date.parse(s.start),
@@ -233,10 +269,7 @@ export async function calculateChargePlan(
         (source) => source.energyEntityId === array?.energyEntityId,
       );
       const wh = source?.hours.find((item) => item.start === hour)?.wh ?? 0;
-      return (
-        wh *
-        (control.chargeAlgorithm === "evening-target" ? 1 : 1 - margin / 100)
-      );
+      return wh;
     };
     const above = p.productionPerKwh - curtailment.priceThresholdPerKwh;
     if (above >= 0) initialEpisode = false;
@@ -370,48 +403,40 @@ export async function calculateChargePlan(
   // terminal value rather than treating the end of the forecast as free energy.
   if (!reserveCovered)
     reserve = (model.capacityKwh * (model.maxSoc - model.minSoc)) / 100;
-  let plan:
-    | Awaited<ReturnType<typeof optimizeCharge>>
-    | Awaited<ReturnType<typeof evening>>;
-  if (control.chargeAlgorithm === "evening-target") {
-    const hour = control.eveningHour ?? 18;
-    const switchCost = control.ceilingSwitchCost ?? 0.002;
-    if (!Number.isInteger(hour) || hour < 0 || hour > 23)
-      throw new Error("Invalid evening deadline hour.");
-    // Search real instants, rather than adding 24h, to respect HA timezone/DST.
-    const deadlineSlot = slots.find(
-      (s) =>
-        new Intl.DateTimeFormat("en-GB", {
-          timeZone: energy.profile.timeZone,
-          hour: "2-digit",
-          minute: "2-digit",
-          hourCycle: "h23",
-        }).format(s.end) === `${String(hour).padStart(2, "0")}:00`,
+  const hour = control.eveningHour ?? 18;
+  const switchCost = control.ceilingSwitchCost ?? 0.002;
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23)
+    throw new Error("Invalid evening deadline hour.");
+  // Search real instants, rather than adding 24h, to respect HA timezone/DST.
+  const deadlineSlot = slots.find(
+    (s) =>
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: energy.profile.timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).format(s.end) === `${String(hour).padStart(2, "0")}:00`,
+  );
+  if (!deadlineSlot)
+    throw new Error(
+      "Waiting for solar and price coverage through the next evening deadline.",
     );
-    if (!deadlineSlot)
-      throw new Error(
-        "Waiting for solar and price coverage through the next evening deadline.",
-      );
-    const eveningPlan = await evening(
-      { slots, model, terminalReserveKwh: reserve },
-      {
-        deadline: new Date(deadlineSlot.end).toISOString(),
-        targetSoc: model.maxSoc,
-        solarHaircut: margin / 100,
-        switchCost,
-        spikeBufferKwh: control.spikeBufferKwh ?? 0.54,
-        passes: 4,
-      },
-    );
-    plan = eveningPlan;
-    report(
-      "algorithm",
-      `Evening target: ${model.maxSoc}% by ${hour}:00; reachable nominal/reduced-solar SoC ${eveningPlan.target.reachableSoc.map((s) => s.toFixed(1)).join(" / ")}%`,
-    );
-  } else {
-    plan = await optimizeCharge(slots, model, reserve);
-    report("algorithm", "Cost optimized");
-  }
+  const eveningPlan = await evening(
+    { slots, model, terminalReserveKwh: reserve },
+    {
+      deadline: new Date(deadlineSlot.end).toISOString(),
+      targetSoc: model.maxSoc,
+      solarHaircut: margin / 100,
+      switchCost,
+      spikeBufferKwh: control.spikeBufferKwh ?? 0.54,
+      passes: 4,
+    },
+  );
+  const plan = eveningPlan;
+  report(
+    "algorithm",
+    `Evening target: ${model.maxSoc}% by ${hour}:00; reachable nominal/reduced-solar SoC ${eveningPlan.target.reachableSoc.map((s) => s.toFixed(1)).join(" / ")}%`,
+  );
   return {
     controlBlocker,
     planningNote,
@@ -419,6 +444,7 @@ export async function calculateChargePlan(
     plan,
     model,
     reportedW: numericState(state),
+    reportedDischargeW: numericState(dischargeState),
     currency: prices.read.forecast.currency,
     forecastEnd: energy.forecastEnd,
     sources: energy.sources.length,

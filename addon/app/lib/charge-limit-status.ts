@@ -10,6 +10,8 @@ export type ChargeLimitStatus = {
   validUntil: number | null;
   reportedW: number | null;
   requestedW: number | null;
+  reportedDischargeW?: number | null;
+  requestedDischargeW?: number | null;
   plan: ChargePlan | null;
   currency: string;
   timeZone: string;
