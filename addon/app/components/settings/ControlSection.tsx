@@ -139,29 +139,17 @@ export default function ControlSection({
           <legend>Automatic charge-limit preview</legend>
           <p style={hintStyle}>
             Calculated on Home whenever a battery has a charge limit entity.
-            Only the enabled Optimize charge limit strategy can apply it; the
+            Only the enabled Optimize charge limits strategy can apply it; the
             battery must remain in native self-consumption. Plans and writes
             update at most every five minutes.
           </p>
           {errors.enabled && <p style={errorStyle}>{errors.enabled}</p>}
           {errors.planning && <p style={errorStyle}>{errors.planning}</p>}
-          <label style={labelStyle}>
-            Planning algorithm
-            <select
-              name="chargeAlgorithm"
-              defaultValue={config.chargeAlgorithm ?? "cost-optimized"}
-              style={inputStyle()}
-            >
-              <option value="cost-optimized">Cost optimized</option>
-              <option value="evening-target">Evening target</option>
-            </select>
-          </label>
           <p style={hintStyle}>
-            Cost optimized minimizes cost with an end reserve penalty. Evening
-            target aims for the battery’s configured maximum SoC by the next
-            deadline, allowing for reduced solar and preferring fewer ceiling
-            changes. This selection also applies to the preview while control is
-            disabled.
+            Evening target aims for the configured maximum charge by the next
+            deadline, allowing for reduced solar. With an AC output limit
+            configured, it also saves energy during cheaper hours for
+            higher-priced demand.
           </p>
           <Field
             name="eveningHour"
@@ -180,7 +168,7 @@ export default function ControlSection({
             min={0}
             step="any"
             defaultValue={config.spikeBufferKwh ?? 0.54}
-            hint="Extra stored energy above the native minimum, capped at usable capacity. 0.54 kWh means a 20% target on a 3.6 kWh battery with a 5% minimum. A soft charging preference, not a discharge restriction. Set 0 to disable."
+            hint="Extra stored energy above the native minimum, capped at usable capacity. 0.54 kWh means a 20% target on a 3.6 kWh battery with a 5% minimum. A soft reserve preference, not a hard SoC floor. Set 0 to disable."
           />
           <Field
             name="ceilingSwitchCost"

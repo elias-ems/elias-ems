@@ -86,7 +86,7 @@ async function saveLeases(value: Lease[]) {
 async function restore(lease: Lease) {
   lease.restoring = true;
   await saveLeases(
-    (await leases()).map((l) => (l.batteryId === lease.batteryId ? lease : l)),
+    (await leases()).map((l) => (l.entityId === lease.entityId ? lease : l)),
   );
   const state = await fetchHaState(lease.entityId);
   const current = numericState(state);
@@ -118,16 +118,28 @@ async function restore(lease: Lease) {
     }
   }
   await saveLeases(
-    (await leases()).filter((l) => l.batteryId !== lease.batteryId),
+    (await leases()).filter((l) => l.entityId !== lease.entityId),
   );
 }
 
 /** Called inside the lock, before updating/removing a battery. */
 export async function releaseChargeLimit(batteryId: string) {
-  const lease = (await leases()).find((l) => l.batteryId === batteryId);
-  if (lease) await restore(lease);
+  await restoreAll((await leases()).filter((l) => l.batteryId === batteryId));
   statuses.delete(batteryId);
   nextPlan = 0;
+}
+
+/** A failed direction must not prevent recovery of the other direction. */
+async function restoreAll(records: Lease[]) {
+  const errors: string[] = [];
+  for (const lease of records) {
+    try {
+      await restore(lease);
+    } catch (error) {
+      errors.push(messageOf(error));
+    }
+  }
+  if (errors.length) throw new Error(errors.join(" "));
 }
 
 function empty(b: Battery): ChargeLimitStatus {
@@ -141,6 +153,8 @@ function empty(b: Battery): ChargeLimitStatus {
     validUntil: null,
     reportedW: null,
     requestedW: null,
+    reportedDischargeW: null,
+    requestedDischargeW: null,
     plan: null,
     currency: "EUR",
     timeZone: "UTC",
@@ -167,13 +181,20 @@ export async function readChargeLimits(): Promise<ChargeLimitsData> {
   };
 }
 
-async function apply(b: Battery, desiredW: number, now: number) {
+async function apply(
+  b: Battery,
+  entityId: string,
+  desiredW: number,
+  now: number,
+) {
   const all = await leases();
-  let lease = all.find((l) => l.batteryId === b.id);
-  const entity = await fetchHaState(b.chargeLimitEntityId || "");
+  let lease = all.find((l) => l.entityId === entityId);
+  const entity = await fetchHaState(entityId);
   const current = numericState(entity);
   const a = entity?.attributes;
   if (
+    entity?.entity_id !== entityId ||
+    !Number.isFinite(desiredW) ||
     a?.unit_of_measurement !== "W" ||
     typeof a.min !== "number" ||
     typeof a.max !== "number" ||
@@ -187,11 +208,11 @@ async function apply(b: Battery, desiredW: number, now: number) {
     ) > 1e-6
   ) {
     throw new Error(
-      "Charge-limit unit or range changed while calculating the plan.",
+      `Power-limit unit or range changed for ${entityId} while calculating the plan.`,
     );
   }
   if (current === null)
-    throw new Error("Charge-limit readback is unavailable.");
+    throw new Error(`Power-limit readback is unavailable for ${entityId}.`);
   if (lease?.paused)
     throw new Error(
       "Charge-limit control paused after an external change. Save the battery settings to resume.",
@@ -200,7 +221,7 @@ async function apply(b: Battery, desiredW: number, now: number) {
     lease.paused = true;
     await saveLeases(all);
     throw new Error(
-      "The charge limit changed externally or was not accepted. Control is paused; save battery settings to resume.",
+      `The power limit ${entityId} changed externally or was not accepted. Control is paused; save battery settings to resume.`,
     );
   }
   if (close(current, desiredW))
@@ -216,7 +237,7 @@ async function apply(b: Battery, desiredW: number, now: number) {
   if (!lease) {
     lease = {
       batteryId: b.id,
-      entityId: b.chargeLimitEntityId || "",
+      entityId,
       originalW: current,
       previousW: current,
       requestedW: desiredW,
@@ -239,6 +260,7 @@ export async function chargeLimitTick(now = Date.now()) {
   const active = control.enabled && control.strategy === "charge-limit";
   const batteries = await listBatteries();
   const enabled = batteries.filter((b) => Boolean(b.chargeLimitEntityId));
+  const recover: Lease[] = [];
   for (const lease of await leases()) {
     const battery = batteries.find((b) => b.id === lease.batteryId);
     if (
@@ -246,38 +268,50 @@ export async function chargeLimitTick(now = Date.now()) {
       lease.restoring ||
       !battery ||
       !active ||
-      battery.chargeLimitEntityId !== lease.entityId
+      ![battery.chargeLimitEntityId, battery.dischargeLimitEntityId].includes(
+        lease.entityId,
+      )
     )
-      await restore(lease);
+      recover.push(lease);
   }
+  await restoreAll(recover);
   recovered = true;
   if (!enabled.length) return;
   if (now < nextPlan) {
     for (const b of enabled) {
       const status = statuses.get(b.id);
       if (!status) continue;
-      status.reportedW = numericState(
-        await fetchHaState(b.chargeLimitEntityId || ""),
-      );
-      if (status.reportedW === null)
-        throw new Error(
-          "Charge-limit readback is unavailable; restoring the previous limit when reachable.",
-        );
-      const lease = (await leases()).find((l) => l.batteryId === b.id);
-      if (
-        lease &&
-        !lease.paused &&
-        now - lease.at > 60_000 &&
-        !close(status.reportedW, lease.requestedW)
-      ) {
-        lease.paused = true;
-        await saveLeases(
-          (await leases()).map((l) => (l.batteryId === b.id ? lease : l)),
-        );
-        status.state = "error";
-        status.message =
-          "Charge limit was changed externally or not accepted. Save battery settings to resume.";
-        status.validUntil = null;
+      for (const [entityId, field] of [
+        [b.chargeLimitEntityId, "reportedW"],
+        [b.dischargeLimitEntityId, "reportedDischargeW"],
+      ] as const) {
+        if (!entityId) continue;
+        const reported = numericState(await fetchHaState(entityId));
+        status[field] = reported;
+        if (reported === null)
+          throw new Error(
+            "Power-limit readback is unavailable; restoring previous limits when reachable.",
+          );
+        const all = await leases();
+        const lease = all.find((l) => l.entityId === entityId);
+        if (
+          lease &&
+          !lease.paused &&
+          now - lease.at > 60_000 &&
+          !close(reported, lease.requestedW)
+        ) {
+          lease.paused = true;
+          await saveLeases(all);
+          status.state = "error";
+          status.message =
+            "A power limit was changed externally or not accepted. Save battery settings to resume.";
+          status.validUntil = null;
+          // Stop controlling the other direction too, preserving the user's edit.
+          for (const other of (await leases()).filter(
+            (l) => l.batteryId === b.id && !l.paused,
+          ))
+            await restore(other);
+        }
       }
     }
     return;
@@ -290,6 +324,10 @@ export async function chargeLimitTick(now = Date.now()) {
       status.reportedW = numericState(
         await fetchHaState(b.chargeLimitEntityId || ""),
       );
+      if (b.dischargeLimitEntityId)
+        status.reportedDischargeW = numericState(
+          await fetchHaState(b.dischargeLimitEntityId),
+        );
       // Independent single-battery plans would allocate the same solar twice.
       if (batteries.length !== 1)
         throw new Error(
@@ -301,7 +339,7 @@ export async function chargeLimitTick(now = Date.now()) {
           "Hypothetical preview: assumes native self-consumption while another battery strategy is active.",
         b.steered &&
           "Turn off target-power steering for this battery before activating charge-limit control.",
-        (await leases()).find((l) => l.batteryId === b.id)?.paused &&
+        (await leases()).some((l) => l.batteryId === b.id && l.paused) &&
           "Control is paused after an external change. Save battery settings to resume.",
       ]
         .filter(Boolean)
@@ -319,6 +357,7 @@ export async function chargeLimitTick(now = Date.now()) {
         calculatedAt: now,
         validUntil: Math.min(now + PLAN_MS, current.end),
         reportedW: result.reportedW,
+        reportedDischargeW: result.reportedDischargeW ?? null,
         currency: result.currency,
         timeZone: result.timeZone,
         forecastEnd: result.forecastEnd,
@@ -350,8 +389,10 @@ export async function chargeLimitTick(now = Date.now()) {
         ].map((t) => [String(t), formatter.format(t)]),
       );
       if (!mayWrite) {
-        const lease = (await leases()).find((l) => l.batteryId === b.id);
-        if (lease && !lease.paused) await restore(lease);
+        for (const lease of (await leases()).filter(
+          (l) => l.batteryId === b.id && !l.paused,
+        ))
+          await restore(lease);
       }
       if (mayWrite) {
         // Do not publish a plan whose current interval ended while inputs were read.
@@ -359,9 +400,29 @@ export async function chargeLimitTick(now = Date.now()) {
           throw new Error(
             "Plan expired during calculation; waiting for the next update.",
           );
-        const applied = await apply(b, current.limitW, Date.now());
+        const applied = await apply(
+          b,
+          b.chargeLimitEntityId || "",
+          current.limitW,
+          Date.now(),
+        );
         status.reportedW = applied.reportedW;
         status.requestedW = applied.requestedW;
+        if (b.dischargeLimitEntityId) {
+          if (current.dischargeLimitW === undefined)
+            throw new Error(
+              "The plan has no AC output limit; restoring previous limits.",
+            );
+          const output = await apply(
+            b,
+            b.dischargeLimitEntityId,
+            current.dischargeLimitW,
+            Date.now(),
+          );
+          status.reportedDischargeW = output.reportedW;
+          status.requestedDischargeW = output.requestedW;
+          applied.throttled ||= output.throttled;
+        }
         status.message += applied.throttled
           ? " Holding the previous limit until the five-minute write interval has elapsed."
           : " Readback is checked every 30 seconds.";
@@ -371,17 +432,18 @@ export async function chargeLimitTick(now = Date.now()) {
       appendDiagnostic(
         "charge-limit",
         "info",
-        `${b.title}: ${status.mode}, maximum charge ${current.limitW} W. ${status.message}`,
+        `${b.title}: ${status.mode}, maximum charge ${current.limitW} W${current.dischargeLimitW === undefined ? "" : `, maximum AC output ${current.dischargeLimitW} W`}. ${status.message}`,
       );
     } catch (error) {
       status.state = "error";
       status.message = messageOf(error);
       status.validUntil = null;
-      const lease = (await leases()).find((l) => l.batteryId === b.id);
-      if (lease && !lease.paused) {
+      for (const lease of (await leases()).filter(
+        (l) => l.batteryId === b.id && !l.paused,
+      )) {
         try {
           await restore(lease);
-          status.message += " Previous charge limit restored.";
+          status.message += " Previous power limit restored.";
         } catch (failure) {
           status.message += ` ${messageOf(failure)} Restoration will be retried.`;
         }
@@ -406,8 +468,7 @@ export function startChargeLimitLoop() {
       appendDiagnostic("charge-limit", "error", messageOf(error));
       await withChargeLimitLock(async () => {
         try {
-          for (const lease of await leases())
-            if (!lease.paused) await restore(lease);
+          await restoreAll((await leases()).filter((lease) => !lease.paused));
         } catch (failure) {
           appendDiagnostic(
             "charge-limit",

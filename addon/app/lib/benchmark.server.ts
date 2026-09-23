@@ -39,7 +39,17 @@ async function run(input: ReturnType<typeof benchmarkDataset>["input"]) {
       label: algorithm.label,
       elapsedMs,
       scenarios: [0, settings.solarHaircut].map((solarHaircut) => {
-        const metrics = replay(input, limits, settings, solarHaircut);
+        const metrics = replay(
+          input,
+          limits,
+          settings,
+          solarHaircut,
+          plan.points.some((p) => p.dischargeLimitW !== undefined)
+            ? plan.points.map(
+                (p) => p.dischargeLimitW ?? input.model.dischargeW,
+              )
+            : undefined,
+        );
         return {
           ...metrics,
           solarHaircut,

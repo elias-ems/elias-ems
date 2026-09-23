@@ -1,4 +1,4 @@
-/** Pure model: only the charge ceiling is controllable. Discharge follows load. */
+/** Pure model: power ceilings bound native self-consumption in both directions. */
 export type ChargeInterval = {
   start: number;
   end: number;
@@ -44,6 +44,9 @@ export type ChargeModel = {
   maxW: number;
   stepW: number;
   dischargeW: number;
+  /** Optional controllable AC output range; absent means native discharge. */
+  dischargeMinW?: number;
+  dischargeStepW?: number;
   efficiency: number;
   wearPerKwh: number;
 };
@@ -51,6 +54,7 @@ export type ChargePlanPoint = ChargeInterval & {
   generatedSolarW?: number;
   curtailedW?: number;
   limitW: number;
+  dischargeLimitW?: number;
   chargeW: number;
   dischargeW: number;
   soc: number;
@@ -84,6 +88,7 @@ export function simulateCharge(
   limitW: number,
   m: ChargeModel,
   stepped = false,
+  dischargeLimitW = m.dischargeW,
 ) {
   const hours = (slot.end - slot.start) / 3_600_000;
   const floor = (m.capacityKwh * m.minSoc) / 100;
@@ -159,7 +164,7 @@ export function simulateCharge(
     0,
     Math.min(
       -surplus,
-      (m.dischargeW * hours) / 1000,
+      (Math.min(m.dischargeW, Math.max(0, dischargeLimitW)) * hours) / 1000,
       (energy - floor) * m.efficiency,
     ),
   );

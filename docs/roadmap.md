@@ -4,6 +4,11 @@
 
 ## V1 (current)
 
+- Optimize charge limits — Evening target is the single production planner.
+  Optional maximum AC output control reserves battery energy during cheaper
+  hours for higher-priced demand; both power limits have readback and restoration.
+  See [charge-limit optimization](features/charge-limit.md).
+
 - Battery control (net-zero energy strategy) — deciding, acting and logging
   done, see [features/battery-control.md](features/battery-control.md). Each
   target goes out as an `elias_ems_<battery>_target_power` event for an automation

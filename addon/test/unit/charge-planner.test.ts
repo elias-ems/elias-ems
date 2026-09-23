@@ -177,13 +177,13 @@ describe("forecast planning through Home Assistant", () => {
   });
 });
 
-it("selects the shared evening algorithm using the HA timezone and battery target", {
+it("uses evening planning even for a retired cost-optimized selection", {
   timeout: 15_000,
 }, async () => {
   configMocks.control.mockResolvedValue({
     enabled: false,
     strategy: "charge-limit",
-    chargeAlgorithm: "evening-target",
+    chargeAlgorithm: "cost-optimized",
     eveningHour: 18,
     solarMarginPercent: 20,
   });
@@ -241,4 +241,41 @@ it("keeps ordinary curtailment planning available with an unpredictable EV overr
   expect(
     (await calculateChargePlan(chargeBatteryFixture as Battery)).controlBlocker,
   ).toContain("No PV entity matches");
+});
+
+it("validates the AC output entity and caps its range at the hardware limit", async () => {
+  const { chargeModel } = await import("../../app/lib/charge-planner.server");
+  const battery = {
+    ...chargeBatteryFixture,
+    dischargeLimitEntityId: "number.ac_output",
+  } as Battery;
+  const output = {
+    ...chargeEntityFixture,
+    entity_id: "number.ac_output",
+    attributes: {
+      ...chargeEntityFixture.attributes,
+      min: 50,
+      max: 3000,
+      step: 50,
+    },
+  };
+  expect(chargeModel(battery, chargeEntityFixture, 60, output)).toMatchObject({
+    dischargeW: 2000,
+    dischargeMinW: 50,
+    dischargeStepW: 50,
+  });
+  for (const invalid of [
+    undefined,
+    { ...output, state: "unavailable" },
+    {
+      ...output,
+      attributes: { ...output.attributes, unit_of_measurement: "%" },
+    },
+    { ...output, attributes: { ...output.attributes, step: 0 } },
+    { ...output, attributes: { ...output.attributes, min: 2500 } },
+  ]) {
+    expect(() =>
+      chargeModel(battery, chargeEntityFixture, 60, invalid),
+    ).toThrow();
+  }
 });

@@ -13,7 +13,6 @@ export type ControlConfig = {
   strategy: StrategyId;
   /** How often the loop reconsiders, in seconds. */
   intervalSeconds: number;
-  chargeAlgorithm?: "cost-optimized" | "evening-target";
   eveningHour?: number;
   ceilingSwitchCost?: number;
   spikeBufferKwh?: number;
@@ -33,9 +32,9 @@ export const STRATEGIES: Array<{
 }> = [
   {
     id: "charge-limit",
-    label: "Optimize charge limit",
+    label: "Optimize charge limits",
     description:
-      "Plan automatically with solar forecasts and prices. When enabled, adjust only the maximum charging limit while the battery stays in native self-consumption.",
+      "Plan automatically with solar forecasts and prices. When enabled, adjust maximum charging and optional AC output power limits while the battery stays in native self-consumption.",
   },
   {
     id: "net-zero-energy",
@@ -81,14 +80,6 @@ export function normalizeControlConfig(
       : {}),
     ...(stored?.chargeWearPerKwh !== undefined
       ? { chargeWearPerKwh: Number(stored.chargeWearPerKwh) }
-      : {}),
-    ...(stored?.chargeAlgorithm !== undefined
-      ? {
-          chargeAlgorithm:
-            stored.chargeAlgorithm === "evening-target"
-              ? ("evening-target" as const)
-              : ("cost-optimized" as const),
-        }
       : {}),
     ...(stored?.eveningHour !== undefined
       ? { eveningHour: stored.eveningHour }
@@ -152,15 +143,6 @@ export function parseControlConfig(
 
   const strategy = formData.get("strategy")?.toString();
   const planning: Partial<ControlConfig> = {};
-  const algorithm = formData.get("chargeAlgorithm")?.toString();
-  if (algorithm !== undefined) {
-    if (algorithm !== "cost-optimized" && algorithm !== "evening-target")
-      return {
-        ok: false,
-        errors: { planning: "Choose a valid charge planning algorithm." },
-      };
-    planning.chargeAlgorithm = algorithm;
-  }
   for (const key of [
     "eveningHour",
     "ceilingSwitchCost",

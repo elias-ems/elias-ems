@@ -21,7 +21,13 @@ for (const modeled of [false, true]) {
     try {
       await writeFile(
         path.join(directory, "batteries.json"),
-        JSON.stringify([{ ...chargeBatteryFixture, chargeLimitMode: "off" }]),
+        JSON.stringify([
+          {
+            ...chargeBatteryFixture,
+            chargeLimitMode: "off",
+            dischargeLimitEntityId: "number.ac_output",
+          },
+        ]),
       );
       await writeFile(
         path.join(directory, "curtailment.json"),
@@ -59,7 +65,18 @@ for (const modeled of [false, true]) {
       );
       stack = await startStack({
         dataDir: directory,
-        haStates: [...(await defaultStates()), chargeEntityFixture],
+        haStates: [
+          ...(await defaultStates()),
+          chargeEntityFixture,
+          {
+            ...chargeEntityFixture,
+            entity_id: "number.ac_output",
+            attributes: {
+              ...chargeEntityFixture.attributes,
+              friendly_name: "Battery maximum AC output",
+            },
+          },
+        ],
         haCommandResults: chargeForecastFixture(),
       });
       const errors: string[] = [];
@@ -88,6 +105,11 @@ for (const modeled of [false, true]) {
       await expect(
         page.getByRole("img", {
           name: "Charge ceiling and Expected charging over time, W",
+        }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("img", {
+          name: "AC output ceiling and Expected discharging over time, W",
         }),
       ).toBeVisible();
       await expect(page.getByRole("heading", { name: "PV" })).toBeVisible();
@@ -163,10 +185,13 @@ for (const modeled of [false, true]) {
       );
       await expect(
         page.getByRole("option", {
-          name: "Optimize charge limit",
+          name: "Optimize charge limits",
           exact: true,
         }),
       ).toHaveCount(1);
+      await expect(page.locator('select[name="chargeAlgorithm"]')).toHaveCount(
+        0,
+      );
       await expect(
         page.getByLabel("Physical grid import counters", { exact: true }),
       ).toHaveCount(0);
@@ -181,6 +206,11 @@ for (const modeled of [false, true]) {
       const entity = page.getByLabel("Maximum charge limit (W)", {
         exact: true,
       });
+      await expect(
+        page.getByLabel("Maximum AC output power (W) — optional", {
+          exact: true,
+        }),
+      ).toHaveValue("number.ac_output");
       await entity.fill("Battery maximum charge");
       await expect(
         page.getByRole("option", { name: /Battery maximum charge limit/ }),
