@@ -9,6 +9,12 @@ import {
 } from "../charge-forecast-fixture.js";
 import { defaultStates, startHaMock } from "../ha-mock.js";
 
+// These tests exercise real HA requests and the full evening search (sometimes
+// twice). Its horizon depends on the fixture's current time, and a shared CI
+// runner can exceed Vitest's five-second default. Keep this allowance local to
+// the planner plumbing tests; all behavioral assertions remain unchanged.
+vi.setConfig({ testTimeout: 30_000 });
+
 const configMocks = vi.hoisted(() => ({
   control: vi.fn(),
   curtailment: vi.fn(),
@@ -177,9 +183,7 @@ describe("forecast planning through Home Assistant", () => {
   });
 });
 
-it("uses evening planning even for a retired cost-optimized selection", {
-  timeout: 15_000,
-}, async () => {
+it("uses evening planning even for a retired cost-optimized selection", async () => {
   configMocks.control.mockResolvedValue({
     enabled: false,
     strategy: "charge-limit",
