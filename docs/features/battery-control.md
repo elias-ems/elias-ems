@@ -793,9 +793,13 @@ global optimality or morning availability under unexpected consumption.
 
 A daytime spike buffer defaults to 0.54 kWh above the native minimum, capped at
 usable capacity. Set 0 to disable. A soft penalty values missing buffer energy
-at the import price per hour during solar hours before the deadline. It is a
-reserve preference, not a hard SoC floor or calibrated spike probability. On a
-3.6 kWh battery with a 5% minimum, the default targets 20% SoC.
+at the import price per hour during solar hours before the deadline. This is a
+preference for earlier charging, evaluated with unrestricted native discharge:
+withholding output cannot improve the buffer score. Energy below that buffer
+target remains available for high-priced demand and appliance spikes, down to
+the native minimum. On a 3.6 kWh battery with a 5% minimum, the default targets
+20% SoC for replenishment; it is not a second discharge floor or a calibrated
+spike probability. Price-based withholding and evening feasibility still apply.
 
 See [charge-limit optimization](charge-limit.md) for setup, forecasting and
 restoration of both power limits.

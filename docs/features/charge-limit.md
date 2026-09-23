@@ -101,6 +101,16 @@ Switching costs discourage frequent changes in either direction; equivalent
 output choices prefer more headroom for unexpected demand. This is a bounded
 local search, not a global optimum. Computation yields between batches.
 
+The daytime spike buffer encourages earlier charging, without rewarding an
+output restriction for preserving the buffer. Its shortfall penalty uses a
+separate replay of the same charging schedule with unrestricted native output,
+in each solar scenario. This keeps the buffer useful for expensive morning
+demand and unexpected appliances even when SoC is below the buffer target.
+The configured native minimum remains the discharge floor. Energy costs,
+evening feasibility and the terminal reserve are still evaluated on the actual
+planned output schedule. The reported buffer penalty uses the unrestricted
+reference in nominal solar.
+
 Charging uses available solar surplus up to the selected ceiling and native
 battery room. Discharge serves deficits up to the planned AC output ceiling,
 hardware limit and energy above the native SoC floor. Without an output entity,

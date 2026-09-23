@@ -168,7 +168,7 @@ export default function ControlSection({
             min={0}
             step="any"
             defaultValue={config.spikeBufferKwh ?? 0.54}
-            hint="Extra stored energy above the native minimum, capped at usable capacity. 0.54 kWh means a 20% target on a 3.6 kWh battery with a 5% minimum. A soft reserve preference, not a hard SoC floor. Set 0 to disable."
+            hint="Encourages earlier charging so energy is available for demand spikes. 0.54 kWh means a 20% target on a 3.6 kWh battery with a 5% minimum. This preference does not hold back discharge below the buffer target; the native minimum still applies. Set 0 to disable."
           />
           <Field
             name="ceilingSwitchCost"

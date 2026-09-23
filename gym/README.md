@@ -122,13 +122,15 @@ Open it in a browser; rerun the benchmark and reload to see updated results.
 It uses local dataset time, embeds all data, and needs no server or internet.
 
 Select a default run with `algorithm` in `experiment.json`; select benchmark
-participants with the `algorithms` array. The live Battery control settings use
-the same Cost optimized and Evening target choices. Live evening planning uses
+participants with the `algorithms` array. Live Battery control uses Evening
+target only; Cost optimized remains a benchmark comparison. Live planning uses
 the next configured local deadline and the battery maximum SoC; the solar margin
 is applied once, as a reduced-solar scenario rather than reducing both scenarios.
 
 `spikeBufferKwh` defaults to 0.54 for Evening target; 0 disables it. The
 reported search objective includes a daytime buffer shortfall preference,
-separate from simulated energy costs. The spike test compares the same
+separate from simulated energy costs. With output control, this preference is
+evaluated on an unrestricted-output replay of the charging schedule: preventing
+discharge cannot improve the buffer score. The spike test compares the same
 held-out demand pulse with and without a buffer, including discharge below
 the buffer target. Smooth hindsight costs alone cannot measure this benefit.

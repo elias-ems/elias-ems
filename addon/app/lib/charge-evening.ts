@@ -153,6 +153,9 @@ export async function evening(data: EveningData, settings: EveningSettings) {
   const dischargeLimits = dischargeModel
     ? data.slots.map(() => dischargeModel.minW)
     : undefined;
+  const nativeOutput = dischargeModel
+    ? data.slots.map(() => deviceLimit(dischargeModel.maxW, dischargeModel))
+    : undefined;
   const haircuts = [0, settings.solarHaircut];
   const target = (m.capacityKwh * settings.targetSoc) / 100;
   const required = haircuts.map((h) =>
@@ -166,9 +169,9 @@ export async function evening(data: EveningData, settings: EveningSettings) {
     (m.capacityKwh * (m.maxSoc - m.minSoc)) / 100,
   );
   const bufferTarget = (m.capacityKwh * m.minSoc) / 100 + buffer;
-  // Soft holding cost: price each kWh of missing daytime buffer per hour at
-  // the import tariff. This is an explicit reserve preference, not energy cost
-  // or a calibrated probability of a spike. It is not a hard SoC floor.
+  // Prefer earlier replenishment of the spike buffer, priced per missing kWh
+  // per hour. Evaluate it with unrestricted discharge: an output restriction
+  // must not earn a better buffer score by preventing use of that same buffer.
   const bufferPenalty = (points: ReturnType<typeof replay>["points"]) =>
     points.reduce(
       (sum, p) =>
@@ -181,20 +184,43 @@ export async function evening(data: EveningData, settings: EveningSettings) {
           : 0),
       0,
     );
+  // Output moves share a charging schedule. Cache its reference scores so we
+  // do not double the simulation work for every candidate output ceiling.
+  let bufferReference: { limits: number[]; penalties: number[] } | undefined;
+  const chargingBufferPenalties = (candidate: number[]) => {
+    if (buffer === 0) return haircuts.map(() => 0);
+    if (
+      !bufferReference ||
+      candidate.some((w, i) => w !== bufferReference?.limits[i])
+    ) {
+      bufferReference = {
+        limits: candidate.slice(),
+        penalties: haircuts.map((h) =>
+          bufferPenalty(
+            replay(data, candidate, settings, h, nativeOutput).points,
+          ),
+        ),
+      };
+    }
+    return bufferReference.penalties;
+  };
   const evaluate = (candidate: number[], output = dischargeLimits) => {
     const runs = haircuts.map((h) =>
       replay(data, candidate, settings, h, output),
     );
     if (runs.some((r, i) => r.deadlineEnergy < required[i] - 1e-8))
       return Infinity;
+    const bufferPenalties = output
+      ? chargingBufferPenalties(candidate)
+      : runs.map((r) => bufferPenalty(r.points));
     // Import costs price expected household demand along the way. The terminal
     // reserve evaluator remains in the gym report for comparison with reference.
     return (
       runs.reduce(
-        (sum, r) =>
+        (sum, r, i) =>
           sum +
           r.energyCost +
-          bufferPenalty(r.points) +
+          bufferPenalties[i] +
           Math.max(
             0,
             (m.capacityKwh * m.minSoc) / 100 +
@@ -302,9 +328,7 @@ export async function evening(data: EveningData, settings: EveningSettings) {
     data.slots.map(() => max),
     settings,
     0,
-    dischargeModel
-      ? data.slots.map(() => deviceLimit(dischargeModel.maxW, dischargeModel))
-      : undefined,
+    nativeOutput,
   );
   return {
     points: run.points.map((p, i) => ({
@@ -325,6 +349,8 @@ export async function evening(data: EveningData, settings: EveningSettings) {
     searchObjective: best,
     spikeBufferKwh: buffer,
     bufferTargetSoc: (bufferTarget / m.capacityKwh) * 100,
-    bufferPenalty: bufferPenalty(run.points),
+    bufferPenalty: dischargeLimits
+      ? chargingBufferPenalties(limits)[0]
+      : bufferPenalty(run.points),
   };
 }
