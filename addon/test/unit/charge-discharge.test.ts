@@ -44,8 +44,80 @@ const settings = {
 };
 
 describe("AC output planning", () => {
+  it("keeps a low morning battery available for spikes while replenishing its buffer", {
+    timeout: 30_000,
+  }, async () => {
+    // Screenshot-shaped forecast: nominal solar exceeds demand at 08:35,
+    // but the reduced-solar scenario has a small deficit. Cheap solar follows.
+    const morning = Date.parse("2026-09-23T08:35:00Z");
+    const end = Date.parse("2026-09-23T18:00:00Z");
+    const slots: EveningData["slots"] = [];
+    for (let t = morning; t < end; ) {
+      const next = Math.min(Math.ceil((t + 1) / 900_000) * 900_000, end);
+      const hour = new Date(t).getUTCHours();
+      const solarW =
+        hour === 8 ? 436 : hour === 9 ? 999 : hour === 10 ? 1845 : 4000;
+      const loadW =
+        hour === 8 ? 386 : hour === 9 ? 632 : hour === 10 ? 1222 : 1300;
+      const buy =
+        hour === 8 ? 0.3773 : hour === 9 ? 0.32 : hour === 10 ? 0.28 : 0.2;
+      slots.push({
+        start: t,
+        end: next,
+        solarW,
+        loadW,
+        buy,
+        sell: buy - 0.17,
+        estimatedPrice: false,
+      });
+      t = next;
+    }
+    const sample = { ...data, model: { ...data.model, soc: 7 }, slots };
+    const config = { ...settings, deadline: new Date(end).toISOString() };
+    const without = await evening(sample, config);
+    const withBuffer = await evening(sample, {
+      ...config,
+      spikeBufferKwh: 0.54,
+    });
+    expect(withBuffer.bufferTargetSoc).toBe(20);
+    expect(withBuffer.points[0].dischargeLimitW).toBe(2000);
+    expect(withBuffer.points[0].dischargeW).toBe(0);
+    expect(withBuffer.points[5].soc).toBeGreaterThan(without.points[5].soc);
+
+    const current = withBuffer.points[0];
+    const energy = (sample.model.capacityKwh * sample.model.soc) / 100;
+    const spike = simulateCharge(
+      { ...current, end: morning + 60_000, loadW: current.loadW + 2000 },
+      energy,
+      current.limitW,
+      sample.model,
+      false,
+      current.dischargeLimitW,
+    );
+    expect(spike.dischargeW).toBeCloseTo(1950);
+    expect(spike.energy).toBeLessThan(energy);
+    expect(spike.energy).toBeGreaterThanOrEqual(
+      (sample.model.capacityKwh * sample.model.minSoc) / 100,
+    );
+
+    // The buffer penalty is measured on the unrestricted reference, so it
+    // cannot reward a plan for holding back discharge. The actual schedule
+    // still has to meet the evening target under reduced solar.
+    const reduced = replay(
+      sample,
+      withBuffer.points.map((p) => p.limitW),
+      config,
+      0.2,
+      withBuffer.points.map((p) => p.dischargeLimitW ?? NaN),
+    );
+    expect(reduced.points[0].dischargeW).toBeGreaterThan(0);
+    expect(reduced.deadlineSoc).toBeCloseTo(95);
+    expect(reduced.points.every((p) => p.soc >= 5 - 1e-7)).toBe(true);
+  });
   it("saves a small battery overnight and spends it during the expensive morning", async () => {
-    const plan = await evening(data, settings);
+    // Keep the default daytime buffer enabled: it must not defeat economical
+    // overnight withholding or morning discharge.
+    const plan = await evening(data, { ...settings, spikeBufferKwh: 0.54 });
     const native = replay(
       data,
       data.slots.map(() => 2000),
