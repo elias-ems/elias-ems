@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cardStyle, headingStyle, hintStyle } from "../form";
 
 type SectionProps = {
+  id?: string;
   title: string;
   description?: string;
   /** When given, the header carries a `+` toggle for that section's add form. */
@@ -14,6 +15,7 @@ type SectionProps = {
 };
 
 export default function Section({
+  id,
   title,
   description,
   add,
@@ -23,7 +25,7 @@ export default function Section({
     // A card rather than a run of headings: the sections sit side by side
     // once the panel is wide enough, and columns of text with nothing drawn
     // around them read as one column that has lost its way.
-    <section style={cardStyle}>
+    <section id={id} style={cardStyle}>
       <div
         style={{
           display: "flex",
