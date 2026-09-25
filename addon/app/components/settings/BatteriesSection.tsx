@@ -31,6 +31,7 @@ export default function BatteriesSection({
 
   return (
     <Section
+      id="batteries"
       title="Batteries"
       description="Capacity and the charge window are typed in; the readings come from Home Assistant. A steered battery's target power goes out as an event named after its title."
       add={{

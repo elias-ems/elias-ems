@@ -7,6 +7,7 @@ import type {
 import { usePolledJson } from "../../lib/json-fetch";
 import { hintStyle } from "../form";
 import { cardStyle, eyebrowStyle, monoStyle } from "./chrome";
+import { AlertIcon } from "./Icons";
 import PlanTimeline from "./PlanTimeline";
 
 type PlanView = "charts" | "table";
@@ -136,9 +137,86 @@ function BatteryPlan({
         </details>
       )}
       {status.mode === "preview" && (
-        <p style={hintStyle}>
-          Preview only — the battery's settings are unchanged.
-        </p>
+        <div
+          role="alert"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "0.75rem",
+            padding: "0.75rem 1rem",
+            borderRadius: 6,
+            border: "1px solid var(--color-danger)",
+            background: "var(--color-import-soft)",
+            marginTop: "0.25rem",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "0.5rem",
+              fontSize: "0.8125rem",
+              lineHeight: 1.45,
+              color: "var(--color-text)",
+            }}
+          >
+            <span
+              style={{
+                color: "var(--color-danger)",
+                display: "inline-flex",
+                flex: "none",
+                marginTop: "0.15rem",
+              }}
+            >
+              <AlertIcon size={16} />
+            </span>
+            <div>
+              <strong
+                style={{ display: "block", color: "var(--color-danger)" }}
+              >
+                {status.message?.includes("paused")
+                  ? "Battery limit control paused"
+                  : "Preview only — the battery's settings are unchanged."}
+              </strong>
+              <span>
+                {status.message?.includes("paused")
+                  ? "Control paused after an external limit change. Re-save the battery settings to resume."
+                  : status.message?.includes("Turn off target-power steering")
+                    ? "Turn off target-power steering in battery settings to enable limit control."
+                    : "Battery limit control is not actively applying limits. Enable the Optimize charge limits strategy in Settings to apply this plan."}
+              </span>
+            </div>
+          </div>
+          <Link
+            to={
+              status.message?.includes("paused") ||
+              status.message?.includes("target-power steering")
+                ? "/settings#batteries"
+                : "/settings#battery-control"
+            }
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "0.35rem 0.75rem",
+              borderRadius: 4,
+              border: "1px solid var(--color-danger)",
+              background: "var(--color-surface)",
+              color: "var(--color-danger)",
+              fontWeight: 600,
+              fontSize: "0.75rem",
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {status.message?.includes("paused")
+              ? "Save battery settings"
+              : status.message?.includes("target-power steering")
+                ? "Edit battery"
+                : "Configure battery control"}
+          </Link>
+        </div>
       )}
       {status.plan && (
         <>

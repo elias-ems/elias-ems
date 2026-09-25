@@ -64,6 +64,7 @@ export default function ControlSection({
 
   return (
     <Section
+      id="battery-control"
       title="Battery control"
       description="When enabled, a loop reconsiders what the batteries should be doing at the interval below and writes its decision to the diagnostics on the home page."
     >
