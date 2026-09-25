@@ -23,9 +23,9 @@
   here.
 - Diagnostics — one log every feature writes to, shown on Home as the two
   strategies' decisions merged into a single feed, in full on the Tools page,
-  and downloadable as a text file. Three origins write to it now — battery
-  control, PV curtailment and the price import — the first two being the pair
-  that feed shows; see [features/diagnostics.md](features/diagnostics.md).
+  and downloadable as a text file. Four origins write to it now — battery
+  control, PV curtailment, dynamic prices, and charge limiting — the first two
+  being the pair that feed shows; see [features/diagnostics.md](features/diagnostics.md).
 - Dynamic prices — importing done, see
   [features/dynamic-prices.md](features/dynamic-prices.md). Day-ahead prices are
   read off a Home Assistant entity and put through a formula per direction, so
