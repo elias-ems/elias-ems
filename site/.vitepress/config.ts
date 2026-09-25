@@ -33,6 +33,7 @@ export default defineConfig({
         link: "/internals/architecture",
         activeMatch: "/internals/",
       },
+      { text: "Planner sandbox", link: "/planner" },
       { text: "Contributing", link: "/contributing" },
     ],
 
