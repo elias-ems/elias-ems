@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
+import { Link, useHref } from "react-router";
 import type {
   ChargeLimitStatus,
   ChargeLimitsData,
@@ -24,6 +24,11 @@ function BatteryPlan({
   detailed: boolean;
   view: PlanView;
 }) {
+  const exportHref = useHref(
+    status.batteryId
+      ? `/api/planner-export.json?batteryId=${encodeURIComponent(status.batteryId)}`
+      : "/api/planner-export.json",
+  );
   const first = status.plan?.points[0];
   const expired = status.validUntil !== null && now > status.validUntil;
   const next = status.plan?.points.find(
@@ -133,6 +138,24 @@ function BatteryPlan({
               </li>
             ))}
           </ul>
+          <p style={{ marginTop: "0.5rem" }}>
+            <a
+              href={exportHref}
+              download
+              style={{
+                display: "inline-block",
+                padding: "0.25rem 0.6rem",
+                border: "1px solid var(--color-border-strong)",
+                borderRadius: 4,
+                background: "var(--color-surface)",
+                fontSize: "0.8125rem",
+                textDecoration: "none",
+                color: "inherit",
+              }}
+            >
+              Export planner data (JSON)
+            </a>
+          </p>
         </details>
       )}
       {status.mode === "preview" && (

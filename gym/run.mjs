@@ -10,7 +10,7 @@ const [
   input = "addon/app/lib/benchmark-data/input.json",
   output = "gym/results/latest",
   selectedAlgorithm,
-  settingsFile = "addon/app/lib/benchmark-data/experiment.json",
+  settingsFile,
 ] = process.argv.slice(2);
 if (!input)
   throw new Error("Usage: node gym/run.mjs <dataset.json> [output-directory]");
@@ -26,7 +26,12 @@ if (
   !Array.isArray(data.assumptions)
 )
   throw new Error("Dataset must declare reserve and assumptions");
-const settings = JSON.parse(await readFile(settingsFile, "utf8"));
+const settings = settingsFile
+  ? JSON.parse(await readFile(settingsFile, "utf8"))
+  : data.settings ??
+    JSON.parse(
+      await readFile("addon/app/lib/benchmark-data/experiment.json", "utf8"),
+    );
 validateSettings(data, settings);
 const algorithm = selectedAlgorithm ?? settings.algorithm ?? "cost-optimized";
 const implementation = algorithms[algorithm];

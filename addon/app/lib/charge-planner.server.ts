@@ -103,11 +103,48 @@ export function chargeModel(
   };
 }
 
-export async function calculateChargePlan(
+export type PlannerInputs = {
+  battery: Battery;
+  model: ChargeModel;
+  slots: ChargeInterval[];
+  reserve: number;
+  reserveCovered: boolean;
+  settings: {
+    deadline: string;
+    targetSoc: number;
+    solarHaircut: number;
+    switchCost: number;
+    passes: number;
+    spikeBufferKwh: number;
+    algorithm: "cost-optimized" | "evening-target";
+    algorithms: ["cost-optimized", "evening-target"];
+  };
+  deadlineSlot?: ChargeInterval;
+  controlBlocker: string | null;
+  planningNote: string | null;
+  curtailmentModeled: boolean;
+  reportedW: number | null;
+  reportedDischargeW: number | null;
+  currency: string;
+  forecastEnd: number;
+  sources: number;
+  historyHours: number;
+  timeZone: string;
+  solarMarginPercent: number;
+  raw: {
+    energy: Awaited<ReturnType<typeof readEnergyForecast>>;
+    prices: Awaited<ReturnType<typeof readPrices>>;
+    control: Awaited<ReturnType<typeof readControlConfig>>;
+    curtailment: Awaited<ReturnType<typeof readCurtailmentConfig>>;
+    arrays: Awaited<ReturnType<typeof listPvEntities>>;
+  };
+};
+
+export async function preparePlannerInputs(
   battery: Battery,
   now = Date.now(),
   report: (key: string, message: string) => void = () => {},
-) {
+): Promise<PlannerInputs> {
   const control = await readControlConfig();
   battery = {
     ...battery,
@@ -417,32 +454,36 @@ export async function calculateChargePlan(
         hourCycle: "h23",
       }).format(s.end) === `${String(hour).padStart(2, "0")}:00`,
   );
-  if (!deadlineSlot)
-    throw new Error(
-      "Waiting for solar and price coverage through the next evening deadline.",
-    );
-  const eveningPlan = await evening(
-    { slots, model, terminalReserveKwh: reserve },
-    {
-      deadline: new Date(deadlineSlot.end).toISOString(),
-      targetSoc: model.maxSoc,
-      solarHaircut: margin / 100,
-      switchCost,
-      spikeBufferKwh: control.spikeBufferKwh ?? 0.54,
-      passes: 4,
-    },
-  );
-  const plan = eveningPlan;
-  report(
-    "algorithm",
-    `Evening target: ${model.maxSoc}% by ${hour}:00; reachable nominal/reduced-solar SoC ${eveningPlan.target.reachableSoc.map((s) => s.toFixed(1)).join(" / ")}%`,
-  );
+  const deadline = deadlineSlot
+    ? new Date(deadlineSlot.end).toISOString()
+    : slots.length
+      ? new Date(slots[slots.length - 1].end).toISOString()
+      : new Date().toISOString();
+  const settings = {
+    deadline,
+    targetSoc: model.maxSoc,
+    solarHaircut: margin / 100,
+    switchCost,
+    passes: 4,
+    spikeBufferKwh: control.spikeBufferKwh ?? 0.54,
+    algorithm: "evening-target" as const,
+    algorithms: ["cost-optimized", "evening-target"] as [
+      "cost-optimized",
+      "evening-target",
+    ],
+  };
+
   return {
+    battery,
+    model,
+    slots,
+    reserve,
+    reserveCovered,
+    settings,
+    deadlineSlot,
     controlBlocker,
     planningNote,
     curtailmentModeled,
-    plan,
-    model,
     reportedW: numericState(state),
     reportedDischargeW: numericState(dischargeState),
     currency: prices.read.forecast.currency,
@@ -451,6 +492,51 @@ export async function calculateChargePlan(
     historyHours: energy.profile.hours,
     timeZone: energy.profile.timeZone,
     solarMarginPercent: margin,
-    reserveCovered,
+    raw: {
+      energy,
+      prices,
+      control,
+      curtailment,
+      arrays,
+    },
+  };
+}
+
+export async function calculateChargePlan(
+  battery: Battery,
+  now = Date.now(),
+  report: (key: string, message: string) => void = () => {},
+) {
+  const inputs = await preparePlannerInputs(battery, now, report);
+  const { model, slots, reserve, settings, deadlineSlot } = inputs;
+  const control = inputs.raw.control;
+  const hour = control.eveningHour ?? 18;
+  if (!deadlineSlot)
+    throw new Error(
+      "Waiting for solar and price coverage through the next evening deadline.",
+    );
+  const plan = await evening(
+    { slots, model, terminalReserveKwh: reserve },
+    settings,
+  );
+  report(
+    "algorithm",
+    `Evening target: ${model.maxSoc}% by ${hour}:00; reachable nominal/reduced-solar SoC ${plan.target.reachableSoc.map((s) => s.toFixed(1)).join(" / ")}%`,
+  );
+  return {
+    controlBlocker: inputs.controlBlocker,
+    planningNote: inputs.planningNote,
+    curtailmentModeled: inputs.curtailmentModeled,
+    plan,
+    model: inputs.model,
+    reportedW: inputs.reportedW,
+    reportedDischargeW: inputs.reportedDischargeW,
+    currency: inputs.currency,
+    forecastEnd: inputs.forecastEnd,
+    sources: inputs.sources,
+    historyHours: inputs.historyHours,
+    timeZone: inputs.timeZone,
+    solarMarginPercent: inputs.solarMarginPercent,
+    reserveCovered: inputs.reserveCovered,
   };
 }

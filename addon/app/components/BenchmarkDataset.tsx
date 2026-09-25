@@ -29,6 +29,9 @@ export default function BenchmarkDataset({
   draft,
   onChange,
   reset,
+  resetToBundled,
+  isCustom,
+  onExport,
   disabled,
   intervals,
   model,
@@ -37,6 +40,9 @@ export default function BenchmarkDataset({
   draft: BenchmarkDraft;
   onChange: (draft: BenchmarkDraft) => void;
   reset: () => void;
+  resetToBundled?: () => void;
+  isCustom?: boolean;
+  onExport?: () => void;
   disabled: boolean;
   intervals: string[];
   model: Record<string, number>;
@@ -53,9 +59,28 @@ export default function BenchmarkDataset({
         while this page stays open. Times, battery model and experiment settings
         stay fixed.
       </p>
-      <button type="button" onClick={reset} disabled={disabled}>
-        Reset to bundled dataset
-      </button>
+      <div
+        style={{
+          display: "flex",
+          gap: "0.75rem",
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <button type="button" onClick={reset} disabled={disabled}>
+          {isCustom ? "Reset table edits" : "Reset to bundled dataset"}
+        </button>
+        {isCustom && resetToBundled && (
+          <button type="button" onClick={resetToBundled} disabled={disabled}>
+            Switch back to bundled dataset
+          </button>
+        )}
+        {onExport && (
+          <button type="button" onClick={onExport} disabled={disabled}>
+            Export current dataset (JSON)
+          </button>
+        )}
+      </div>
       <details style={{ marginTop: "1rem" }}>
         <summary>Battery model and reserve</summary>
         <dl
