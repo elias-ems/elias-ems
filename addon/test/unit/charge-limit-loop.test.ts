@@ -1,8 +1,22 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import ChargePlanCard from "../../app/components/dashboard/ChargePlanCard";
 import type { Battery } from "../../app/lib/batteries";
+import type { ChargeLimitsData } from "../../app/lib/charge-limit-status";
+
+const renderPlan = (initial: ChargeLimitsData) =>
+  renderToStaticMarkup(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(ChargePlanCard, { initial }),
+    ),
+  );
 
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
@@ -94,6 +108,102 @@ afterEach(async () => {
 });
 
 describe("charge limit execution and recovery", () => {
+  it("reports saved authorization before planning and while the execution lock waits for history", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    const initial = await loop.readChargeLimits();
+    expect(initial.batteries[0].control.state).toBe("enabled");
+    expect(initial.batteries[0].state).toBe("waiting");
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(renderPlan(initial)).toContain("no settings need to be saved");
+    expect(renderPlan(initial)).not.toContain('role="alert"');
+
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const calculate = mocks.calculate.getMockImplementation();
+    mocks.calculate.mockImplementationOnce(async () => {
+      enter();
+      await pending;
+      return calculate?.();
+    });
+    const tick = loop.withChargeLimitLock(() => loop.chargeLimitTick(now));
+    try {
+      await entered;
+      const waiting = await loop.readChargeLimits();
+      expect(waiting.batteries[0].control.state).toBe("enabled");
+      expect(waiting.batteries[0].plan).toBeNull();
+      expect(renderPlan(waiting)).not.toContain('role="alert"');
+      expect(mocks.set).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await tick;
+    }
+    expect((await loop.readChargeLimits()).batteries[0].state).toBe("active");
+
+    vi.resetModules();
+    const restarted = await import("../../app/lib/charge-limit-loop.server");
+    expect(
+      (await restarted.readChargeLimits()).batteries[0].control.state,
+    ).toBe("enabled");
+    await restarted.chargeLimitTick(now + 30_000);
+    expect((await restarted.readChargeLimits()).batteries[0].state).toBe(
+      "active",
+    );
+  });
+
+  it("reports disabled, conflicting and paused settings without calculating a plan", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await saveBattery({ ...battery, steered: true });
+    let data = await loop.readChargeLimits();
+    expect(data.batteries[0].control.state).toBe("blocked");
+    expect(renderPlan(data)).toContain("Edit battery");
+    await saveBattery(battery);
+    await writeFile(
+      path.join(directory, "charge-limit-leases.json"),
+      JSON.stringify([
+        {
+          batteryId: battery.id,
+          entityId: battery.chargeLimitEntityId,
+          originalW: 2000,
+          previousW: 2000,
+          requestedW: 400,
+          at: now,
+          paused: true,
+        },
+      ]),
+    );
+    data = await loop.readChargeLimits();
+    expect(data.batteries[0].control.state).toBe("paused");
+    expect(renderPlan(data)).toContain("Save battery settings");
+    await writeFile(
+      path.join(directory, "control.json"),
+      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
+    );
+    data = await loop.readChargeLimits();
+    expect(data.batteries[0].control.state).toBe("disabled");
+    expect(renderPlan(data)).toContain("Configure battery control");
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.set).not.toHaveBeenCalled();
+  });
+
+  it("shows planning failures without telling an enabled user to enable control again", async () => {
+    mocks.calculate.mockRejectedValueOnce(new Error("Forecast gap"));
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    const data = await loop.readChargeLimits();
+    expect(data.batteries[0].control.state).toBe("enabled");
+    const html = renderPlan(data);
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Forecast gap");
+    expect(html).not.toContain("Configure battery control");
+    expect(html).not.toContain("Save battery settings");
+  });
+
   it("publishes active status only after the charge-limit write completes", async () => {
     let enter!: () => void;
     let release!: () => void;

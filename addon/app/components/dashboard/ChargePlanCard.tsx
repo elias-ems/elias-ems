@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useHref } from "react-router";
-import type {
-  ChargeLimitStatus,
-  ChargeLimitsData,
-} from "../../lib/charge-limit-status";
+import type { ChargeLimitsData } from "../../lib/charge-limit-status";
 import { usePolledJson } from "../../lib/json-fetch";
 import { hintStyle } from "../form";
 import { cardStyle, eyebrowStyle, monoStyle } from "./chrome";
@@ -20,7 +17,7 @@ function BatteryPlan({
   detailed,
   view,
 }: {
-  status: ChargeLimitStatus;
+  status: ChargeLimitsData["batteries"][number];
   now: number;
   detailed: boolean;
   view: PlanView;
@@ -32,6 +29,9 @@ function BatteryPlan({
   );
   const first = status.plan?.points[0];
   const expired = status.validUntil !== null && now > status.validUntil;
+  const setupBlocked = status.control.state !== "enabled";
+  const executionBlocked =
+    status.state === "error" || status.state === "preview";
   const next = status.plan?.points.find(
     (p) =>
       p.limitW !== first?.limitW ||
@@ -159,7 +159,12 @@ function BatteryPlan({
           </p>
         </details>
       )}
-      {status.mode === "preview" && (
+      {!setupBlocked && status.state === "waiting" && (
+        <p style={{ ...hintStyle, margin: 0 }} role="status">
+          {status.control.message}
+        </p>
+      )}
+      {(setupBlocked || executionBlocked) && (
         <div
           role="alert"
           style={{
@@ -199,46 +204,37 @@ function BatteryPlan({
               <strong
                 style={{ display: "block", color: "var(--color-danger)" }}
               >
-                {status.message?.includes("paused")
+                {status.control.state === "paused"
                   ? "Battery limit control paused"
-                  : "Preview only — the battery's settings are unchanged."}
+                  : status.control.state === "disabled"
+                    ? "Preview only — the battery's settings are unchanged."
+                    : "Battery limit control needs attention"}
               </strong>
               <span>
-                {status.message?.includes("paused")
-                  ? "Control paused after an external limit change. Re-save the battery settings to resume."
-                  : status.message?.includes("Turn off target-power steering")
-                    ? "Turn off target-power steering in battery settings to enable limit control."
-                    : "Battery limit control is not actively applying limits. Enable the Optimize charge limits strategy in Settings to apply this plan."}
+                {setupBlocked ? status.control.message : status.message}
               </span>
             </div>
           </div>
-          <Link
-            to={
-              status.message?.includes("paused") ||
-              status.message?.includes("target-power steering")
-                ? "/settings#batteries"
-                : "/settings#battery-control"
-            }
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "0.35rem 0.75rem",
-              borderRadius: 4,
-              border: "1px solid var(--color-danger)",
-              background: "var(--color-surface)",
-              color: "var(--color-danger)",
-              fontWeight: 600,
-              fontSize: "0.75rem",
-              textDecoration: "none",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {status.message?.includes("paused")
-              ? "Save battery settings"
-              : status.message?.includes("target-power steering")
-                ? "Edit battery"
-                : "Configure battery control"}
-          </Link>
+          {setupBlocked && status.control.settingsHref && (
+            <Link
+              to={status.control.settingsHref}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "0.35rem 0.75rem",
+                borderRadius: 4,
+                border: "1px solid var(--color-danger)",
+                background: "var(--color-surface)",
+                color: "var(--color-danger)",
+                fontWeight: 600,
+                fontSize: "0.75rem",
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {status.control.action}
+            </Link>
+          )}
         </div>
       )}
       {status.plan && (
