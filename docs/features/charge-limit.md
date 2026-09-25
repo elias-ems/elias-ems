@@ -35,6 +35,16 @@ requires the new strategy to be explicitly selected and enabled. Previously
 applied limits are recovered through the restoration journal. Battery-specific
 margin and wear values remain the fallback until global values are supplied.
 
+Once the Optimize charge limits strategy is enabled, that choice persists across
+restarts and updates. The plan card checks the saved control settings, battery
+configuration and paused recovery records independently of planning, without
+waiting for the history fetch or taking the execution lock. Enabled control shows
+a neutral waiting message while a plan is being prepared; it does not ask for
+settings to be saved again. Disabled control, conflicting battery settings and
+an external-change pause show their specific settings action immediately.
+Planning failures and incompatible forecast inputs remain separate warnings;
+limits are still only applied after a valid plan passes all execution checks.
+
 Dynamic consumption and production price formulas must be configured. In Home
 Assistant's Energy dashboard, configure the grid, battery charge/discharge
 energy counters, and a forecast for every solar source. Three complete samples

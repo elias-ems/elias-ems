@@ -2,9 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Battery } from "./batteries";
 import { listBatteries } from "./batteries.server";
-import type {
-  ChargeLimitStatus,
-  ChargeLimitsData,
+import {
+  type ChargeLimitStatus,
+  type ChargeLimitsData,
+  chargeLimitControl,
 } from "./charge-limit-status";
 import { calculateChargePlan, numericState } from "./charge-planner.server";
 import { readControlConfig } from "./control-config.server";
@@ -173,11 +174,24 @@ function empty(b: Battery): ChargeLimitStatus {
 }
 
 export async function readChargeLimits(): Promise<ChargeLimitsData> {
-  const batteries = await listBatteries();
+  // Do not take the execution lock: a cold history fetch can hold it for minutes.
+  const [batteries, control, records] = await Promise.all([
+    listBatteries(),
+    readControlConfig(),
+    leases(),
+  ]);
   return {
     batteries: batteries
       .filter((b) => Boolean(b.chargeLimitEntityId))
-      .map((b) => statuses.get(b.id) || empty(b)),
+      .map((b) => ({
+        ...(statuses.get(b.id) || empty(b)),
+        control: chargeLimitControl(
+          control,
+          b,
+          batteries.length,
+          records.some((l) => l.batteryId === b.id && l.paused),
+        ),
+      })),
   };
 }
 
