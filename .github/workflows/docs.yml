@@ -15,11 +15,15 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "addon/app/lib/charge-evening.ts"
+      - "addon/app/lib/charge-plan.ts"
       - "docs/**"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - "site/**"
+      - "addon/app/lib/charge-evening.ts"
+      - "addon/app/lib/charge-plan.ts"
       - "docs/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:

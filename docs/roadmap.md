@@ -4,6 +4,11 @@
 
 ## V1 (current)
 
+- Documentation planner sandbox — import a planner export locally in the browser,
+  rerun the production Evening target algorithm with adjustable settings, and
+  inspect and download its forecast schedule. Historical replay and algorithm
+  changes remain distinct from measured savings.
+
 - Optimize charge limits — Evening target is the single production planner.
   Optional maximum AC output control reserves battery energy during cheaper
   hours for higher-priced demand; both power limits have readback and restoration.
