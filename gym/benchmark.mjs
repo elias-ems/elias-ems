@@ -7,11 +7,17 @@ import { benchmarkHtml } from "./report.mjs";
 const [
   input = "addon/app/lib/benchmark-data/input.json",
   output = "gym/results/benchmark",
-  settings = "addon/app/lib/benchmark-data/experiment.json",
+  settingsFile,
 ] = process.argv.slice(2);
 await mkdir(output, { recursive: true });
 const reports = [];
-const config = JSON.parse(await readFile(settings, "utf8"));
+const rawInput = JSON.parse(await readFile(input, "utf8"));
+const config = settingsFile
+  ? JSON.parse(await readFile(settingsFile, "utf8"))
+  : rawInput.settings ??
+    JSON.parse(
+      await readFile("addon/app/lib/benchmark-data/experiment.json", "utf8"),
+    );
 const selected = config.algorithms ?? Object.keys(algorithms);
 if (
   !Array.isArray(selected) ||
@@ -22,13 +28,11 @@ if (
   throw new Error("Choose unique known algorithms in experiment.algorithms");
 for (const name of selected) {
   const directory = path.join(output, name);
-  execFileSync(process.execPath, [
-    "gym/run.mjs",
-    input,
-    directory,
-    name,
-    settings,
-  ]);
+  const runArgs = ["gym/run.mjs", input, directory, name];
+  if (settingsFile) {
+    runArgs.push(settingsFile);
+  }
+  execFileSync(process.execPath, runArgs);
   reports.push(
     JSON.parse(await readFile(path.join(directory, "report.json"), "utf8")),
   );

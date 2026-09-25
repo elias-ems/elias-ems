@@ -22,10 +22,26 @@ export default function Tools({ loaderData }: Route.ComponentProps) {
   // in an `href` is not something React Router rewrites — it would be resolved
   // against the Home Assistant origin, where this app is not served.
   const downloadHref = useHref("/api/diagnostics.txt");
+  const exportHref = useHref("/api/planner-export.json");
 
   return (
     <main className="page">
       <h1 style={pageTitleStyle}>Tools</h1>
+
+      <section style={{ ...cardStyle, marginTop: "1.5rem" }}>
+        <div style={sectionHeaderStyle}>
+          <h2 style={headingStyle}>Planner data export</h2>
+          <a href={exportHref} download style={downloadStyle}>
+            Export JSON
+          </a>
+        </div>
+
+        <p style={{ ...hintStyle, marginTop: "0.35rem", maxWidth: "62ch" }}>
+          Export all current planner inputs—including configured devices, load
+          and solar forecasts, dynamic tariffs, and interval models—to a JSON
+          dataset for replay and analysis in the Benchmark tool.
+        </p>
+      </section>
 
       <section style={{ ...cardStyle, marginTop: "1.5rem" }}>
         <div style={sectionHeaderStyle}>

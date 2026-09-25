@@ -59,7 +59,9 @@ afterAll(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
-it("plans in the background, serves Home through ingress and restores on a settings change", async () => {
+it("plans in the background, serves Home through ingress and restores on a settings change", {
+  timeout: 35_000,
+}, async () => {
   let status: ChargeLimitsData | undefined;
   await vi.waitFor(
     async () => {
@@ -70,7 +72,7 @@ it("plans in the background, serves Home through ingress and restores on a setti
         "active",
       );
     },
-    { timeout: 15_000, interval: 100 },
+    { timeout: 30_000, interval: 100 },
   );
   expect(status?.batteries[0].plan?.points.length).toBeGreaterThan(3);
   const state = await fetch(

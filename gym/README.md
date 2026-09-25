@@ -134,3 +134,35 @@ evaluated on an unrestricted-output replay of the charging schedule: preventing
 discharge cannot improve the buffer score. The spike test compares the same
 held-out demand pulse with and without a buffer, including discharge below
 the buffer target. Smooth hindsight costs alone cannot measure this benefit.
+
+## Replaying live planner exports
+
+Planner data exports can be downloaded directly from the EMS web interface
+(**Tools → Planner data export**, **Charge plans → Export planner data**, or
+the download link on the battery dashboard card). The exported JSON file
+(`elias-planner-export-YYYY-MM-DD-HH-mm-ss.json`) packages:
+- All forecast interval inputs (solar, demand, import/export prices)
+- Battery model, limits, and terminal reserve
+- Planner control settings with the computed deadline
+- Full snapshots of all configured devices (batteries, PV arrays, grid meter,
+  curtailment configuration, control parameters, and dynamic price source)
+
+You can replay and evaluate these exports in two ways:
+
+1. **In the EMS web UI**:
+   Go to **More → Benchmark**, click **Import exported planner data**, and pick the JSON file.
+   The page loads the custom dataset, previews configured devices and assumptions, displays the
+   full schedule table, and allows testing what-if edits or running all algorithms.
+
+2. **In the CLI gym**:
+   Both `run.mjs` and `benchmark.mjs` accept the exported snapshot JSON directly. When a
+   settings file argument is omitted, the runner automatically extracts and uses the
+   settings embedded in the exported dataset:
+   ```sh
+   # Run a single algorithm on the exported snapshot:
+   node gym/run.mjs path/to/export.json gym/results/live-export evening-target
+
+   # Benchmark all registered algorithms on the exported snapshot:
+   node gym/benchmark.mjs path/to/export.json gym/results/live-benchmark
+   ```
+
