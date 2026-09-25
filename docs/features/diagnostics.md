@@ -17,7 +17,7 @@ which is pure and shared with the browser bundle.
 
 | Field | Meaning |
 | --- | --- |
-| `origin` | which feature logged it — `battery-control`, `pv-curtailment` or `prices` |
+| `origin` | which feature logged it — `battery-control`, `pv-curtailment`, `prices` or `charge-limit` |
 | `message` | the text; may be several lines |
 | `at` | ISO timestamp, for the downloaded file |
 | `time` | `HH:MM:SS` local, for the box |
@@ -202,7 +202,7 @@ anyone can reach should not put a developer's page at eye level.
 
 - **Filtering or searching in the UI.** The two filters that exist are both
   fixed in code — the decision feed's pair of origins, the Tools box's none —
-  and nothing lets a reader narrow the log themselves. Three origins and 300
-  entries still fit in a scroll; a fourth writer, or a longer buffer, is what
+  and nothing lets a reader narrow the log themselves. Four origins and 300
+  entries still fit in a scroll; a fifth writer, or a longer buffer, is what
   would change that.
 - **Persistence and retention**, deliberately — see above.
