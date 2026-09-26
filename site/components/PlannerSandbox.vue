@@ -184,7 +184,19 @@ function download() {
       <p>Battery SoC across the imported horizon: solid = planned; dashed = unrestricted. Exact timestamps and values are below.</p>
       <button type="button" @click="download">Download inputs and calculated plan</button>
       <div class="planner-table" tabindex="0" role="region" aria-label="Interval schedule">
-        <table><thead><tr><th>Interval start</th><th>Solar W</th><th>Load W</th><th>Buy / kWh</th><th>Sell / kWh</th><th>Charge ceiling W</th><th>Output ceiling W</th><th>Charging W</th><th>Discharging W</th><th>SoC %</th><th>Baseline SoC %</th></tr></thead>
+        <table><thead><tr>
+          <th scope="col" title="Interval start" aria-label="Interval start">Start</th>
+          <th scope="col" title="Solar power (W)" aria-label="Solar power (W)">Solar W</th>
+          <th scope="col" title="Household load (W)" aria-label="Household load (W)">Load W</th>
+          <th scope="col" title="Buy price per kWh" aria-label="Buy price per kWh">Buy/kWh</th>
+          <th scope="col" title="Sell price per kWh" aria-label="Sell price per kWh">Sell/kWh</th>
+          <th scope="col" title="Charge ceiling (W)" aria-label="Charge ceiling (W)">In cap W</th>
+          <th scope="col" title="Output ceiling (W)" aria-label="Output ceiling (W)">Out cap W</th>
+          <th scope="col" title="Charging power (W)" aria-label="Charging power (W)">In W</th>
+          <th scope="col" title="Discharging power (W)" aria-label="Discharging power (W)">Out W</th>
+          <th scope="col" title="Battery state of charge (%)" aria-label="Battery state of charge (%)">SoC %</th>
+          <th scope="col" title="Unrestricted baseline state of charge (%)" aria-label="Unrestricted baseline state of charge (%)">Base %</th>
+        </tr></thead>
           <tbody><tr v-for="p in plan.points" :key="p.start"><td>{{ time(p.start) }}{{ p.estimatedPrice ? " (estimated price)" : "" }}</td><td>{{ (p.generatedSolarW ?? p.solarW).toFixed(0) }}</td><td>{{ p.loadW.toFixed(0) }}</td><td>{{ p.buy.toFixed(4) }}</td><td>{{ p.sell.toFixed(4) }}</td><td>{{ p.limitW }}</td><td>{{ p.dischargeLimitW ?? "Native" }}</td><td>{{ p.chargeW.toFixed(0) }}</td><td>{{ p.dischargeW.toFixed(0) }}</td><td>{{ p.soc.toFixed(1) }}</td><td>{{ p.baselineSoc.toFixed(1) }}</td></tr></tbody>
         </table>
       </div>
@@ -200,11 +212,10 @@ function download() {
 .planner-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; margin-top: 1rem; }
 .planner pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .planner-table { overflow-x: auto; }
-.planner-table table { font-size: 0.85rem; white-space: nowrap; }
+.planner-table table { display: table; width: 100%; font-size: 0.85rem; white-space: nowrap; }
+.planner-table th, .planner-table td { padding: 6px 8px; }
 .planner svg { width: 100%; color: var(--vp-c-text-2); }
 .planner svg text { fill: currentColor; font-size: 12px; }
 .planner [role="alert"] { color: var(--vp-c-danger-1); }
 </style>
-
-
 

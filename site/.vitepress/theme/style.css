@@ -1,0 +1,21 @@
+:root {
+  --site-content-max-width: 1240px;
+}
+
+/* Share a bounded reading/work area across docs and the planner. Navigation
+   and the optional outline still consume space on pages that include them. */
+:root .Layout .VPDoc .container,
+:root .Layout .VPDoc:not(.has-sidebar) .container {
+  max-width: calc(var(--site-content-max-width) + 64px);
+}
+
+:root .Layout .VPDoc .content,
+:root .Layout .VPDoc:not(.has-sidebar) .content {
+  min-width: 0;
+  max-width: none;
+}
+
+:root .Layout .VPDoc .content-container,
+:root .Layout .VPDoc.has-aside .content-container {
+  max-width: var(--site-content-max-width);
+}
