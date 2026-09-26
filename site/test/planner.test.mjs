@@ -1,7 +1,34 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { evening } from "../../addon/app/lib/charge-evening.ts";
+import { evening, replay } from "../../addon/app/lib/charge-evening.ts";
 import { parseDataset, runPlanner } from "../lib/planner.ts";
+
+test("opens a whole morning restriction without sacrificing either evening target", async () => {
+  // Numeric forecast only: no exported device identities or household metadata.
+  const input = JSON.parse(
+    readFileSync(
+      new URL("./fixtures/morning-headroom.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const plan = await evening(input, input.settings);
+  assert.ok(plan.points.slice(0, 8).every((p) => p.dischargeLimitW === 2000));
+  assert.ok(plan.points.slice(0, 8).every((p) => p.dischargeW === 0));
+  // The old local search scored 0.6056077758 on this snapshot.
+  assert.ok(plan.searchObjective < 0.6056);
+  for (const haircut of [0, 0.2]) {
+    const run = replay(
+      input,
+      plan.points.map((p) => p.limitW),
+      input.settings,
+      haircut,
+      plan.points.map((p) => p.dischargeLimitW),
+    );
+    assert.ok(Math.abs(run.deadlineSoc - 100) < 1e-7);
+    assert.ok(run.points.every((p) => p.soc >= 5 - 1e-7));
+  }
+});
 
 function fixture() {
   const start = Date.parse("2026-09-25T12:00:00Z");

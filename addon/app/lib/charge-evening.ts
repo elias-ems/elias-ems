@@ -299,6 +299,35 @@ export async function evening(data: EveningData, settings: EveningSettings) {
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       }
+      // A restriction can span several local blocks. Opening only part adds
+      // switches, trapping the search even when opening the whole run wins.
+      // Try unrestricted output and each constant run against the same costs
+      // and both deadline constraints; equal scores favour spike headroom.
+      const ranges: [number, number][] = [[0, dischargeLimits.length]];
+      for (let start = 0; start < dischargeLimits.length; ) {
+        let end = start + 1;
+        while (
+          end < dischargeLimits.length &&
+          dischargeLimits[end] === dischargeLimits[start]
+        )
+          end++;
+        ranges.push([start, end]);
+        start = end;
+      }
+      const maximumOutput = deviceLimit(dischargeModel.maxW, dischargeModel);
+      for (const [start, end] of ranges) {
+        if (dischargeLimits.slice(start, end).every((w) => w === maximumOutput))
+          continue;
+        const candidate = dischargeLimits.slice();
+        candidate.fill(maximumOutput, start, end);
+        const value = evaluate(limits, candidate);
+        if (Number.isFinite(value) && value <= best + 1e-9) {
+          best = value;
+          dischargeLimits.splice(0, dischargeLimits.length, ...candidate);
+          changed = true;
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
     }
     // Block moves let equally priced adjacent slots adopt one stable ceiling.
     for (const size of [4, 1]) {

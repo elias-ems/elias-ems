@@ -1,0 +1,841 @@
+{
+  "model": {
+    "capacityKwh": 3.6,
+    "minSoc": 5,
+    "maxSoc": 100,
+    "soc": 7,
+    "minW": 100,
+    "maxW": 2000,
+    "stepW": 100,
+    "dischargeW": 2000,
+    "dischargeMinW": 0,
+    "dischargeStepW": 100,
+    "efficiency": 0.95,
+    "wearPerKwh": 0.05
+  },
+  "slots": [
+    {
+      "start": 1790406597870,
+      "end": 1790406900000,
+      "solarW": 864.1103263728182,
+      "loadW": 688.7142857146385,
+      "buy": 0.34371984,
+      "sell": 0.174336,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790406900000,
+      "end": 1790407800000,
+      "solarW": 864.1103263728182,
+      "loadW": 688.7142857146385,
+      "buy": 0.3143112,
+      "sell": 0.14768000000000003,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790407800000,
+      "end": 1790408700000,
+      "solarW": 864.1103263728182,
+      "loadW": 688.7142857146385,
+      "buy": 0.2851188,
+      "sell": 0.12122000000000001,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790408700000,
+      "end": 1790409600000,
+      "solarW": 864.1103263728182,
+      "loadW": 688.7142857146385,
+      "buy": 0.27279312000000006,
+      "sell": 0.11004799999999999,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790409600000,
+      "end": 1790410500000,
+      "solarW": 1278.9306096450923,
+      "loadW": 1204.8144285711367,
+      "buy": 0.27798288000000004,
+      "sell": 0.11475199999999998,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790410500000,
+      "end": 1790411400000,
+      "solarW": 1278.9306096450923,
+      "loadW": 1204.8144285711367,
+      "buy": 0.26522472,
+      "sell": 0.103188,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790411400000,
+      "end": 1790412300000,
+      "solarW": 1278.9306096450923,
+      "loadW": 1204.8144285711367,
+      "buy": 0.24835800000000002,
+      "sell": 0.08789999999999999,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790412300000,
+      "end": 1790413200000,
+      "solarW": 1278.9306096450923,
+      "loadW": 1204.8144285711367,
+      "buy": 0.24587124000000002,
+      "sell": 0.085646,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790413200000,
+      "end": 1790414100000,
+      "solarW": 2015.3239445893112,
+      "loadW": 1804.6228571429526,
+      "buy": 0.21970620000000002,
+      "sell": 0.06193,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790414100000,
+      "end": 1790415000000,
+      "solarW": 2015.3239445893112,
+      "loadW": 1804.6228571429526,
+      "buy": 0.20121768,
+      "sell": 0.045172000000000004,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790415000000,
+      "end": 1790415900000,
+      "solarW": 2015.3239445893112,
+      "loadW": 1804.6228571429526,
+      "buy": 0.18489156000000004,
+      "sell": 0.030373999999999998,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790415900000,
+      "end": 1790416800000,
+      "solarW": 2015.3239445893112,
+      "loadW": 1804.6228571429526,
+      "buy": 0.19397364,
+      "sell": 0.038606,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790416800000,
+      "end": 1790417700000,
+      "solarW": 3025.9290140700023,
+      "loadW": 2537.6910714283645,
+      "buy": 0.18683772,
+      "sell": 0.032138,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790417700000,
+      "end": 1790418600000,
+      "solarW": 3025.9290140700023,
+      "loadW": 2537.6910714283645,
+      "buy": 0.18543216,
+      "sell": 0.030864000000000003,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 1465.8423716970678,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 1465.8423716970678,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 1560.0866423729346,
+        "modulatingArrays": [
+          {
+            "availableW": 1560.0866423729346,
+            "floorW": 100,
+            "ceilingW": 4500
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 4500,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790418600000,
+      "end": 1790419500000,
+      "solarW": 3025.9290140700023,
+      "loadW": 2537.6910714283645,
+      "buy": 0.17808000000000002,
+      "sell": 0.0242,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 1465.8423716970678,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 1465.8423716970678,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 1560.0866423729346,
+        "modulatingArrays": [
+          {
+            "availableW": 1560.0866423729346,
+            "floorW": 100,
+            "ceilingW": 4000
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 4000,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790419500000,
+      "end": 1790420400000,
+      "solarW": 3025.9290140700023,
+      "loadW": 2537.6910714283645,
+      "buy": 0.16932228,
+      "sell": 0.016262,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 2114.5396685138703,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 2114.5396685138703,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 2187.484391679449,
+        "modulatingArrays": [
+          {
+            "availableW": 2187.484391679449,
+            "floorW": 100,
+            "ceilingW": 3500
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 3500,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790420400000,
+      "end": 1790421300000,
+      "solarW": 4302.024060193319,
+      "loadW": 3380.528857143624,
+      "buy": 0.16229448000000002,
+      "sell": 0.009891999999999998,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 2114.5396685138703,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 2114.5396685138703,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 2187.484391679449,
+        "modulatingArrays": [
+          {
+            "availableW": 2187.484391679449,
+            "floorW": 100,
+            "ceilingW": 3500
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 3500,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790421300000,
+      "end": 1790422200000,
+      "solarW": 4302.024060193319,
+      "loadW": 3380.528857143624,
+      "buy": 0.1586184,
+      "sell": 0.00656,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 2114.5396685138703,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 2114.5396685138703,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 2187.484391679449,
+        "modulatingArrays": [
+          {
+            "availableW": 2187.484391679449,
+            "floorW": 100,
+            "ceilingW": 3500
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 3500,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790422200000,
+      "end": 1790423100000,
+      "solarW": 4302.024060193319,
+      "loadW": 3380.528857143624,
+      "buy": 0.16110516000000003,
+      "sell": 0.008813999999999999,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 2114.5396685138703,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 2114.5396685138703,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 2187.484391679449,
+        "modulatingArrays": [
+          {
+            "availableW": 2187.484391679449,
+            "floorW": 100,
+            "ceilingW": 3500
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 3500,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790423100000,
+      "end": 1790424000000,
+      "solarW": 4302.024060193319,
+      "loadW": 3380.528857143624,
+      "buy": 0.16110516000000003,
+      "sell": 0.008813999999999999,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 250,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 2238.4885183302986,
+            "ceilingW": 5000,
+            "stepW": 250,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 2253.2106582000815,
+        "modulatingArrays": [
+          {
+            "availableW": 2253.2106582000815,
+            "floorW": 100
+          }
+        ],
+        "floorW": 100,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790424000000,
+      "end": 1790424900000,
+      "solarW": 4491.69917653038,
+      "loadW": 2030.6142857139862,
+      "buy": 0.14607648,
+      "sell": -0.004808,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 250,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 2238.4885183302986,
+            "ceilingW": 5000,
+            "stepW": 250,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 2253.2106582000815,
+        "modulatingArrays": [
+          {
+            "availableW": 2253.2106582000815,
+            "floorW": 100
+          }
+        ],
+        "floorW": 100,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790424900000,
+      "end": 1790425800000,
+      "solarW": 4491.69917653038,
+      "loadW": 2030.6142857139862,
+      "buy": 0.14834700000000003,
+      "sell": -0.002749999999999999,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 2238.4885183302986,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 2238.4885183302986,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 2253.2106582000815,
+        "modulatingArrays": [
+          {
+            "availableW": 2253.2106582000815,
+            "floorW": 100,
+            "ceilingW": 3500
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 3500,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790425800000,
+      "end": 1790426700000,
+      "solarW": 4491.69917653038,
+      "loadW": 2030.6142857139862,
+      "buy": 0.16002396000000002,
+      "sell": 0.007834,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 2238.4885183302986,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 2238.4885183302986,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 2253.2106582000815,
+        "modulatingArrays": [
+          {
+            "availableW": 2253.2106582000815,
+            "floorW": 100,
+            "ceilingW": 4000
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 4000,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790426700000,
+      "end": 1790427600000,
+      "solarW": 4491.69917653038,
+      "loadW": 2030.6142857139862,
+      "buy": 0.16932228,
+      "sell": 0.016262,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 1867.9627697987187,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 1867.9627697987187,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 1888.7241954923177,
+        "modulatingArrays": [
+          {
+            "availableW": 1888.7241954923177,
+            "floorW": 100,
+            "ceilingW": 3500
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 3500,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790427600000,
+      "end": 1790428500000,
+      "solarW": 3756.6869652910364,
+      "loadW": 1854.9687142857208,
+      "buy": 0.15969960000000002,
+      "sell": 0.007539999999999998,
+      "estimatedPrice": false
+    },
+    {
+      "curtailment": {
+        "fixedW": 1867.9627697987187,
+        "deadbandW": 50,
+        "fixedArrays": [
+          {
+            "availableW": 1867.9627697987187,
+            "ceilingW": 5000,
+            "initiallyStepped": false
+          }
+        ],
+        "availableW": 1888.7241954923177,
+        "modulatingArrays": [
+          {
+            "availableW": 1888.7241954923177,
+            "floorW": 100,
+            "ceilingW": 4500
+          }
+        ],
+        "floorW": 100,
+        "ceilingW": 4500,
+        "gridTargetW": -250,
+        "exportAllowanceW": 0
+      },
+      "start": 1790428500000,
+      "end": 1790429400000,
+      "solarW": 3756.6869652910364,
+      "loadW": 1854.9687142857208,
+      "buy": 0.17808000000000002,
+      "sell": 0.0242,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790429400000,
+      "end": 1790430300000,
+      "solarW": 3756.6869652910364,
+      "loadW": 1854.9687142857208,
+      "buy": 0.2180844,
+      "sell": 0.06046,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790430300000,
+      "end": 1790431200000,
+      "solarW": 3756.6869652910364,
+      "loadW": 1854.9687142857208,
+      "buy": 0.24316824,
+      "sell": 0.08319599999999999,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790431200000,
+      "end": 1790432100000,
+      "solarW": 3049.30178166283,
+      "loadW": 1234.818000000063,
+      "buy": 0.22911264,
+      "sell": 0.070456,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790432100000,
+      "end": 1790433000000,
+      "solarW": 3049.30178166283,
+      "loadW": 1234.818000000063,
+      "buy": 0.26327856000000005,
+      "sell": 0.101424,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790433000000,
+      "end": 1790433900000,
+      "solarW": 3049.30178166283,
+      "loadW": 1234.818000000063,
+      "buy": 0.27636108000000004,
+      "sell": 0.11328199999999998,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790433900000,
+      "end": 1790434800000,
+      "solarW": 3049.30178166283,
+      "loadW": 1234.818000000063,
+      "buy": 0.30793212000000003,
+      "sell": 0.14189799999999997,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790434800000,
+      "end": 1790435700000,
+      "solarW": 2481.356964018846,
+      "loadW": 1300.5302142858163,
+      "buy": 0.29949876,
+      "sell": 0.13425399999999998,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790435700000,
+      "end": 1790436600000,
+      "solarW": 2481.356964018846,
+      "loadW": 1300.5302142858163,
+      "buy": 0.33809760000000005,
+      "sell": 0.16924,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790436600000,
+      "end": 1790437500000,
+      "solarW": 2481.356964018846,
+      "loadW": 1300.5302142858163,
+      "buy": 0.34220616000000004,
+      "sell": 0.172964,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790437500000,
+      "end": 1790438400000,
+      "solarW": 2481.356964018846,
+      "loadW": 1300.5302142858163,
+      "buy": 0.34815276000000006,
+      "sell": 0.178354,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790438400000,
+      "end": 1790439300000,
+      "solarW": 1293.8749451316176,
+      "loadW": 844.6428571427467,
+      "buy": 0.33896256,
+      "sell": 0.170024,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790439300000,
+      "end": 1790440200000,
+      "solarW": 1293.8749451316176,
+      "loadW": 844.6428571427467,
+      "buy": 0.35691048000000003,
+      "sell": 0.186292,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790440200000,
+      "end": 1790441100000,
+      "solarW": 1293.8749451316176,
+      "loadW": 844.6428571427467,
+      "buy": 0.37323660000000003,
+      "sell": 0.20109,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790441100000,
+      "end": 1790442000000,
+      "solarW": 1293.8749451316176,
+      "loadW": 844.6428571427467,
+      "buy": 0.38804903999999996,
+      "sell": 0.21451599999999998,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790442000000,
+      "end": 1790442900000,
+      "solarW": 239.21646836492437,
+      "loadW": 624.4999999997115,
+      "buy": 0.37485840000000004,
+      "sell": 0.20256000000000002,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790442900000,
+      "end": 1790443800000,
+      "solarW": 239.21646836492437,
+      "loadW": 624.4999999997115,
+      "buy": 0.3840486,
+      "sell": 0.21089000000000002,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790443800000,
+      "end": 1790444700000,
+      "solarW": 239.21646836492437,
+      "loadW": 624.4999999997115,
+      "buy": 0.39821232,
+      "sell": 0.22372799999999998,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790444700000,
+      "end": 1790445600000,
+      "solarW": 239.21646836492437,
+      "loadW": 624.4999999997115,
+      "buy": 0.4063213200000001,
+      "sell": 0.231078,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790445600000,
+      "end": 1790446500000,
+      "solarW": 0,
+      "loadW": 565.1428571428515,
+      "buy": 0.3932388,
+      "sell": 0.21921999999999997,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790446500000,
+      "end": 1790447400000,
+      "solarW": 0,
+      "loadW": 565.1428571428515,
+      "buy": 0.3856704000000001,
+      "sell": 0.21236,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790447400000,
+      "end": 1790448300000,
+      "solarW": 0,
+      "loadW": 565.1428571428515,
+      "buy": 0.37539900000000004,
+      "sell": 0.20305,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790448300000,
+      "end": 1790449200000,
+      "solarW": 0,
+      "loadW": 565.1428571428515,
+      "buy": 0.3640464,
+      "sell": 0.19276,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790449200000,
+      "end": 1790450100000,
+      "solarW": 0,
+      "loadW": 452.35714285723003,
+      "buy": 0.37074984000000005,
+      "sell": 0.198836,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790450100000,
+      "end": 1790451000000,
+      "solarW": 0,
+      "loadW": 452.35714285723003,
+      "buy": 0.36210024,
+      "sell": 0.190996,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790451000000,
+      "end": 1790451900000,
+      "solarW": 0,
+      "loadW": 452.35714285723003,
+      "buy": 0.3570186,
+      "sell": 0.18639,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790451900000,
+      "end": 1790452800000,
+      "solarW": 0,
+      "loadW": 452.35714285723003,
+      "buy": 0.35107200000000005,
+      "sell": 0.181,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790452800000,
+      "end": 1790453700000,
+      "solarW": 0,
+      "loadW": 316.6428571428404,
+      "buy": 0.35864039999999997,
+      "sell": 0.18785999999999997,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790453700000,
+      "end": 1790454600000,
+      "solarW": 0,
+      "loadW": 316.6428571428404,
+      "buy": 0.35172072,
+      "sell": 0.18158799999999997,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790454600000,
+      "end": 1790455500000,
+      "solarW": 0,
+      "loadW": 316.6428571428404,
+      "buy": 0.34858524,
+      "sell": 0.17874599999999996,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790455500000,
+      "end": 1790456400000,
+      "solarW": 0,
+      "loadW": 316.6428571428404,
+      "buy": 0.34231428,
+      "sell": 0.173062,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790456400000,
+      "end": 1790457300000,
+      "solarW": 0,
+      "loadW": 291.2142857142775,
+      "buy": 0.34588224000000006,
+      "sell": 0.176296,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790457300000,
+      "end": 1790458200000,
+      "solarW": 0,
+      "loadW": 291.2142857142775,
+      "buy": 0.33853008,
+      "sell": 0.169632,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790458200000,
+      "end": 1790459100000,
+      "solarW": 0,
+      "loadW": 291.2142857142775,
+      "buy": 0.3322591200000001,
+      "sell": 0.16394799999999998,
+      "estimatedPrice": false
+    },
+    {
+      "start": 1790459100000,
+      "end": 1790460000000,
+      "solarW": 0,
+      "loadW": 291.2142857142775,
+      "buy": 0.3270693600000001,
+      "sell": 0.159244,
+      "estimatedPrice": false
+    }
+  ],
+  "terminalReserveKwh": 2.424285714285566,
+  "settings": {
+    "deadline": "2026-09-26T16:00:00.000Z",
+    "targetSoc": 100,
+    "solarHaircut": 0.2,
+    "switchCost": 0.002,
+    "passes": 4,
+    "spikeBufferKwh": 0.54
+  }
+}

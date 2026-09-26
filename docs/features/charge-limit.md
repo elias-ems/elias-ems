@@ -7,6 +7,12 @@ morning before solar recovery. This is independent of target-power steering.
 Elias does not request grid charging or change the operating mode or native SoC
 limits. The minimum charge setting (for example 5%) remains the protective floor.
 
+The output search also tries opening an entire constant-ceiling stretch and the
+whole forecast horizon. This avoids unnecessary restrictions that persist when
+opening only a short block would add switching costs. These moves must preserve
+the reachable evening target in both forecast and reduced-solar simulations and
+must not worsen the objective; equal scores favor output headroom for load spikes.
+
 ## Setup
 
 In Settings → Batteries, edit the battery:
