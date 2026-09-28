@@ -56,7 +56,7 @@ export const chargeBatteryFixture = {
   energyEntityId: "sensor.battery_energy_total",
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
-  steered: false,
+  steered: true,
   maxChargePowerW: 2000,
   maxDischargePowerW: 2000,
   chargeLimitEntityId: "number.battery_charge_limit",

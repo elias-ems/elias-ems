@@ -51,7 +51,7 @@ and Home Assistant does not, so they are typed in; the rest are entities.
 | **Energy (kWh)** | Cumulative energy counter. |
 | **Power (W)** | Current power — **positive charging, negative discharging**. |
 | **Charge — state of charge (%)** | The battery's SoC. |
-| **Steer this battery** | Whether Elias ems publishes targets for it at all. |
+| **Steer this battery** | Whether the selected strategy may control this battery. |
 | **Maximum charge power (W)** — optional | Cap on charge power. |
 | **Maximum discharge power (W)** — optional | Cap on discharge power, as a **positive** number. |
 
@@ -69,9 +69,15 @@ capable of. Setting 20 and 90 does not stop the battery's own logic charging to
 
 ### Watched vs. steered, and the event named after the title
 
-Elias ems does not write to your battery. Every target goes out as a Home
-Assistant **event**, and an automation you write turns that into whatever your
-inverter wants.
+Both strategies use **Steer this battery** to select which batteries they may
+control. Leave it unchecked to monitor a battery without controlling it.
+
+**Optimize charge limits** writes the configured power-limit entities while the
+device stays in native self-consumption. It currently supports one configured
+household battery; see [setup and requirements](/internals/charge-limit).
+
+**Net zero energy** sends each target as a Home Assistant **event**, and an
+automation you write turns that into whatever your inverter wants.
 
 Each battery gets **its own event type, named after its title**:
 
@@ -88,12 +94,12 @@ automation.
 
 [Writing that automation is its own page →](/guide/battery-control#connecting-the-event-to-your-battery)
 
-**Steer this battery** is what decides whether any of that happens. Leave it
+**Steer this battery** authorizes either strategy. Leave it
 unticked and the battery still appears on the dashboard, still counts as part of
 the house, and simply never gets told what to do — a supported state, not an
 unfinished one. **Control cannot be switched on until at least one battery is
-steered**, and the checkbox stays disabled until then. The rule is "at least
-one", not "all" — a house can reasonably have one steered battery and one that
+steered**, and the checkbox stays disabled until then. For Net zero energy,
+the rule is "at least one", not "all" — a house can reasonably have one steered battery and one that
 only reports.
 
 ::: danger Renaming a battery renames its event
@@ -177,10 +183,10 @@ The two formulas are the substance of it, and they have a page of their own:
 | Field | Default | Notes |
 | --- | --- | --- |
 | **Enabled** | off | Disabled until at least one battery is steered. |
-| **Strategy** | Net-zero energy | The only one so far. |
+| **Strategy** | Net zero energy | Net zero energy or Optimize charge limits. |
 | **Loop interval (seconds)** | 5 | 1–3600. |
 
-The interval is a **rate limit, not a schedule**: at most one decision per
+For Net zero energy, the interval is a **rate limit, not a schedule**: at most one decision per
 interval. The loop does not wait for a timer to notice the meter moved — Home
 Assistant tells it, and it acts as soon as the event arrives, subject to that
 limit. A change arriving inside the window schedules a tick for when the window

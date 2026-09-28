@@ -46,11 +46,11 @@ export function chargeLimitControl(
       settingsHref: "/settings#battery-control",
       action: "Configure battery control",
     };
-  if (batteryCount !== 1 || !battery.chargeLimitEntityId || battery.steered)
+  if (batteryCount !== 1 || !battery.chargeLimitEntityId || !battery.steered)
     return {
       state: "blocked",
       message:
-        "Configure one battery with a maximum charge limit entity and turn off its target-power steering.",
+        "Configure one battery with a maximum charge limit entity and enable Steer this battery.",
       settingsHref: "/settings#batteries",
       action: "Edit battery",
     };

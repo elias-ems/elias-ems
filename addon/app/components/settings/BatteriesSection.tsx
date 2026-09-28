@@ -33,7 +33,7 @@ export default function BatteriesSection({
     <Section
       id="batteries"
       title="Batteries"
-      description="Capacity and the charge window are typed in; the readings come from Home Assistant. A steered battery's target power goes out as an event named after its title."
+      description="Capacity and the charge window are typed in; the readings come from Home Assistant. The selected battery control strategy controls batteries with Steer this battery enabled."
       add={{
         label: "Add battery",
         open: editor.showAdd,
@@ -67,10 +67,11 @@ export default function BatteriesSection({
             <div style={{ fontSize: "0.875rem" }}>
               {isSteerable(battery) ? (
                 <>
-                  Steered — <code>{targetEventType(batterySlug(battery))}</code>
+                  Steered; net-zero event:{" "}
+                  <code>{targetEventType(batterySlug(battery))}</code>
                 </>
               ) : (
-                "Target-power steering off"
+                "Watched — steering off"
               )}
             </div>
             {battery.chargeLimitEntityId && (
@@ -214,7 +215,7 @@ export default function BatteriesSection({
 
 /**
  * Whether this battery is steered at all — the one thing that decides if a
- * target is ever published for it. A checkbox rather than the presence of
+ * strategy may control it. A checkbox rather than the presence of
  * some other field, so that "watched, not steered" is something chosen rather
  * than something arrived at by leaving a box empty.
  *
@@ -239,9 +240,9 @@ function SteeredField({ defaultChecked }: { defaultChecked: boolean }) {
         </label>
       </div>
       <p style={hintStyle}>
-        Publishes its target power as an event whenever control decides
-        something. Leave this off for native self-consumption. Charge-limit
-        optimization is configured separately and does not publish target power.
+        Allows the selected battery control strategy to control this battery.
+        Net zero energy publishes target-power events; Optimize charge limits
+        adjusts its configured power limits. Leave this off to only monitor it.
       </p>
     </div>
   );

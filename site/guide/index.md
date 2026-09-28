@@ -25,7 +25,7 @@ configured entirely from its own pages — no YAML.
 | **Home Assistant** | A **Supervisor-based** install: Home Assistant OS or Home Assistant Supervised. Core-only and plain Docker installs have no Add-on Store and cannot run this. |
 | **Architecture** | `aarch64` or `amd64`. 32-bit ARM (`armv7`) is not supported — Home Assistant dropped it, and the Node 24 runtime the add-on is built on publishes no 32-bit ARM images to base one on. |
 | **A grid sensor** | One entity giving **instantaneous power in watts, signed**: positive importing, negative exporting. See [the note on signed sensors](/guide/configure#the-grid-sensor) if yours is an import/export pair. |
-| **A battery** | Entities for its cumulative energy (kWh), current power (W) and state of charge (%). To have it *steered* rather than merely watched, it also needs an [automation](/guide/battery-control#connecting-the-event-to-your-battery) listening for the event named after it — a few lines of YAML, and the one place your inverter's own quirks live. |
+| **A battery** | Entities for its cumulative energy (kWh), current power (W) and state of charge (%). Check **Steer this battery** to allow control. Net zero energy needs an [automation](/guide/battery-control#connecting-the-event-to-your-battery) listening for its target event; [Optimize charge limits](/internals/charge-limit) needs writable power-limit entities. |
 
 ## What works today
 

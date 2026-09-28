@@ -3,7 +3,10 @@
 Elias optimizes a battery's **maximum charging power** and optional **maximum AC
 output power** while it remains in native self-consumption mode. Reducing output
 during cheaper hours preserves energy for higher-priced demand, including the
-morning before solar recovery. This is independent of target-power steering.
+morning before solar recovery. Like Net zero energy, this strategy only controls
+a battery when **Steer this battery** is checked. Unchecking it restores owned
+power limits and leaves the battery monitored only. The planner still requires
+one configured household battery.
 Elias does not request grid charging or change the operating mode or native SoC
 limits. The minimum charge setting (for example 5%) remains the protective floor.
 
@@ -17,7 +20,7 @@ must not worsen the objective; equal scores favor output headroom for load spike
 
 In Settings → Batteries, edit the battery:
 
-1. Turn off **Steer this battery**. Set self-consumption on the device itself.
+1. Turn on **Steer this battery**. Set self-consumption on the device itself.
 2. Match the capacity, minimum/maximum SoC, and charge/discharge hardware limits
    to the battery's native configuration. Elias does not change its SoC settings.
 3. Search for its **Maximum charge limit (W)** entity. The integration must expose
@@ -37,7 +40,9 @@ In Settings → Batteries, edit the battery:
 
 Existing per-battery Off/Preview/Active selections no longer authorize writes.
 Upgrades retain the entity and automatically show a passive preview. Activation
-requires the new strategy to be explicitly selected and enabled. Previously
+requires the strategy to be explicitly selected and enabled, with **Steer this
+battery** checked. Existing unchecked batteries remain unchecked after an
+upgrade: check the box to resume optimization. Previously
 applied limits are recovered through the restoration journal. Battery-specific
 margin and wear values remain the fallback until global values are supplied.
 

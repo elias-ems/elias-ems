@@ -87,7 +87,7 @@ export default function ControlSection({
         {!eligible && (
           <p style={errors.enabled ? errorStyle : hintStyle}>
             {strategy === "charge-limit"
-              ? "Configure one battery with a charge limit entity and turn off its target-power steering."
+              ? "Configure one battery with a charge limit entity and enable Steer this battery."
               : NO_STEERABLE_BATTERY_ERROR}
           </p>
         )}

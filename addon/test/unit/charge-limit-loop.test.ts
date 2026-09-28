@@ -48,7 +48,7 @@ const battery: Battery = {
   energyEntityId: "sensor.energy",
   powerEntityId: "sensor.power",
   socEntityId: "sensor.soc",
-  steered: false,
+  steered: true,
   maxChargePowerW: 2000,
   maxDischargePowerW: 2000,
   chargeLimitEntityId: "number.charge_limit",
@@ -158,7 +158,7 @@ describe("charge limit execution and recovery", () => {
 
   it("reports disabled, conflicting and paused settings without calculating a plan", async () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
-    await saveBattery({ ...battery, steered: true });
+    await saveBattery({ ...battery, steered: false });
     let data = await loop.readChargeLimits();
     expect(data.batteries[0].control.state).toBe("blocked");
     expect(renderPlan(data)).toContain("Edit battery");
@@ -256,7 +256,7 @@ describe("charge limit execution and recovery", () => {
     expect(status.message).toContain("Hypothetical");
     expect(mocks.set).not.toHaveBeenCalled();
   });
-  it("does not write in preview and works without target steering", async () => {
+  it("does not write in preview even when steering is enabled", async () => {
     await writeFile(
       path.join(directory, "control.json"),
       JSON.stringify({ enabled: false, strategy: "charge-limit" }),
@@ -266,6 +266,25 @@ describe("charge limit execution and recovery", () => {
     expect(mocks.calculate).toHaveBeenCalledOnce();
     expect(mocks.set).not.toHaveBeenCalled();
     expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
+  });
+  it("previews without writing when the battery is not steered", async () => {
+    await saveBattery({ ...battery, steered: false });
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    expect(mocks.calculate).toHaveBeenCalledOnce();
+    expect(mocks.set).not.toHaveBeenCalled();
+    expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
+  });
+  it("restores owned limits when steering is unchecked between plans", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    expect(current).toBe(400);
+    await saveBattery({ ...battery, steered: false });
+    await loop.chargeLimitTick(now + 30_000);
+    expect(current).toBe(2000);
+    expect((await loop.readChargeLimits()).batteries[0].control.state).toBe(
+      "blocked",
+    );
   });
   it("writes a cap, confirms readback, throttles and restores the previous value on disable", async () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
@@ -336,13 +355,13 @@ describe("charge limit execution and recovery", () => {
     await loop.chargeLimitTick(now);
     expect(current).toBe(2000);
   });
-  it("blocks conflicting steering, curtailment and multiple batteries", async () => {
+  it("blocks unchecked steering and curtailment", async () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
-    await saveBattery({ ...battery, steered: true });
+    await saveBattery({ ...battery, steered: false });
     await loop.chargeLimitTick(now);
     expect(mocks.set).not.toHaveBeenCalled();
     expect((await loop.readChargeLimits()).batteries[0].message).toContain(
-      "steering",
+      "Steer this battery",
     );
     await saveBattery(battery);
     mocks.curtail.mockResolvedValue({ enabled: true });
