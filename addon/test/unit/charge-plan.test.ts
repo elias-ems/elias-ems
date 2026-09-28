@@ -37,6 +37,35 @@ const slot = (
 });
 
 describe("native self-consumption charging plan", () => {
+  it.each([0.1, 0, -0.1])(
+    "serves known evening demand instead of holding a full terminal reserve (lowest price %s)",
+    async (lowestPrice) => {
+      const slots = [slot(0, 0, 0, 0, lowestPrice), slot(1, 0, 500, 0, 0.4)];
+      const full = {
+        ...model,
+        soc: 100,
+        dischargeMinW: 0,
+        dischargeStepW: 100,
+      };
+      const settings = {
+        deadline: new Date(slots[0].end).toISOString(),
+        targetSoc: 100,
+        solarHaircut: 0.2,
+        switchCost: 0,
+        passes: 4,
+        spikeBufferKwh: 0,
+      };
+      for (const plan of [
+        await optimizeCharge(slots, full, 1),
+        await evening({ slots, model: full, terminalReserveKwh: 1 }, settings),
+      ]) {
+        expect(plan.points[0].soc).toBeCloseTo(100);
+        expect(plan.points[1].dischargeW).toBeCloseTo(500);
+        expect(plan.points[1].soc).toBeCloseTo(50);
+      }
+    },
+  );
+
   it("starts a fixed step only on surplus, holds through demand, and releases on price recovery", () => {
     const forecast: ChargeInterval = {
       ...slot(0, 1000, 500, -0.1),

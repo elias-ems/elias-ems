@@ -204,6 +204,10 @@ export async function evening(data: EveningData, settings: EveningSettings) {
     }
     return bufferReference.penalties;
   };
+  // Value unknown future demand at the cheapest published import price. A
+  // negative price removes the reserve incentive rather than rewarding waste.
+  const reservePrice =
+    Math.max(0, Math.min(...data.slots.map((s) => s.buy))) * m.efficiency;
   const evaluate = (candidate: number[], output = dischargeLimits) => {
     const runs = haircuts.map((h) =>
       replay(data, candidate, settings, h, output),
@@ -230,8 +234,7 @@ export async function evening(data: EveningData, settings: EveningSettings) {
               ) -
               (r.endSoc * m.capacityKwh) / 100,
           ) *
-            Math.max(0, ...data.slots.map((s) => s.buy)) *
-            m.efficiency,
+            reservePrice,
         0,
       ) /
         runs.length +

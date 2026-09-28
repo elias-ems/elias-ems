@@ -241,7 +241,9 @@ export async function optimizeCharge(
     ),
   ].reverse();
   const reserve = Math.min(ceiling - floor, terminalReserveKwh);
-  const reservePrice = Math.max(0, ...slots.map((s) => s.buy)) * m.efficiency;
+  // Unknown future prices must not outbid known evening demand at peak prices.
+  const reservePrice =
+    Math.max(0, Math.min(...slots.map((s) => s.buy))) * m.efficiency;
   const values: Float64Array[][] = new Array(slots.length + 1);
   const terminalValues = Float64Array.from(
     { length: count + 1 },
