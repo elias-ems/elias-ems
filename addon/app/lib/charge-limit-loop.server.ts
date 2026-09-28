@@ -281,6 +281,7 @@ export async function chargeLimitTick(now = Date.now()) {
       (!recovered && !lease.paused) ||
       lease.restoring ||
       !battery ||
+      !battery.steered ||
       !active ||
       ![battery.chargeLimitEntityId, battery.dischargeLimitEntityId].includes(
         lease.entityId,
@@ -351,8 +352,8 @@ export async function chargeLimitTick(now = Date.now()) {
         control.enabled &&
           control.strategy !== "charge-limit" &&
           "Hypothetical preview: assumes native self-consumption while another battery strategy is active.",
-        b.steered &&
-          "Turn off target-power steering for this battery before activating charge-limit control.",
+        !b.steered &&
+          "Enable Steer this battery to apply charge-limit control.",
         (await leases()).some((l) => l.batteryId === b.id && l.paused) &&
           "Control is paused after an external change. Save battery settings to resume.",
       ]

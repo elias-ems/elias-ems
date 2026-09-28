@@ -52,7 +52,7 @@ and on the dashboard, and it is what the target event type is derived from.
 | `energyEntityId` | entity | cumulative energy counter, kWh |
 | `powerEntityId` | entity | current power, W — see the sign convention below |
 | `socEntityId` | entity | state of charge, % |
-| `steered` | boolean | whether targets are published for this battery at all |
+| `steered` | boolean | whether the selected strategy may control this battery |
 | `maxChargePowerW` | number | **optional** — cap on charge power, W |
 | `maxDischargePowerW` | number | **optional** — cap on discharge power, W, as a positive number |
 
@@ -159,7 +159,7 @@ what the meter asked for.
 | Field | Default | Notes |
 | --- | --- | --- |
 | `enabled` | `false` | |
-| `strategy` | `"net-zero-energy"` | the only strategy so far |
+| `strategy` | `"net-zero-energy"` | Net zero energy or `"charge-limit"` (Optimize charge limits) |
 | `intervalSeconds` | `5` | 1–3600. A floor between ticks, not a schedule — see [The loop](#the-loop). |
 
 The strategy is stored as an id rather than a boolean so that the price-aware
@@ -769,6 +769,11 @@ tick currently in flight, since advancing a clock only *starts* one.
   durable.
 
 ## Optimize charge limits
+
+Both strategies use **Steer this battery** as their per-battery authorization.
+Net zero energy publishes target-power events; Optimize charge limits writes
+the configured power-limit entities. Unchecked batteries are monitored only.
+Charge-limit planning still supports one configured household battery.
 
 **Evening target** is the single production planner for both preview and active
 control. Older stored algorithm selections are ignored and removed on save.

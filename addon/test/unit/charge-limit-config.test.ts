@@ -15,18 +15,22 @@ function form(overrides: Record<string, string | undefined> = {}) {
   return data;
 }
 describe("charge-limit settings", () => {
-  it("accepts a generic number entity independently of target steering", () => {
-    const parsed = parseBattery(
-      form({
-        chargeLimitEntityId: "number.indevolt_cms_sf2000_feed_in_power_limit",
-      }),
-    );
-    expect(parsed.ok).toBe(true);
-    if (parsed.ok) {
-      expect(parsed.fields.steered).toBe(false);
-      expect(parsed.fields.chargeLimitMode).toBe("preview");
-    }
-  });
+  it.each([false, true])(
+    "accepts charge-limit settings with steering %s",
+    (steered) => {
+      const parsed = parseBattery(
+        form({
+          steered: steered ? "on" : undefined,
+          chargeLimitEntityId: "number.indevolt_cms_sf2000_feed_in_power_limit",
+        }),
+      );
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) {
+        expect(parsed.fields.steered).toBe(steered);
+        expect(parsed.fields.chargeLimitMode).toBe("preview");
+      }
+    },
+  );
   it("does not activate migrated batteries", () => {
     const {
       chargeLimitMode: _mode,
@@ -36,7 +40,6 @@ describe("charge-limit settings", () => {
     expect(normalizeBattery(legacy as Battery).chargeLimitMode).toBe("off");
   });
   it.each([
-    { steered: "on" },
     { dischargeLimitEntityId: "sensor.power" },
     { dischargeLimitEntityId: chargeBatteryFixture.chargeLimitEntityId },
     { chargeLimitEntityId: "sensor.power" },

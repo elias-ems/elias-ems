@@ -717,6 +717,35 @@ describe("POST /settings", () => {
     }
   });
 
+  it.each([false, true])(
+    "requires battery steering to enable charge-limit control: %s",
+    async (steered) => {
+      const { addBattery } = await import("../../app/lib/batteries.server");
+      await addBattery({
+        ...storedBattery,
+        steered,
+        chargeLimitEntityId: "number.charge_limit",
+      });
+      const result = await post({
+        intent: "control-save",
+        enabled: "on",
+        strategy: "charge-limit",
+        intervalSeconds: "5",
+      });
+      const { readControlConfig } = await import(
+        "../../app/lib/control-config.server"
+      );
+      expect((await readControlConfig()).enabled).toBe(steered);
+      if (!steered) {
+        const { payload, status } = failure(result);
+        expect(status).toBe(400);
+        expect(payload).toMatchObject({
+          errors: { enabled: expect.stringContaining("Steer this battery") },
+        });
+      }
+    },
+  );
+
   it("refuses to enable control when no battery is steered", async () => {
     // A loop that decides correctly and commands nothing is indistinguishable
     // from a broken one, so this is a rejection rather than a warning.

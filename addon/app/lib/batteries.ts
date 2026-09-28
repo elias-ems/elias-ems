@@ -16,7 +16,7 @@
 import { slugifyTitle } from "./slug";
 
 export type BatteryFields = {
-  /** Separate from target-power steering; legacy records default to off. */
+  /** Legacy preview setting; authorization comes from steered and global control. */
   chargeLimitMode?: "off" | "preview" | "active";
   chargeLimitEntityId?: string;
   dischargeLimitEntityId?: string;
@@ -40,7 +40,7 @@ export type BatteryFields = {
    * Whether the add-on may command this battery.
    *
    * False means watched but not steered: it still appears on the dashboard and
-   * still counts as part of the house, and no target is ever published for
+   * still counts as part of the house, but neither strategy controls
    * it. A supported state rather than an unfinished one — a house can
    * reasonably have one battery under control and one that only reports.
    *
@@ -307,9 +307,6 @@ export function parseBattery(
   if (chargeLimitMode !== "off") {
     if (!chargeLimitEntityId)
       errors.chargeLimitEntityId = "Pick the maximum charge limit entity.";
-    if (steered)
-      errors.chargeLimitMode =
-        "Turn off target-power steering; this strategy requires native self-consumption.";
     if (!maxChargePowerW.ok || maxChargePowerW.value === null)
       errors.maxChargePowerW =
         "Set the hardware charge ceiling for charge-limit planning.";

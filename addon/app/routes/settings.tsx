@@ -247,7 +247,7 @@ async function settingsAction({ request }: Route.ActionArgs) {
           parsed.config.strategy === "charge-limit"
             ? batteries.length !== 1 ||
               !batteries[0].chargeLimitEntityId ||
-              batteries[0].steered
+              !batteries[0].steered
             : !batteries.some(isSteerable)
         ) {
           return failed({
@@ -256,7 +256,7 @@ async function settingsAction({ request }: Route.ActionArgs) {
             errors: {
               enabled:
                 parsed.config.strategy === "charge-limit"
-                  ? "Configure one battery with a maximum charge limit entity and turn off its target-power steering."
+                  ? "Configure one battery with a maximum charge limit entity and enable Steer this battery."
                   : NO_STEERABLE_BATTERY_ERROR,
             },
           });
@@ -402,7 +402,7 @@ export default function Settings({
             chargeLimit:
               batteries.length === 1 &&
               Boolean(batteries[0].chargeLimitEntityId) &&
-              !batteries[0].steered,
+              batteries[0].steered,
           }}
           actionData={actionData}
         />
