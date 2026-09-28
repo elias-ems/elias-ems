@@ -146,7 +146,11 @@ most 48 hours within published prices and complete solar coverage. No future
 tariffs are fabricated. Beyond that horizon, the planner values stored energy
 for forecast demand before solar recovery, capped by usable battery capacity.
 If recovery is not covered, a full usable reserve is valued conservatively.
-This is a soft terminal value based on available purchase prices, not a promise
+Both planners value this reserve at the lowest published import price, floored
+at zero and adjusted for discharge efficiency. Unknown morning prices therefore
+do not justify saving the entire battery at the highest known price instead of
+serving known evening demand. New published prices inform subsequent plans.
+This is a soft terminal value, not a promise
 of a particular morning SoC. Unexpected demand and insufficient surplus can make
 that reserve unreachable.
 
