@@ -1,7 +1,7 @@
 import loadHighs from "highs";
 import { type Expr, Milp } from "./algebra.ts";
 import { evaluate, step } from "./physics.ts";
-import { preferBalance } from "./relabel.ts";
+import { preferBalance, widenBoundaries } from "./relabel.ts";
 import { inspectSolution } from "./solver-result.ts";
 import type { Command, Input, Mode } from "./types.ts";
 import { validate } from "./validate.ts";
@@ -244,6 +244,10 @@ export async function solve(input: Input, wasmUrl?: string) {
           "Identical intervals relabelled to balance; maximum not proven";
     }
   }
+  // Boundaries the forecast never reaches: widen them so real surplus or
+  // demand beyond the forecast is still absorbed. Runs for balance-only too.
+  const widened = widenBoundaries(input, selected.commands);
+  selected = { commands: widened.commands, scenarios: widened.scenarios };
   const optimal = answer.optimal;
   return {
     status: optimal

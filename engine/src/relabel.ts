@@ -72,3 +72,62 @@ export function preferBalance(input: Input, commands: Command[]) {
   }
   return { commands: current, scenarios, relabelled };
 }
+
+/** Raise each balance interval's boundaries to the device maximum wherever
+ * that replays both scenarios exactly. A limit just above the forecast flow
+ * (4 W of charge for 4 W of surplus) is cost-equivalent to the maximum in the
+ * model, but in reality it caps the battery at the forecast: any extra solar
+ * is exported and any extra load is imported. Never changes energy or cost. */
+export function widenBoundaries(input: Input, commands: Command[]) {
+  const m = input.model;
+  const haircuts = [0, input.solarHaircut];
+  let current = commands;
+  let scenarios = haircuts.map((h) => evaluate(input, current, h));
+  let widened = 0;
+  for (const [i, u] of commands.entries()) {
+    if (u.mode !== "balance") continue;
+    const charge = u.chargeLimitW < m.maxW ? m.maxW : undefined;
+    const discharge =
+      m.dischargeStepW !== undefined && u.dischargeLimitW < m.dischargeW
+        ? m.dischargeW
+        : undefined;
+    const attempts = [
+      { chargeLimitW: charge, dischargeLimitW: discharge },
+      { chargeLimitW: charge, dischargeLimitW: undefined },
+      { chargeLimitW: undefined, dischargeLimitW: discharge },
+    ].filter(
+      (x, j, all) =>
+        (x.chargeLimitW !== undefined || x.dischargeLimitW !== undefined) &&
+        all.findIndex(
+          (y) =>
+            y.chargeLimitW === x.chargeLimitW &&
+            y.dischargeLimitW === x.dischargeLimitW,
+        ) === j,
+    );
+    for (const attempt of attempts) {
+      const candidate = current.map(
+        (v, j): Command =>
+          j === i
+            ? {
+                ...u,
+                chargeLimitW: attempt.chargeLimitW ?? u.chargeLimitW,
+                dischargeLimitW: attempt.dischargeLimitW ?? u.dischargeLimitW,
+              }
+            : v,
+      );
+      let replayed: Scenario[];
+      try {
+        replayed = haircuts.map((h) => evaluate(input, candidate, h));
+      } catch {
+        continue; // Boundary not writable on this device.
+      }
+      if (replayed.every((s, j) => same(s, scenarios[j]))) {
+        current = candidate;
+        scenarios = replayed;
+        widened++;
+        break;
+      }
+    }
+  }
+  return { commands: current, scenarios, widened };
+}

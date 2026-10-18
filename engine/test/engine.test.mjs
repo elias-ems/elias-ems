@@ -3,7 +3,7 @@ import test from "node:test";
 import { simulateCharge } from "../../addon/app/lib/charge-plan.ts";
 import { plan } from "../node.mjs";
 import { evaluate } from "../src/physics.ts";
-import { preferBalance } from "../src/relabel.ts";
+import { preferBalance, widenBoundaries } from "../src/relabel.ts";
 
 function fixture() {
   return {
@@ -490,6 +490,44 @@ test("identical intervals are relabelled to balance without changing the plan", 
     assert.equal(u.dischargeLimitW, 0);
   }
   assert.equal(result.relabelled, 2);
+  for (const [j, scenario] of result.scenarios.entries()) {
+    assert.ok(Math.abs(scenario.cost - before[j].cost) < 1e-12);
+    assert.ok(Math.abs(scenario.finalSoc - before[j].finalSoc) < 1e-9);
+  }
+});
+
+test("boundaries the forecast never reaches widen to the maximum", () => {
+  const input = fixture();
+  input.model.stepW = 1;
+  input.model.dischargeStepW = 1;
+  // 4 W of nominal surplus at noon, none once solar is reduced by 20%.
+  input.slots[1].solarW = 504;
+  const limits = [
+    [0, 0],
+    [4, 0],
+    [0, 300],
+  ];
+  const commands = input.slots.map((s, i) => ({
+    start: s.start,
+    end: s.end,
+    mode: "balance",
+    chargeLimitW: limits[i][0],
+    dischargeLimitW: limits[i][1],
+  }));
+  const before = [0, input.solarHaircut].map((h) =>
+    evaluate(input, commands, h),
+  );
+  const result = widenBoundaries(input, commands);
+  assert.deepEqual(
+    result.commands.map((u) => [u.chargeLimitW, u.dischargeLimitW]),
+    // A discharge limit that holds back stored energy is part of the plan.
+    [
+      [2000, 0],
+      [2000, 0],
+      [2000, 300],
+    ],
+  );
+  assert.equal(result.widened, 3);
   for (const [j, scenario] of result.scenarios.entries()) {
     assert.ok(Math.abs(scenario.cost - before[j].cost) < 1e-12);
     assert.ok(Math.abs(scenario.finalSoc - before[j].finalSoc) < 1e-9);

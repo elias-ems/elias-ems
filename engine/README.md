@@ -82,10 +82,16 @@ boundaries at its setpoint, or at the minimum) reproduces exactly in both
 scenarios is relabelled to balance. The replay must agree on every interval's
 battery flow, PV generation, energy and cost, so this never changes the plan,
 and it also tidies a plan whose cost could not be proven within the budget.
+Finally, every balance interval's charge and discharge boundaries are raised
+to the device maximum wherever that replays both scenarios just as exactly.
+The cost objective is indifferent between a 4 W charge limit for 4 W of
+forecast surplus and a 2000 W one, but on the device the former exports any
+solar beyond the forecast and the latter stores it. A boundary that binds in
+either scenario, such as a discharge limit holding energy back, is kept.
 A limited or rejected second result never replaces the first with a costlier plan;
 the original cost-optimal plan remains available. `balancePreference` reports
-whether the tie-break itself was proven. Limits still apply in balance mode;
-this preference does not maximize those limits or guarantee unrestricted response
+whether the tie-break itself was proven. Binding limits still apply in balance mode;
+this preference does not guarantee unrestricted response
 to unexpected demand. Feasible time-limited incumbents are labeled unproven; no feasible
 incumbent, infeasibility, invalid input or replay mismatch yields no schedule.
 The solver time budget is shared by initialization, construction and both solves;
