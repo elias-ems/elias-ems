@@ -1,5 +1,7 @@
 /** Bounded expression compiler. Every min/max is an equality, never a relaxed
- * inequality: negative tariffs must not buy fictitious charging or grid flows. */
+ * inequality: negative tariffs must not buy fictitious charging or grid flows.
+ * The one exception is `penalizedPositive`, for a term the objective always
+ * pushes down (grid import when buying costs at least as much as selling). */
 export type Expr = {
   terms: Map<string, number>;
   constant: number;
@@ -14,6 +16,8 @@ export interface Algebra<T> {
   max(a: T, b: T): T;
   select(flag: T, yes: T, no: T): T;
   threshold(x: T, threshold: number): T;
+  /** max(0, x), exact only where the objective strictly penalizes the result. */
+  penalizedPositive(x: T): T;
 }
 export const numeric: Algebra<number> = {
   constant: (n) => n,
@@ -23,6 +27,7 @@ export const numeric: Algebra<number> = {
   max: Math.max,
   select: (flag, yes, no) => (flag > 0.5 ? yes : no),
   threshold: (x, threshold) => Number(x >= threshold),
+  penalizedPositive: (x) => Math.max(0, x),
 };
 export class Milp implements Algebra<Expr> {
   variables: { name: string; lo: number; hi: number; integer: boolean }[] = [];
@@ -85,6 +90,13 @@ export class Milp implements Algebra<Expr> {
   }
   max(a: Expr, b: Expr): Expr {
     return this.scale(this.min(this.scale(a, -1), this.scale(b, -1)), -1);
+  }
+  penalizedPositive(x: Expr): Expr {
+    if (x.lo >= 0) return x;
+    if (x.hi <= 0) return this.constant(0);
+    const y = this.variable(0, x.hi);
+    this.constrain(this.add(y, this.scale(x, -1)), ">=", 0);
+    return y;
   }
   threshold(x: Expr, threshold: number): Expr {
     if (x.lo >= threshold) return this.constant(1);

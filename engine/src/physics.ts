@@ -38,34 +38,33 @@ export function step<T>(
     a.scale(sub(c(ceiling), energy), 1 / (h * m.efficiency)),
   );
   const available = positive(a.scale(sub(energy, c(floor)), m.efficiency / h));
-  const initialCharge = min(
-    u.chargeLimit,
-    room,
-    a.select(
-      u.balance,
-      c(Math.max(0, solar - load)),
-      a.select(u.charge, u.chargeRequest, c(0)),
-    ),
-    c(
-      input.capabilities.gridCharging
-        ? m.maxW / 1000
-        : Math.max(0, solar - load),
-    ),
-  );
-  const directDischarge = min(
-    u.dischargeLimit,
-    available,
-    a.select(u.discharge, u.dischargeRequest, c(0)),
-    c(
-      input.capabilities.batteryExport
-        ? m.dischargeW / 1000
-        : Math.max(0, load - solar),
-    ),
-  );
   let generated = c(solar);
   let nextStepped = c(0);
   const pv = slot.curtailment;
   if (pv) {
+    const initialCharge = min(
+      a.select(
+        u.balance,
+        a.min(u.chargeLimit, c(Math.max(0, solar - load))),
+        a.select(u.charge, u.chargeRequest, c(0)),
+      ),
+      room,
+      c(
+        input.capabilities.gridCharging
+          ? m.maxW / 1000
+          : Math.max(0, solar - load),
+      ),
+    );
+    const directDischarge = min(
+      a.select(u.discharge, u.dischargeRequest, c(0)),
+      available,
+      c(
+        input.capabilities.batteryExport
+          ? m.dischargeW / 1000
+          : Math.max(0, load - solar),
+      ),
+    );
+
     const hasSteps = pv.fixedArrays?.some((x) => x.stepW !== undefined);
     if (hasSteps) {
       const trigger = a.threshold(
@@ -154,8 +153,12 @@ export function step<T>(
     a.scale(discharge, -1),
     a.scale(generated, -1),
   );
-  const imported = positive(grid);
-  const exported = positive(a.scale(grid, -1));
+  // Buying at least as dear as selling makes simultaneous import and export
+  // never cheaper, so the objective itself settles the split.
+  const imported =
+    slot.buy >= slot.sell ? a.penalizedPositive(grid) : positive(grid);
+  const exported =
+    slot.buy >= slot.sell ? sub(imported, grid) : positive(a.scale(grid, -1));
   return {
     energy: a.add(
       energy,

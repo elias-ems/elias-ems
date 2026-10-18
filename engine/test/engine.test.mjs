@@ -425,3 +425,28 @@ test("balance preference cannot sacrifice profitable direct charging", async () 
   assert.equal(result.commands[0].setpointW, 2000);
   assert.ok(Math.abs(result.scenarios[0].cost - (-0.4 + 0.02)) < 1e-8);
 });
+test("selling above the buy price cannot manufacture simultaneous grid flows", async () => {
+  const input = fixture();
+  input.slots = input.slots.map((slot) => ({ ...slot, buy: 0.2, sell: 0.3 }));
+  input.capabilities = {
+    modes: ["balance", "hold", "charge", "discharge"],
+    gridCharging: true,
+    batteryExport: true,
+    setpointStepW: 500,
+  };
+  const result = await plan(input);
+  assert.equal(result.optimal, true, JSON.stringify(result));
+  for (const scenario of result.scenarios) {
+    for (const p of scenario.points) assert.equal(p.importW * p.exportW, 0);
+    assert.ok(
+      Math.abs(
+        evaluate(
+          input,
+          result.commands,
+          scenario === result.scenarios[0] ? 0 : input.solarHaircut,
+        ).cost - scenario.cost,
+      ) < 1e-9,
+    );
+  }
+});
+

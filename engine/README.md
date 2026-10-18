@@ -50,6 +50,15 @@ not a simulation of controller ramps, delays or percent quantization. Fixed-step
 threshold ties can be numerically ambiguous; a result whose exact replay differs
 in energy, PV generation, battery flow or cost is rejected.
 
+The model stays small where the physics allows it. Curtailment terms exist
+only for intervals that carry curtailment. Boundaries clip the battery only in
+balance, since a valid direct setpoint already lies within them. Where buying
+costs at least as much as selling, import is a continuous term the objective
+pushes down to the meter's positive part rather than a branched maximum:
+importing and exporting at once can then never be cheaper, and replay still
+evaluates the exact split. Intervals that sell above the buy price keep the
+branched form.
+
 The primary objective is mean nominal/reduced-solar cost: grid import charges minus
 export revenue plus configured battery wear. There is no evening deadline,
 SoC target, shortfall penalty, terminal reserve value, switching penalty or
