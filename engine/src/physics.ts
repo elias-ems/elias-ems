@@ -182,7 +182,6 @@ export function evaluate(input: Input, commands: Command[], haircut = 0) {
   let energy = (input.model.capacityKwh * input.model.soc) / 100;
   let stepped = 0;
   let cost = 0;
-  let eveningSoc = input.model.soc;
   const points = input.slots.map((slot, i) => {
     const u = commands[i];
     const next = step(
@@ -206,7 +205,6 @@ export function evaluate(input: Input, commands: Command[], haircut = 0) {
     stepped = next.stepped;
     cost += next.cost;
     const soc = (energy / input.model.capacityKwh) * 100;
-    if (slot.end === input.deadline) eveningSoc = soc;
     return {
       ...u,
       soc,
@@ -234,11 +232,6 @@ export function evaluate(input: Input, commands: Command[], haircut = 0) {
       0,
     ),
     cost,
-    eveningSoc,
     finalSoc: (energy / input.model.capacityKwh) * 100,
-    shortfallKwh: Math.max(
-      0,
-      ((input.model.maxSoc - eveningSoc) * input.model.capacityKwh) / 100,
-    ),
   };
 }

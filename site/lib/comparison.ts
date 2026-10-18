@@ -7,8 +7,6 @@ export type ComparisonOptions = {
   gridCharging: boolean;
   batteryExport: boolean;
   setpointStepW: number;
-  priority: "evening-first" | "cost-first";
-  shortfallPerKwh: number;
   timeLimitSeconds: number;
 };
 /** Worker-only orchestration; snapshot v1 stays untouched. */
@@ -21,9 +19,7 @@ export async function compare(
   const input: Input = {
     model: dataset.model,
     slots: dataset.slots,
-    deadline: Date.parse(dataset.settings.deadline),
     solarHaircut: dataset.settings.solarHaircut,
-    terminalReserveKwh: dataset.terminalReserveKwh,
     capabilities: {
       modes: options.expanded
         ? ["balance", "hold", "charge", "discharge"]
@@ -31,10 +27,6 @@ export async function compare(
       gridCharging: options.expanded && options.gridCharging,
       batteryExport: options.expanded && options.batteryExport,
       ...(options.expanded ? { setpointStepW: options.setpointStepW } : {}),
-    },
-    objective: {
-      priority: options.priority,
-      shortfallPerKwh: options.shortfallPerKwh,
     },
     timeLimitSeconds: options.timeLimitSeconds,
   };

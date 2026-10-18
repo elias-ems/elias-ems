@@ -61,12 +61,9 @@ export async function solve(input: Input, wasmUrl?: string) {
   });
   const floor = (m.capacityKwh * m.minSoc) / 100;
   const ceiling = (m.capacityKwh * m.maxSoc) / 100;
-  const shortfalls: Expr[] = [],
-    energies: Expr[][] = [],
+  const energies: Expr[][] = [],
     costs: Expr[] = [];
   const predictions: ReturnType<typeof step<Expr>>[][] = [];
-  const reservePrice =
-    Math.max(0, Math.min(...input.slots.map((s) => s.buy))) * m.efficiency;
   for (const haircut of [0, input.solarHaircut]) {
     let energy = c((m.capacityKwh * m.soc) / 100),
       stepped = c(0);
@@ -88,31 +85,11 @@ export async function solve(input: Input, wasmUrl?: string) {
       predicted.push(result);
       costs.push(a.scale(result.cost, 0.5));
       scenarioEnergies.push(energy);
-      if (input.slots[i].end === input.deadline)
-        shortfalls.push(a.add(c(ceiling), a.scale(energy, -1)));
     }
     energies.push(scenarioEnergies);
     predictions.push(predicted);
-    costs.push(
-      a.scale(
-        a.max(
-          c(0),
-          a.add(
-            c(floor + Math.min(ceiling - floor, input.terminalReserveKwh)),
-            a.scale(energy, -1),
-          ),
-        ),
-        reservePrice / 2,
-      ),
-    );
   }
-  const shortfall = a.add(...shortfalls);
-  const objective = a.add(
-    ...costs,
-    ...(input.objective.priority === "cost-first"
-      ? [a.scale(shortfall, input.objective.shortfallPerKwh / 2)]
-      : []),
-  );
+  const objective = a.add(...costs);
   const statuses: string[] = [];
   const run = (objective: Expr) => {
     const remaining =
@@ -134,29 +111,11 @@ export async function solve(input: Input, wasmUrl?: string) {
       optimal: inspected.optimal,
     };
   };
-  let targetProof = false;
-  let answer: ReturnType<typeof run>;
-  let costSolved = false;
-  if (input.objective.priority === "evening-first") {
-    answer = run(shortfall);
-    targetProof = answer?.optimal === true;
-    if (targetProof && answer) {
-      a.constrain(shortfall, "<=", a.value(shortfall, answer.values) + 1e-7);
-      const second = run(objective);
-      if (second?.feasible) {
-        answer = second;
-        costSolved = second.optimal;
-      }
-    }
-  } else {
-    answer = run(objective);
-    costSolved = answer?.optimal === true;
-  }
+  const answer = run(objective);
   if (!answer?.feasible)
     return {
       status: statuses.at(-1) ?? "Time limit before solve",
       optimal: false,
-      targetProof,
       statuses,
       runtimeMs: performance.now() - started,
       commands: undefined,
@@ -218,27 +177,19 @@ export async function solve(input: Input, wasmUrl?: string) {
       status:
         "Rejected: solver schedule disagrees with physical replay (including PV threshold ties)",
       optimal: false,
-      targetProof: false,
       statuses,
       runtimeMs: performance.now() - started,
       commands: undefined,
     };
-  const optimal =
-    costSolved && (input.objective.priority === "cost-first" || targetProof);
+  const optimal = answer.optimal;
   return {
     status: optimal
       ? "Optimal for modeled objective"
       : "Feasible, not proven optimal",
     optimal,
-    targetProof,
     statuses,
     runtimeMs: performance.now() - started,
     commands,
     scenarios,
-    targetStatus: scenarios.some((s) => s.shortfallKwh > 1e-5)
-      ? targetProof
-        ? "Full target unreachable jointly in the two scenarios"
-        : "Target shortfall; unreachability not established"
-      : "Target reached in both scenarios",
   };
 }

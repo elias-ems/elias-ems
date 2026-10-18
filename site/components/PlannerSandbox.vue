@@ -12,8 +12,6 @@ const options = ref({
   gridCharging: false,
   batteryExport: false,
   setpointStepW: 100,
-  priority: "evening-first" as "evening-first" | "cost-first",
-  shortfallPerKwh: 1,
   timeLimitSeconds: 30,
 });
 const error = ref("");
@@ -208,8 +206,8 @@ function download() {
       </details>
       <form @submit.prevent="run" @input="invalidate" @change="invalidate">
         <div class="planner-fields">
-          <label>Evening deadline<select v-model="settings.deadline"><option v-for="slot in dataset.slots" :key="slot.end" :value="new Date(slot.end).toISOString()">{{ time(slot.end) }}</option></select></label>
-          <p>Comparison target: configured maximum SoC {{ dataset.model.maxSoc }}% (imported target {{ dataset.settings.targetSoc }}%).</p>
+          <label>Evening target deadline<select v-model="settings.deadline"><option v-for="slot in dataset.slots" :key="slot.end" :value="new Date(slot.end).toISOString()">{{ time(slot.end) }}</option></select></label>
+          <p>Evening target only: configured maximum SoC {{ dataset.model.maxSoc }}% (imported target {{ dataset.settings.targetSoc }}%).</p>
           <label>Solar reduction (0–1)<input v-model.number="settings.solarHaircut" type="number" min="0" max="0.999" step="any" required /></label>
           <label>Cost per limit change<input v-model.number="settings.switchCost" type="number" min="0" step="any" required /></label>
           <label>Search passes<input v-model.number="settings.passes" type="number" min="1" max="20" required /></label>
@@ -224,8 +222,6 @@ function download() {
             <label><input v-model="options.batteryExport" type="checkbox" /> Permit battery export</label>
             <label>Assumed setpoint step (W)<input v-model.number="options.setpointStepW" type="number" min="1" required /></label>
           </template>
-          <label>Objective<select v-model="options.priority"><option value="evening-first">Minimize evening shortfall first, then cost</option><option value="cost-first">Cost with priced evening shortfall</option></select></label>
-          <label v-if="options.priority === 'cost-first'">Shortfall cost per kWh<input v-model.number="options.shortfallPerKwh" type="number" min="0" step="any" required /></label>
           <label>Solver budget (seconds)<input v-model.number="options.timeLimitSeconds" type="number" min="1" max="120" required /></label>
         </fieldset>
         <button type="submit" :disabled="busy">{{ busy ? "Calculating…" : "Compare planners" }}</button>
@@ -235,14 +231,14 @@ function download() {
     </template>
     <template v-if="comparison">
       <h2>Evening target / HiGHS comparison</h2>
-      <p>HiGHS: {{ comparison.engine?.status ?? comparison.engineError }}. {{ comparison.engine?.targetStatus }}</p>
-      <p>Runtime: Evening target {{ comparison.legacyRuntimeMs.toFixed(0) }} ms; HiGHS {{ comparison.engine?.runtimeMs.toFixed(0) ?? '—' }} ms (including solver initialization). Solver phases: {{ comparison.engine?.statuses.join(' / ') }}.</p>
-      <p>HiGHS minimizes mean nominal/reduced-solar cost, wear and terminal reserve penalty. Evening-first minimizes the sum of both evening shortfalls before cost. Evening target also uses switching and spike-buffer preferences; HiGHS does not. Lower final SoC can explain lower cost. Neither forecast guarantees live savings.</p>
+      <p>HiGHS: {{ comparison.engine?.status ?? comparison.engineError }}</p>
+      <p>Runtime: Evening target {{ comparison.legacyRuntimeMs.toFixed(0) }} ms; HiGHS {{ comparison.engine?.runtimeMs.toFixed(0) ?? '—' }} ms (including solver initialization). Solver status: {{ comparison.engine?.statuses.join(' / ') }}.</p>
+      <p>HiGHS minimizes mean nominal/reduced-solar cost: import charges minus export revenue plus battery wear. It has no evening target or terminal-reserve penalty. Evening target retains its deadline, reserve, switching and spike-buffer preferences. Lower final SoC can explain lower cost. Neither forecast guarantees live savings.</p>
       <div class="planner-table" tabindex="0">
-        <table><thead><tr><th>Scenario / algorithm</th><th>Cost incl. wear</th><th>Evening SoC</th><th>Final SoC</th><th>Shortfall kWh</th><th>PV generated / curtailed kWh</th></tr></thead>
+        <table><thead><tr><th>Scenario / algorithm</th><th>Cost incl. wear</th><th>Final SoC</th><th>PV generated / curtailed kWh</th></tr></thead>
           <tbody><template v-for="(old, i) in comparison.legacyScenarios" :key="i">
-            <tr><td>{{ i ? 'Reduced solar' : 'Nominal' }} / Evening target</td><td>{{ old.cost.toFixed(3) }}</td><td>{{ old.eveningSoc.toFixed(1) }}%</td><td>{{ old.finalSoc.toFixed(1) }}%</td><td>{{ old.shortfallKwh.toFixed(3) }}</td><td>{{ old.generatedKwh.toFixed(2) }} / {{ old.curtailedKwh.toFixed(2) }}</td></tr>
-            <tr v-if="comparison.engine?.scenarios"><td>{{ i ? 'Reduced solar' : 'Nominal' }} / HiGHS</td><td>{{ comparison.engine.scenarios[i].cost.toFixed(3) }}</td><td>{{ comparison.engine.scenarios[i].eveningSoc.toFixed(1) }}%</td><td>{{ comparison.engine.scenarios[i].finalSoc.toFixed(1) }}%</td><td>{{ comparison.engine.scenarios[i].shortfallKwh.toFixed(3) }}</td><td>{{ comparison.engine.scenarios[i].generatedKwh.toFixed(2) }} / {{ comparison.engine.scenarios[i].curtailedKwh.toFixed(2) }}</td></tr>
+            <tr><td>{{ i ? 'Reduced solar' : 'Nominal' }} / Evening target</td><td>{{ old.cost.toFixed(3) }}</td><td>{{ old.finalSoc.toFixed(1) }}%</td><td>{{ old.generatedKwh.toFixed(2) }} / {{ old.curtailedKwh.toFixed(2) }}</td></tr>
+            <tr v-if="comparison.engine?.scenarios"><td>{{ i ? 'Reduced solar' : 'Nominal' }} / HiGHS</td><td>{{ comparison.engine.scenarios[i].cost.toFixed(3) }}</td><td>{{ comparison.engine.scenarios[i].finalSoc.toFixed(1) }}%</td><td>{{ comparison.engine.scenarios[i].generatedKwh.toFixed(2) }} / {{ comparison.engine.scenarios[i].curtailedKwh.toFixed(2) }}</td></tr>
           </template></tbody>
         </table>
       </div>

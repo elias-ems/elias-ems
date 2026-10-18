@@ -62,24 +62,13 @@ export function validate(input: Input) {
     !finite(input.solarHaircut) ||
     input.solarHaircut < 0 ||
     input.solarHaircut >= 1 ||
-    !finite(input.terminalReserveKwh) ||
-    input.terminalReserveKwh < 0 ||
     !finite(input.timeLimitSeconds) ||
     input.timeLimitSeconds <= 0 ||
-    input.timeLimitSeconds > 120 ||
-    !["evening-first", "cost-first"].includes(input.objective.priority) ||
-    !finite(input.objective.shortfallPerKwh) ||
-    input.objective.shortfallPerKwh < 0
+    input.timeLimitSeconds > 120
   )
-    throw new Error("Invalid objective or solve budget");
-  if (
-    !input.slots.length ||
-    input.slots.length > 384 ||
-    !input.slots.some((s) => s.end === input.deadline)
-  )
-    throw new Error(
-      "Expected 1–384 intervals and a deadline at an interval end",
-    );
+    throw new Error("Invalid solar scenario or solve budget");
+  if (!input.slots.length || input.slots.length > 384)
+    throw new Error("Expected 1–384 intervals");
   input.slots.forEach((s, i) => {
     if (
       ![s.start, s.end, s.solarW, s.loadW, s.buy, s.sell].every(finite) ||

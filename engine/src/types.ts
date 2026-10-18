@@ -64,19 +64,13 @@ export type Command = {
 export type Input = {
   model: ChargeModel;
   slots: ChargeInterval[];
-  deadline: number;
   solarHaircut: number;
-  terminalReserveKwh: number;
   capabilities: {
     modes: Mode[];
     gridCharging: boolean;
     batteryExport: boolean;
     /** Required explicitly when any direct mode is available. */
     setpointStepW?: number;
-  };
-  objective: {
-    priority: "evening-first" | "cost-first";
-    shortfallPerKwh: number;
   };
   timeLimitSeconds: number;
 };

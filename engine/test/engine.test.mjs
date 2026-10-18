@@ -29,15 +29,12 @@ function fixture() {
       sell: 0.1,
       estimatedPrice: false,
     })),
-    deadline: 7200000,
     solarHaircut: 0.2,
-    terminalReserveKwh: 0,
     capabilities: {
       modes: ["balance"],
       gridCharging: false,
       batteryExport: false,
     },
-    objective: { priority: "evening-first", shortfallPerKwh: 1 },
     timeLimitSeconds: 10,
   };
 }
@@ -161,15 +158,14 @@ test("shared balance replay agrees with stateful PV simulator including reduced 
       }
     }
 });
-test("exhaustive discrete balance schedules match the two-stage optimum", async () => {
+test("exhaustive discrete balance schedules match the cost-only optimum", async () => {
   const input = fixture();
   input.model.maxW = 1000;
   input.model.dischargeW = 1000;
   input.solarHaircut = 0;
   const result = await plan(input);
   assert.equal(result.optimal, true);
-  let bestShort = Infinity,
-    bestCost = Infinity;
+  let bestCost = Infinity;
   for (let mask = 0; mask < 729; mask++) {
     let n = mask;
     const commands = input.slots.map((s) => {
@@ -180,13 +176,8 @@ test("exhaustive discrete balance schedules match the two-stage optimum", async 
       return { ...s, mode: "balance", chargeLimitW, dischargeLimitW };
     });
     const run = evaluate(input, commands);
-    if (run.shortfallKwh < bestShort - 1e-8) {
-      bestShort = run.shortfallKwh;
-      bestCost = run.cost;
-    } else if (Math.abs(run.shortfallKwh - bestShort) < 1e-8)
-      bestCost = Math.min(bestCost, run.cost);
+    bestCost = Math.min(bestCost, run.cost);
   }
-  assert.ok(Math.abs(result.scenarios[0].shortfallKwh - bestShort) < 1e-6);
   assert.ok(Math.abs(result.scenarios[0].cost - bestCost) < 1e-6);
 });
 test("PV solver schedule passes exact replay and cannot manufacture solar", async () => {
@@ -208,7 +199,7 @@ test("PV solver schedule passes exact replay and cannot manufacture solar", asyn
     );
   assert.ok(r.scenarios[0].points[1].curtailedW > 0);
 });
-test("cost-first reports chosen shortfall without claiming unreachable", async () => {
+test("cost-only leaves an empty battery empty when charging has no benefit", async () => {
   const input = fixture();
   input.model.soc = 0;
   input.slots.forEach((s) => {
@@ -221,12 +212,15 @@ test("cost-first reports chosen shortfall without claiming unreachable", async (
     batteryExport: false,
     setpointStepW: 500,
   };
-  input.objective = { priority: "cost-first", shortfallPerKwh: 0 };
   const r = await plan(input);
   assert.ok(r.commands);
-  assert.ok(r.scenarios[0].shortfallKwh > 0);
-  assert.equal(r.targetProof, false);
-  assert.match(r.targetStatus, /not established/);
+  assert.equal(r.optimal, true);
+  assert.equal(r.scenarios[0].finalSoc, 0);
+  assert.ok(r.scenarios[0].points.every((p) => p.chargeW === 0));
+  assert.equal(r.statuses.length, 1);
+  assert.equal("targetProof" in r, false);
+  assert.equal("targetStatus" in r, false);
+  assert.equal("shortfallKwh" in r.scenarios[0], false);
 });
 test("infeasible direct-only configuration never supplies a schedule", async () => {
   const input = fixture();
@@ -301,6 +295,10 @@ test("worker keeps the Node event loop responsive and can be cancelled", async (
 });
 test("fixed-step curtailment solver validates the persistent episode", async () => {
   const input = fixture();
+  // Fix the boundaries: this test checks curtailment state across intervals;
+  // the exhaustive schedule test separately establishes cost optimality.
+  input.model.minW = input.model.maxW;
+  input.model.dischargeMinW = input.model.dischargeW;
   for (const s of input.slots) {
     s.solarW = 3000;
     s.curtailment = {
@@ -357,4 +355,22 @@ test("mode contracts reject missing, opposite-sign and inapplicable setpoints", 
     );
   }
   assert.throws(() => evaluate(input, commands, 1), /scenario reduction/);
+});
+
+test("cost-only spends available energy without preserving an evening or terminal reserve", async () => {
+  const input = fixture();
+  input.model.soc = 50;
+  input.model.efficiency = 1;
+  input.slots = input.slots
+    .slice(0, 2)
+    .map((s) => ({ ...s, solarW: 0, loadW: 1000, buy: 0.5 }));
+  const result = await plan(input);
+  assert.equal(result.optimal, true);
+  for (const scenario of result.scenarios) {
+    assert.ok(Math.abs(scenario.cost) < 1e-7);
+    assert.ok(Math.abs(scenario.finalSoc) < 1e-7);
+    assert.ok(
+      scenario.points.every((p) => Math.abs(p.dischargeW - 1000) < 1e-7),
+    );
+  }
 });

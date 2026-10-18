@@ -118,6 +118,15 @@ try {
   assert.equal(exported.plan.points.length, data.slots.length);
   assert.equal(exported.comparison.input.capabilities.gridCharging, true);
   assert.equal(exported.comparison.engine.commands.length, data.slots.length);
+  for (const field of ["deadline", "objective", "terminalReserveKwh"]) {
+    assert.equal(field in exported.comparison.input, false);
+  }
+  assert.equal(exported.comparison.engine.statuses.length, 1);
+  assert.equal(
+    "shortfallKwh" in exported.comparison.engine.scenarios[0],
+    false,
+  );
+  assert.equal(await page.getByLabel("Objective", { exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   assert.ok(responses.length >= 1);
   assert.ok(responses.every((s) => s === 200));

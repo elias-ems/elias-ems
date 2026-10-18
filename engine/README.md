@@ -50,30 +50,25 @@ not a simulation of controller ramps, delays or percent quantization. Fixed-step
 threshold ties can be numerically ambiguous; a result whose exact replay differs
 in energy, PV generation, battery flow or cost is rejected.
 
-`evening-first` minimizes the **sum of nominal and reduced-solar shortfalls** to
-configured maximum SoC at the explicit deadline, then minimizes mean scenario
-energy cost plus wear and terminal reserve penalty within that minimum shortfall.
-This is lexicographic priority, not an arbitrary large money penalty. A positive
-proven minimum means both scenarios cannot jointly reach full; it does not prove
-that each scenario separately is impossible. `cost-first` prices mean shortfall
-at an explicit currency/kWh penalty. A cost-first shortfall is not evidence that
-the target was unreachable.
+The sole objective is mean nominal/reduced-solar cost: grid import charges minus
+export revenue plus configured battery wear. There is no evening deadline,
+SoC target, shortfall penalty, terminal reserve value, switching penalty or
+spike-buffer preference. SoC minimum/maximum bounds still protect the battery.
+The engine may finish at minimum SoC when using the stored energy saves money.
+No value or tariff is invented beyond the supplied horizon.
 
-Terminal reserve has the existing conservative value: lowest known nonnegative
-import price times discharge efficiency, capped by usable capacity. No unknown
-prices are invented. HiGHS does not reproduce Evening target's switching or spike
-buffer preferences; these objective differences are visible in the sandbox.
-Costs in comparison exclude terminal and shortfall penalties but include wear.
-Always inspect final SoC as well as cost.
+Evening target retains its original target and reserve preferences in the
+sandbox. Its settings remain in version 1 snapshots for backward compatibility,
+but the adapter does not pass them to HiGHS. Compare final SoC alongside cost:
+a cheaper schedule may simply leave less energy stored for later.
 
 Only HiGHS `Optimal` (within numerical tolerances), with validated primal constraints and physical replay, can
-produce an optimality claim for the modeled problem. Evening-first needs both
-phases optimal. Feasible time-limited incumbents are labeled unproven; no feasible
+produce an optimality claim for the modeled cost problem. A single solve is
+used. Feasible time-limited incumbents are labeled unproven; no feasible
 incumbent, infeasibility, invalid input or replay mismatch yields no schedule.
-The solver time budget is shared by initialization, construction and both phases;
+The solver time budget is shared by initialization, construction and the solve;
 Node also has an outer termination deadline. Browser users can cancel the worker.
-The current input limit is 384 contiguous intervals, with deadline at an interval
-end. Initial SoC outside the configured window is explicitly unsupported rather
+The current input limit is 384 contiguous intervals. Initial SoC outside the configured window is explicitly unsupported rather
 than clamped, since clamping would invent energy. No forecast resampling occurs.
 
 ## Future event contract (not implemented)
@@ -120,10 +115,8 @@ because this session cannot access the Docker daemon. Native ARM64 was not teste
 passed lint, typechecking and all 18 tests in
 [CI for 6475807](https://github.com/elias-ems/elias-ems/actions/runs/39137086264).
 
-A manual expanded-mode run on the committed 52-interval gym hindsight dataset
-also exercised real time-limited incumbents: a two-second budget returned a
-feasible, unproven target plan; thirty seconds proved the evening target and
-retained a full-at-deadline schedule when cost optimization timed out. Neither
-result claimed cost optimality. These are local observations, not performance
-guarantees. Deterministic tests also reject missing, fractional, out-of-bounds
-and constraint-violating primal values even when the status says Optimal.
+Deterministic tests reject missing, fractional, out-of-bounds and
+constraint-violating primal values even when the status says Optimal. Cost-only
+regressions verify that the engine does not buy energy just to fill the battery
+and can spend the available energy down to minimum SoC without preserving an
+evening or terminal reserve.

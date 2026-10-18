@@ -55,16 +55,15 @@ browser-based replay of exported planning inputs.
   explicitly so gains from extra capabilities are not attributed solely to a
   better algorithm. Replay each plan using its actual control semantics through
   a shared physical evaluation model. Compare schedules, modeled cost,
-  evening and final state of charge, target shortfall and runtime. Explain any
+  final state of charge and runtime. Explain any
   differences in objectives; a plan ending with less stored energy is not
   automatically better. Keep the existing planner available during evaluation.
-- **Aim for a full battery for each night, within what is achievable.** Treat
-  full as the configured maximum SoC, at an explicit evening deadline. Make
-  the tradeoff with price optimization explicit and report shortfall when the
-  available solar, permitted grid charging and controls cannot reach it. Do not
-  invent energy or assume future prices to promise a full battery. Evaluate
-  reduced-solar scenarios as
-  well as the nominal forecast.
+- **Optimize cost only.** Minimize mean import charges minus export revenue plus
+  configured battery wear over nominal and reduced-solar forecasts. The new
+  engine has no evening deadline, SoC target, shortfall penalty or terminal
+  reserve value. Keep physical SoC bounds. The existing Evening target planner
+  retains its own deadline and reserve preferences for comparison; do not pass
+  those settings to the new engine or change the legacy snapshot format.
 - **Respect the physical system and supported controls.** Account for SoC
   bounds, efficiencies, hardware limits, writable power steps and modeled PV
   curtailment. Model supported device modes explicitly; grid charging and battery
