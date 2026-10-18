@@ -118,6 +118,37 @@ function time(value: number) {
   }).format(value);
 }
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function intervalTime(start: number, end: number) {
+  const timeZone = dataset.value?.timeZone;
+  const date = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+  });
+  const day = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const clock = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const offset = new Intl.DateTimeFormat("en", {
+    timeZone,
+    timeZoneName: "shortOffset",
+  });
+  const zone = (value: number) =>
+    offset.formatToParts(value).find((p) => p.type === "timeZoneName")?.value;
+  const changesOffset = zone(start) !== zone(end);
+  const from = `${date.format(start)}, ${clock.format(start)}${changesOffset ? ` ${zone(start)}` : ""}`;
+  const to = `${day.format(start) === day.format(end) ? "" : `${date.format(end)}, `}${clock.format(end)}${changesOffset ? ` ${zone(end)}` : ""}`;
+  return `${from} – ${to}`;
+}
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const curve = computed(() =>
   plan.value?.points
     .map(
@@ -216,12 +247,44 @@ function download() {
         </table>
       </div>
       <details v-if="comparison.engine?.scenarios"><summary>Side-by-side interval controls and predictions (nominal)</summary>
-        <p>Each cell shows mode; charge/discharge boundaries W; signed setpoint W (— for balance); predicted signed battery W; end SoC; interval cost. Positive battery power means charging.</p>
-        <div class="planner-table" tabindex="0"><table><thead><tr><th>Interval</th><th>Evening target</th><th>HiGHS</th></tr></thead><tbody>
-          <tr v-for="(p, i) in comparison.engine.scenarios[0].points" :key="p.start"><td>{{ time(p.start) }} – {{ time(p.end) }}</td>
-            <td v-for="(q, j) in [comparison.legacyScenarios[0].points[i], p]" :key="j">{{ q.mode }}; {{ q.chargeLimitW }}/{{ q.dischargeLimitW }}; {{ q.setpointW ?? '—' }}; {{ q.batteryW.toFixed(0) }}; {{ q.soc.toFixed(1) }}%; {{ q.cost.toFixed(3) }}</td>
-          </tr>
-        </tbody></table></div>
+        <p>Times are in {{ dataset!.timeZone }}. Prices are the snapshot’s configured consumption/import and production/export tariffs, including pricing formulas—not raw EPEX spot prices. Positive battery power means charging; negative means discharging. “—” means balance has no requested setpoint.</p>
+        <div class="planner-table" tabindex="0" role="region" aria-label="Side-by-side interval comparison"><table>
+          <thead>
+            <tr>
+              <th scope="col" rowspan="2">Interval</th>
+              <th scope="col" rowspan="2">Consumption<br />{{ dataset!.currency }}/kWh</th>
+              <th scope="col" rowspan="2">Production<br />{{ dataset!.currency }}/kWh</th>
+              <th scope="colgroup" colspan="6">Evening target</th>
+              <th scope="colgroup" colspan="6">HiGHS</th>
+            </tr>
+            <tr>
+              <template v-for="algorithm in ['Evening target', 'HiGHS']" :key="algorithm">
+                <th scope="col">Mode</th>
+                <th scope="col">Limits W<br />charge / discharge</th>
+                <th scope="col">Requested<br />setpoint W</th>
+                <th scope="col">Predicted<br />battery W</th>
+                <th scope="col">End SoC %</th>
+                <th scope="col">Cost {{ dataset!.currency }}</th>
+              </template>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(p, i) in comparison.engine.scenarios[0].points" :key="p.start">
+              <td :title="`${time(p.start)} – ${time(p.end)}`">{{ intervalTime(p.start, p.end) }}</td>
+              <td>{{ comparison.input.slots[i].buy.toFixed(4) }}{{ comparison.input.slots[i].estimatedPrice ? ' *' : '' }}</td>
+              <td>{{ comparison.input.slots[i].sell.toFixed(4) }}{{ comparison.input.slots[i].estimatedPrice ? ' *' : '' }}</td>
+              <template v-for="(q, j) in [comparison.legacyScenarios[0].points[i], p]" :key="j">
+                <td>{{ q.mode }}</td>
+                <td>{{ q.chargeLimitW }} / {{ q.dischargeLimitW }}</td>
+                <td>{{ q.setpointW ?? '—' }}</td>
+                <td>{{ q.batteryW.toFixed(0) }}</td>
+                <td>{{ q.soc.toFixed(1) }}</td>
+                <td>{{ q.cost.toFixed(3) }}</td>
+              </template>
+            </tr>
+          </tbody>
+        </table></div>
+        <p v-if="comparison.input.slots.some(slot => slot.estimatedPrice)">* Estimated price in the imported snapshot.</p>
       </details>
     </template>
     <template v-if="plan">

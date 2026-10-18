@@ -100,7 +100,7 @@ try {
   assert.ok(
     (await page
       .getByRole("cell")
-      .filter({ hasText: /charge;/ })
+      .filter({ hasText: /^charge$/ })
       .count()) > 0,
   );
   const [download] = await Promise.all([
