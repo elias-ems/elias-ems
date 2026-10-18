@@ -4,8 +4,6 @@ import type { Input } from "../../engine/src/types.ts";
 import { parseDataset, runPlanner } from "./planner.ts";
 export type ComparisonOptions = {
   expanded: boolean;
-  gridCharging: boolean;
-  batteryExport: boolean;
   setpointStepW: number;
   timeLimitSeconds: number;
 };
@@ -24,8 +22,8 @@ export async function compare(
       modes: options.expanded
         ? ["balance", "hold", "charge", "discharge"]
         : ["balance"],
-      gridCharging: options.expanded && options.gridCharging,
-      batteryExport: options.expanded && options.batteryExport,
+      gridCharging: options.expanded,
+      batteryExport: options.expanded,
       ...(options.expanded ? { setpointStepW: options.setpointStepW } : {}),
     },
     timeLimitSeconds: options.timeLimitSeconds,

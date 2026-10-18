@@ -73,6 +73,17 @@ try {
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(data)),
   });
+  assert.equal(
+    await page
+      .getByLabel("Comparison capabilities", { exact: true })
+      .inputValue(),
+    "true",
+  );
+  assert.equal(await page.getByLabel("Permit grid charging").count(), 0);
+  assert.equal(await page.getByLabel("Permit battery export").count(), 0);
+  await page
+    .getByLabel("Comparison capabilities", { exact: true })
+    .selectOption({ label: "Equivalent: balance + existing boundaries" });
   await page.getByRole("button", { name: "Compare planners" }).click();
   await page
     .getByText("Optimal for modeled objective", { exact: false })
@@ -84,8 +95,6 @@ try {
   await page
     .getByLabel("Comparison capabilities", { exact: true })
     .selectOption({ label: "Expanded: assume all four modes" });
-  await page.getByLabel("Permit grid charging").check();
-  await page.getByLabel("Permit battery export").check();
   await page.getByRole("button", { name: "Compare planners" }).click();
   await page
     .getByText("Optimal for modeled objective", { exact: false })
@@ -117,6 +126,7 @@ try {
   assert.equal(exported.algorithm, "evening-target");
   assert.equal(exported.plan.points.length, data.slots.length);
   assert.equal(exported.comparison.input.capabilities.gridCharging, true);
+  assert.equal(exported.comparison.input.capabilities.batteryExport, true);
   assert.equal(exported.comparison.engine.commands.length, data.slots.length);
   for (const field of ["deadline", "objective", "terminalReserveKwh"]) {
     assert.equal(field in exported.comparison.input, false);

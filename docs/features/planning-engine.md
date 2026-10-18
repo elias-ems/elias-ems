@@ -6,8 +6,8 @@ continues to use Evening target. The new engine only calculates plans.
 
 Import a version 1 planner snapshot and choose equivalent capabilities (native
 balance and the exported writable boundaries) or expanded capabilities (explicitly
-assumed hold, charge and discharge modes). Grid charging and battery export are
-separate opt-in assumptions. Expanded setpoint resolution is supplied by the
+assumed hold, charge and discharge modes). Expanded capabilities are the sandbox default and always assume permission
+for grid charging and battery export. Equivalent capabilities remain balance-only. Expanded setpoint resolution is supplied by the
 user; power-limit entities do not establish direct-control support.
 
 Both planners use the same physical snapshot and share evaluation for nominal

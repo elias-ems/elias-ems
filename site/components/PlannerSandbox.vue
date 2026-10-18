@@ -8,9 +8,7 @@ const dataset = shallowRef<PlannerDataset>();
 const plan = shallowRef<Awaited<ReturnType<typeof runPlanner>>>();
 const comparison = shallowRef<Awaited<ReturnType<typeof compare>>>();
 const options = ref({
-  expanded: false,
-  gridCharging: false,
-  batteryExport: false,
+  expanded: true,
   setpointStepW: 100,
   timeLimitSeconds: 30,
 });
@@ -217,9 +215,7 @@ function download() {
           <legend>HiGHS capability assumptions (not established by this export)</legend>
           <label>Comparison<select aria-label="Comparison capabilities" v-model="options.expanded"><option :value="false">Equivalent: balance + existing boundaries</option><option :value="true">Expanded: assume all four modes</option></select></label>
           <template v-if="options.expanded">
-            <p>Hypothetical direct control with signed AC setpoints and native SoC protection. A local adapter is assumed to enforce the permissions below against live power. No device compatibility is inferred from limit entities.</p>
-            <label><input v-model="options.gridCharging" type="checkbox" /> Permit grid charging</label>
-            <label><input v-model="options.batteryExport" type="checkbox" /> Permit battery export</label>
+            <p>Hypothetical direct control with signed AC setpoints and native SoC protection. Grid charging and battery export are always permitted in this expanded simulation. No device compatibility is inferred from limit entities.</p>
             <label>Assumed setpoint step (W)<input v-model.number="options.setpointStepW" type="number" min="1" required /></label>
           </template>
           <label>Solver budget (seconds)<input v-model.number="options.timeLimitSeconds" type="number" min="1" max="120" required /></label>
