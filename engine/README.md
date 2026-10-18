@@ -116,8 +116,9 @@ site tests, engine/site lint and typechecks passed. Vite reports the solver's
 conditional `node:module` import as externalized; the production browser test
 verifies the browser branch works. WebKit 26.5 downloaded but could not launch:
 the host lacks libicu74, libxml2 and libflite1. Docker image checks could not run
-because this session cannot access the Docker daemon. Native ARM64 remains
-unverified locally; the CI matrix is ready but has not been dispatched.
+because this session cannot access the Docker daemon. Native ARM64 was not tested locally. Both native ARM64 and amd64 engine jobs
+passed lint, typechecking and all 18 tests in
+[CI for 6475807](https://github.com/elias-ems/elias-ems/actions/runs/39137086264).
 
 A manual expanded-mode run on the committed 52-interval gym hindsight dataset
 also exercised real time-limited incumbents: a two-second budget returned a
