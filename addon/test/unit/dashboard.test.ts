@@ -4,6 +4,7 @@
  * allowed to be absent, so what matters here is that neither the presence nor
  * the absence of a socket is visible in the result.
  */
+
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +18,7 @@ import {
   vi,
 } from "vitest";
 import { addBattery } from "../../app/lib/batteries.server";
+import type { BatteryMode } from "../../app/lib/battery-command";
 import {
   readDashboard,
   watchedEntityIds,
@@ -52,6 +54,11 @@ beforeAll(async () => {
     powerEntityId: "sensor.battery_power",
     socEntityId: "sensor.battery_state_of_charge",
     steered: false,
+    controlModes: ["balance", "hold", "charge", "discharge"] as BatteryMode[],
+    dischargeLimitSupported: false,
+    powerStepW: 100,
+    chargeLimitPlanning: false,
+    commandContract: 1,
     maxChargePowerW: null,
     maxDischargePowerW: null,
   });

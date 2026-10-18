@@ -297,10 +297,10 @@ test("battery control can be configured, enabled, and watched deciding", async (
   await page.getByLabel(/^Charge —/).fill("state_of_charge");
   await suggestion("sensor\\.battery_state_of_charge\\b").click();
   // Control cannot be switched on unless something is steered. The event this
-  // battery's targets go out on is named after the title typed above, and
+  // battery's commands go out on is named after the title typed above, and
   // the form says so while it is being typed.
   await expect(
-    page.getByText("elias_ems_home_battery_target_power"),
+    page.getByText("elias_ems_home_battery_battery_command"),
   ).toBeVisible();
   await page.getByLabel("Steer this battery").check();
   await page.getByRole("button", { name: "Add", exact: true }).click();

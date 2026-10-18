@@ -1,14 +1,22 @@
 # Self-consumption charge-limit optimization
 
-Elias optimizes a battery's **maximum charging power** and optional **maximum AC
-output power** while it remains in native self-consumption mode. Reducing output
-during cheaper hours preserves energy for higher-priced demand, including the
-morning before solar recovery. Like Net zero energy, this strategy only controls
-a battery when **Steer this battery** is checked. Unchecking it restores owned
-power limits and leaves the battery monitored only. The planner still requires
-one configured household battery.
+Elias plans a battery's **maximum charging power** and optional **maximum AC
+output power** while it remains in native self-consumption mode, and publishes
+the current interval as a `balance` [battery
+command](battery-control.md#publishing-commands). Reducing output during
+cheaper hours preserves energy for higher-priced demand, including the morning
+before solar recovery. Like Net zero energy, this strategy only commands a
+battery when **Steer this battery** is checked. The planner still requires one
+configured household battery.
 Elias does not request grid charging or change the operating mode or native SoC
 limits. The minimum charge setting (for example 5%) remains the protective floor.
+
+**Elias no longer writes the limits itself.** An automation listening for the
+battery's command event applies `charge_limit_w` and `discharge_limit_w` to the
+inverter, and puts its normal limits back on a release — see [Boundaries in
+balance](battery-control.md#boundaries-in-balance). That is what lets a second
+battery, with different entities, be a second automation rather than a change
+here.
 
 The output search also tries opening an entire constant-ceiling stretch and the
 whole forecast horizon. This avoids unnecessary restrictions that persist when
@@ -20,41 +28,54 @@ must not worsen the objective; equal scores favor output headroom for load spike
 
 In Settings → Batteries, edit the battery:
 
-1. Turn on **Steer this battery**. Set self-consumption on the device itself.
-2. Match the capacity, minimum/maximum SoC, and charge/discharge hardware limits
-   to the battery's native configuration. Elias does not change its SoC settings.
-3. Search for its **Maximum charge limit (W)** entity. The integration must expose
-   a `number` entity with W units and valid `min`, `max`, and `step` attributes.
-   Names vary: verify which setting limits charging for the installed integration.
-4. Optionally select **Maximum AC output power (W)**, a distinct writable
-   `number` entity with W units and valid non-negative range and step. It must
-   limit battery discharge, not combined PV/inverter output or grid export.
-   Leave it empty to retain native discharge. Existing configurations stay empty.
-5. Save the battery. Home automatically calculates a preview, even while Battery
-   control is disabled or another strategy is selected. Defaults are 95%
-   efficiency in each direction, a 20% solar margin, and no wear cost.
+1. Match the capacity, minimum/maximum SoC, and charge/discharge hardware limits
+   to the battery's native configuration. Both power limits are required: they
+   are the top of the range the boundaries are planned in. Elias does not change
+   its SoC settings.
+2. Set **Power step (W)** to the step of the limit setting the automation will
+   write (100 W by default).
+3. Tick **Can limit discharge (AC output) in balance** only if the automation can
+   cap battery output — not combined PV/inverter output or grid export. Leave it
+   off to retain native discharge.
+4. Tick **Plan charge limits** and save. Home automatically calculates a preview,
+   even while Battery control is disabled or another strategy is selected.
+   Defaults are 95% efficiency in each direction, a 20% solar margin, and no
+   wear cost.
+5. Write the automation for the battery's `elias_ems_<slug>_battery_command`
+   event, then tick **Steer this battery**. Set self-consumption on the device.
 6. Under **Battery control**, set the solar margin and wear cost if needed.
    Check the Home plan, then select **Optimize charge limits** and enable Battery
-   control to allow writes. Keep native self-consumption enabled on the device.
-   Limits update at most once per five minutes; readback runs every 30 seconds.
-
-Existing per-battery Off/Preview/Active selections no longer authorize writes.
-Upgrades retain the entity and automatically show a passive preview. Activation
-requires the strategy to be explicitly selected and enabled, with **Steer this
-battery** checked. Existing unchecked batteries remain unchecked after an
-upgrade: check the box to resume optimization. Previously
-applied limits are recovered through the restoration journal. Battery-specific
-margin and wear values remain the fallback until global values are supplied.
+   control to publish commands. Plans refresh every five minutes and at each
+   interval boundary.
 
 Once the Optimize charge limits strategy is enabled, that choice persists across
-restarts and updates. The plan card checks the saved control settings, battery
-configuration and paused recovery records independently of planning, without
-waiting for the history fetch or taking the execution lock. Enabled control shows
-a neutral waiting message while a plan is being prepared; it does not ask for
-settings to be saved again. Disabled control, conflicting battery settings and
-an external-change pause show their specific settings action immediately.
-Planning failures and incompatible forecast inputs remain separate warnings;
-limits are still only applied after a valid plan passes all execution checks.
+restarts and updates. The plan card checks the saved control settings and
+battery configuration independently of planning, without waiting for the history
+fetch or taking the execution lock. Enabled control shows a neutral waiting
+message while a plan is being prepared; it does not ask for settings to be saved
+again. Disabled control and conflicting battery settings show their specific
+settings action immediately. Planning failures and incompatible forecast inputs
+remain separate warnings; a command is only published after a valid plan passes
+all execution checks.
+
+### Upgrading from direct limit writes
+
+Earlier versions wrote the two limit entities themselves and journalled each
+entity's original value in `charge-limit-leases.json` first. On upgrade:
+
+- **The battery arrives unsteered**, with **Plan charge limits** ticked, and
+  **Can limit discharge** ticked if it had an output entity. The preview keeps
+  working; commands start once the automation exists and the box is ticked
+  again.
+- **Outstanding limits are restored.** Every 30-second tick puts back any
+  journalled original value — but only one Elias still owns: an entity whose
+  value somebody changed since is left alone. Each direction is restored
+  independently, failures are retried, and the journal shrinks to empty. Until
+  it is, the plan card says it is restoring and no command is published for that
+  battery, so the old writes and the new events never steer it at the same time.
+
+The migration only ever restores. It writes no new leases, and once the journal
+is empty it does nothing at all.
 
 Dynamic consumption and production price formulas must be configured. In Home
 Assistant's Energy dashboard, configure the grid, battery charge/discharge
@@ -84,7 +105,7 @@ whole-percent feedback quantization remain outside the equilibrium forecast.
 
 An unmatched or unrated solar source, a forecast provider shared between arrays,
 or a configured flexible-charger override,
-shows an explicitly **hypothetical preview assuming uncurtailed solar**. Writes
+shows an explicitly **hypothetical preview assuming uncurtailed solar**. Commands
 are blocked until that configuration can be modeled or curtailment is disabled.
 Another active battery strategy likewise makes the preview hypothetical. Other
 external battery or PV controllers must not change the model's assumptions.
@@ -134,7 +155,7 @@ reference in nominal solar.
 
 Charging uses available solar surplus up to the selected ceiling and native
 battery room. Discharge serves deficits up to the planned AC output ceiling,
-hardware limit and energy above the native SoC floor. Without an output entity,
+hardware limit and energy above the native SoC floor. Without discharge limiting,
 it follows native limits. The
 objective is purchase cost minus export revenue plus the configured wear cost
 per charged kWh. Thus charging with solar carries the opportunity cost of the
@@ -156,7 +177,7 @@ that reserve unreachable.
 
 ## Home and Plans
 
-Home shows recommended, requested and reported ceilings for both configured
+Home shows the recommended ceilings and the commanded ones for both planned
 directions, next change,
 expected generation and curtailment totals, and the modeled cost difference. It
 links to the **Plans** page for the complete forward-looking view.
@@ -165,46 +186,49 @@ Plans separates the forecast into Battery, PV and Prices sections. The PV
 section shows forecast versus generated solar after PV limits and totals the
 modeled generation and curtailment over the plan. A prominent view switch
 exchanges those charts for the full schedule table and remembers the last choice
-in the browser. Battery charts show the AC output ceiling and expected discharge when configured.
+in the browser. Battery charts show the AC output ceiling and expected discharge when the battery can limit discharge.
 The schedule includes both ceilings, expected discharge, household demand and separates forecast
 solar, generated solar and curtailed power. Cost difference is modeled over published prices, not
 measured savings; plans may end with different stored energy. Forecast source
 count, coverage, history sample count and solar margin make the assumptions
 visible.
-The live limit is fetched before planning, so a forecast or source-selection
-failure does not falsely mark an available entity unavailable. **Planning inputs**
-lists solar, history, price and battery checks separately.
+**Planning inputs** lists solar, history, price and battery checks separately.
 
 ## Control lifecycle
 
-The background loop runs even when no browser is open. It recalculates every five
-minutes. Settings mutations are serialized with actuation, preventing an old
-plan from writing after the battery is disabled or removed.
+The background loop runs even when no browser is open. It ticks every 30 seconds
+and recalculates every five minutes or at the end of the current interval,
+whichever comes first. Settings mutations are serialized with publishing,
+preventing an old plan from going out after the battery is disabled or removed.
 
-Before the first write to each entity, Elias atomically records its original value in
-`charge-limit-leases.json`. Each direction has its own recovery record. It restores both values on disable, entity replacement,
-removal, or planning failure, and recovers outstanding writes after a restart.
-Failed restorations remain recorded and are retried. Direct `number.set_value`
-calls are used for these slow limits, unlike the existing frequent target-power
-events. Readback is distinct from a successful service response.
+Each plan publishes its current interval as one `balance` command: the charge
+ceiling as `charge_limit_w`, the AC output ceiling as `discharge_limit_w` (null
+without discharge limiting), and a validity from the interval's start to its end
+plus a minute's grace. An unchanged command is not repeated when the plan is
+recalculated inside the same interval; the next interval's command goes out
+when it starts.
 
-An unexpected external value or an unacknowledged command pauses both directions
-and releases the other owned limit. A partial write failure restores the owned
-limits independently, retaining any failed restoration for retry. Save
-the battery settings to resume; Elias preserves a manual value it no longer owns.
-If Home Assistant or the add-on is stopped, the device retains its last limit
-until restoration is possible. For installations requiring a deadline independent
-of Elias, configure a Home Assistant watchdog to restore a chosen normal limit.
-No watchdog or device automation is installed automatically.
+The strategy releases a battery it holds when the strategy is disabled, when the
+battery stops being steered or planned, and when planning fails — a plan that
+cannot be trusted must not leave the battery capped. A release is `action:
+release`, and restoring the battery's normal limits is the automation's job.
+
+There is no readback. A successful publish means the event reached Home
+Assistant's bus, not that the inverter applied it; the plan card shows the
+**commanded** ceilings, never a reported one. If Home Assistant or the add-on is
+stopped, the device keeps whatever the automation last wrote until the
+automation's own `valid_until` watchdog — or the inverter's command timeout —
+lets go. Neither is installed automatically.
 
 ## Verification
 
 Unit tests cover price-driven deferral, insufficient later solar, native
 discharge, negative prices, reserve value, energy conservation, device steps,
 exhaustive small-case comparison, DST, forecast gaps, household history,
-authentication, and the actuation/restoration lifecycle. An integration test runs
-the production add-on behind its ingress proxy against mock Energy dashboard,
-Recorder, prices, and writable number endpoints.
+authentication, the command lifecycle and the migration from direct writes. An
+integration test runs the production add-on behind its ingress proxy against
+mock Energy dashboard, Recorder, prices and event endpoints, including restoring
+a limit an earlier version left behind.
 
 Sources: [Home Assistant Energy API implementation](https://github.com/home-assistant/core/blob/dev/homeassistant/components/energy/websocket_api.py),
 [Helios forecast contract](https://github.com/ReikanYsora/Helios-Forecast/blob/main/CONTRACT.md).

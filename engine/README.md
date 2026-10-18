@@ -99,24 +99,32 @@ Node also has an outer termination deadline. Browser users can cancel the worker
 The current input limit is 384 contiguous intervals. Initial SoC outside the configured window is explicitly unsupported rather
 than clamped, since clamping would invent energy. No forecast resampling occurs.
 
-## Future event contract (not implemented)
+## Event contract
 
-`BatteryControlEvent` version 1 carries battery identity, unique command identity,
-owner epoch, issue time and either release or one coherent interval command.
-The interval's start/end are its validity period. Apply includes mode, both
-boundaries, the applicable signed setpoint (none for balance, zero for hold),
-and explicit grid-charging/battery-export permissions.
-A future adapter must reject stale epochs/commands, expired commands and modes
-it cannot implement. Publication acknowledgement is not confirmation of device
-application; readback/adapter acknowledgement must be separate.
+`BatteryControlEvent` version 1 is now published by the add-on for both
+production strategies, as `elias_ems_<slug>_battery_command` — see
+[`battery-command.ts`](../addon/app/lib/battery-command.ts) and [Publishing
+commands](../docs/features/battery-control.md#publishing-commands). It carries
+battery identity, unique command identity, owner epoch, issue time, and either a
+release or one coherent command: mode, both boundaries, the applicable signed
+setpoint (none for balance, zero for hold), grid-charging/battery-export
+permissions and a validity period. An engine `Command` maps onto it field for
+field, so wiring HiGHS into execution needs no contract change; the add-on's
+payload is the snake_case, flat form an automation reads from Jinja.
 
-Future activation must acquire exclusive ownership and restore/release the old
-charge-limit leases before publishing new commands. On disable, failure or expiry,
-release ownership and restore the recorded native mode/limits; do not equate
-release with hold. On restart, recover outstanding restorations, create a fresh
-epoch and require a new plan before applying. Device-side expiry/watchdog behavior
-must work even if Elias is down. Neither publisher, watchdog nor migration is
-installed by this change.
+What already holds: the add-on releases rather than holds on disable, failure,
+un-steering and shutdown; a strategy only releases batteries it owns; a fresh
+epoch is created on every restart; and the limit-entity leases of the old
+charge-limit writer are restored before any command for that battery is
+published. Publication is still not confirmation — an adapter acknowledgement
+would be a separate event.
+
+Still for the engine's integration: an adapter that rejects stale epochs and
+commands, expired commands and modes it cannot implement, and enforces the
+permissions against live power. Today every battery has a hand-written
+automation, and the direct modes' explicit permissions are only as safe as
+it is. Device-side expiry must work even if Elias is down; no watchdog is
+installed automatically.
 
 ## Verification
 

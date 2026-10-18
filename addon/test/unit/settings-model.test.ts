@@ -11,8 +11,8 @@ import {
   normalizeBattery,
   parseBattery,
   resolvePowerLimits,
-  targetEventType,
 } from "../../app/lib/batteries";
+import { commandEventType } from "../../app/lib/battery-command";
 import {
   DEFAULT_CONTROL_CONFIG,
   MAX_INTERVAL_SECONDS,
@@ -288,6 +288,34 @@ describe("normalizeBattery", () => {
     expect(battery.steered).toBe(false);
   });
 
+  it("keeps a battery saved against the command event steered", () => {
+    const battery = normalizeBattery({
+      id: "b1",
+      title: "Home battery",
+      capacityKwh: 10,
+      minChargePercent: 10,
+      maxChargePercent: 90,
+      energyEntityId: "sensor.e",
+      powerEntityId: "sensor.p",
+      socEntityId: "sensor.s",
+      steered: true,
+      commandContract: 1,
+      maxChargePowerW: null,
+      maxDischargePowerW: null,
+    });
+
+    expect(battery.steered).toBe(true);
+    // A mode list nobody chose reads as everything, which is what the form
+    // offers a new battery.
+    expect(battery.controlModes).toEqual([
+      "balance",
+      "hold",
+      "charge",
+      "discharge",
+    ]);
+    expect(battery.powerStepW).toBe(BATTERY_DEFAULTS.powerStepW);
+  });
+
   it("drops a power cap of zero rather than freezing the battery at 0 W", () => {
     // Far more likely to be a stray keystroke in a hand-edited file than a
     // deliberate "never let this battery do anything".
@@ -528,7 +556,7 @@ describe("naming a battery on the event bus", () => {
 
   it("falls back to the record id when a stored title slugifies to nothing", () => {
     // Only reachable through a hand-edited file, and an ugly event name beats
-    // publishing to `elias_ems__target_power` or not publishing at all.
+    // publishing to `elias_ems__battery_command` or not publishing at all.
     expect(batterySlug({ id: "b1", title: "⚡" })).toBe("battery_b1");
     expect(batterySlug({ id: "b1", title: "Home battery" })).toBe(
       "home_battery",
@@ -536,8 +564,8 @@ describe("naming a battery on the event bus", () => {
   });
 
   it("names one event type per battery", () => {
-    expect(targetEventType("home_battery")).toBe(
-      "elias_ems_home_battery_target_power",
+    expect(commandEventType("home_battery")).toBe(
+      "elias_ems_home_battery_battery_command",
     );
   });
 });

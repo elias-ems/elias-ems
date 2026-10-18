@@ -11,16 +11,20 @@
 
 - Optimize charge limits — Evening target is the single production planner.
   Optional maximum AC output control reserves battery energy during cheaper
-  hours for higher-priced demand; both power limits have readback and restoration.
-  See [charge-limit optimization](features/charge-limit.md).
+  hours for higher-priced demand. Both limits now go out as a `balance` battery
+  command for an automation to apply; limits earlier versions wrote directly are
+  restored on upgrade. See [charge-limit optimization](features/charge-limit.md).
 
 - Battery control (net-zero energy strategy) — deciding, acting and logging
-  done, see [features/battery-control.md](features/battery-control.md). Each
-  target goes out as an `elias_ems_<battery>_target_power` event for an automation
-  to carry out, within per-battery charge and discharge power limits. Still to
-  do: noticing that nothing acted on a target — no automation, one listening
-  for a battery's old name, or an inverter ignoring it all look identical from
-  here.
+  done, see [features/battery-control.md](features/battery-control.md). Both
+  strategies publish one versioned `elias_ems_<battery>_battery_command` event
+  per battery — a mode (`balance`, `hold`, `charge`, `discharge`) plus
+  boundaries, an optional setpoint, permissions and a validity — for an
+  automation to carry out. The four modes are the HiGHS engine's, so wiring
+  that engine in needs no contract change. Still to do: noticing that nothing
+  acted on a command — no automation, one listening for a battery's old name,
+  or an inverter ignoring it all look identical from here — and a packaged
+  adapter that enforces validity and permissions.
 - Diagnostics — one log every feature writes to, shown on Home as the two
   strategies' decisions merged into a single feed, in full on the Tools page,
   and downloadable as a text file. Four origins write to it now — battery

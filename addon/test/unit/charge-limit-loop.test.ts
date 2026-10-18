@@ -21,12 +21,14 @@ const renderPlan = (initial: ChargeLimitsData) =>
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   set: vi.fn(),
+  fire: vi.fn(),
   calculate: vi.fn(),
   curtail: vi.fn(),
 }));
 vi.mock("../../app/lib/ha.server", () => ({
   fetchHaState: mocks.fetch,
   setHaChargeLimit: mocks.set,
+  fireHaEvent: mocks.fire,
 }));
 vi.mock("../../app/lib/charge-planner.server", () => ({
   calculateChargePlan: mocks.calculate,
@@ -36,8 +38,10 @@ vi.mock("../../app/lib/charge-planner.server", () => ({
 vi.mock("../../app/lib/curtailment-config.server", () => ({
   readCurtailmentConfig: mocks.curtail,
 }));
+
 let directory: string;
-let current = 2000;
+/** A power-limit entity an earlier version wrote, for the migration cases. */
+let legacyLimit = 400;
 let now: number;
 const battery: Battery = {
   id: "one",
@@ -49,13 +53,27 @@ const battery: Battery = {
   powerEntityId: "sensor.power",
   socEntityId: "sensor.soc",
   steered: true,
+  controlModes: ["balance", "hold", "charge", "discharge"],
+  dischargeLimitSupported: false,
+  powerStepW: 10,
+  chargeLimitPlanning: true,
+  commandContract: 1,
   maxChargePowerW: 2000,
   maxDischargePowerW: 2000,
-  chargeLimitEntityId: "number.charge_limit",
-  chargeLimitMode: "active",
 };
 const saveBattery = (b: Battery) =>
   writeFile(path.join(directory, "batteries.json"), JSON.stringify([b]));
+const saveControl = (enabled: boolean, strategy = "charge-limit") =>
+  writeFile(
+    path.join(directory, "control.json"),
+    JSON.stringify({ enabled, strategy, intervalSeconds: 5 }),
+  );
+
+/** Every battery command fired so far, as payloads. */
+const commands = (): Array<Record<string, unknown>> =>
+  mocks.fire.mock.calls
+    .filter(([type]) => String(type).endsWith("_battery_command"))
+    .map(([, data]) => data as Record<string, unknown>);
 
 beforeEach(async () => {
   vi.resetModules();
@@ -63,14 +81,15 @@ beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "elias-charge-test-"));
   vi.stubEnv("DATA_DIR", directory);
   now = Date.now();
-  current = 2000;
-  mocks.fetch.mockImplementation(async () => ({
-    entity_id: "number.charge_limit",
-    state: String(current),
+  legacyLimit = 400;
+  mocks.fire.mockResolvedValue(undefined);
+  mocks.fetch.mockImplementation(async (id: string) => ({
+    entity_id: id,
+    state: String(legacyLimit),
     attributes: { min: 0, max: 2000, step: 10, unit_of_measurement: "W" },
   }));
   mocks.set.mockImplementation(async (_id: string, w: number) => {
-    current = w;
+    legacyLimit = w;
   });
   mocks.curtail.mockResolvedValue({ enabled: false });
   mocks.calculate.mockImplementation(async () => ({
@@ -78,13 +97,19 @@ beforeEach(async () => {
       ? "Hypothetical curtailment preview; control blocked."
       : null,
     plan: {
-      points: [{ start: now, end: now + 900_000, limitW: 400 }],
+      points: [
+        {
+          start: now,
+          end: now + 900_000,
+          limitW: 400,
+          dischargeLimitW: 100,
+        },
+      ],
       reason: "Wait for midday solar.",
       cost: 1,
       baselineCost: 2,
       terminalReserveKwh: 1,
     },
-    reportedW: current,
     currency: "EUR",
     timeZone: "Europe/Brussels",
     forecastEnd: now + 86_400_000,
@@ -93,21 +118,14 @@ beforeEach(async () => {
     reserveCovered: true,
   }));
   await saveBattery(battery);
-  await writeFile(
-    path.join(directory, "control.json"),
-    JSON.stringify({
-      enabled: true,
-      strategy: "charge-limit",
-      intervalSeconds: 5,
-    }),
-  );
+  await saveControl(true);
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
   await rm(directory, { recursive: true, force: true });
 });
 
-describe("charge limit execution and recovery", () => {
+describe("charge limit commands", () => {
   it("reports saved authorization before planning and while the execution lock waits for history", async () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
     const initial = await loop.readChargeLimits();
@@ -138,57 +156,91 @@ describe("charge limit execution and recovery", () => {
       expect(waiting.batteries[0].control.state).toBe("enabled");
       expect(waiting.batteries[0].plan).toBeNull();
       expect(renderPlan(waiting)).not.toContain('role="alert"');
-      expect(mocks.set).not.toHaveBeenCalled();
+      expect(commands()).toEqual([]);
     } finally {
       release();
       await tick;
     }
     expect((await loop.readChargeLimits()).batteries[0].state).toBe("active");
-
-    vi.resetModules();
-    const restarted = await import("../../app/lib/charge-limit-loop.server");
-    expect(
-      (await restarted.readChargeLimits()).batteries[0].control.state,
-    ).toBe("enabled");
-    await restarted.chargeLimitTick(now + 30_000);
-    expect((await restarted.readChargeLimits()).batteries[0].state).toBe(
-      "active",
-    );
   });
 
-  it("reports disabled, conflicting and paused settings without calculating a plan", async () => {
+  it("publishes the current interval as a balance command with its boundaries", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+
+    expect(mocks.fire).toHaveBeenCalledWith(
+      "elias_ems_home_battery_command",
+      expect.any(Object),
+    );
+    expect(commands()).toEqual([
+      expect.objectContaining({
+        action: "apply",
+        strategy: "charge-limit",
+        mode: "balance",
+        setpoint_w: null,
+        charge_limit_w: 400,
+        // Without discharge limiting the battery's output stays native, and
+        // the command says so rather than repeating the plan's ceiling.
+        discharge_limit_w: null,
+        valid_from: new Date(now).toISOString(),
+        valid_until: new Date(
+          now + 900_000 + loop.COMMAND_GRACE_MS,
+        ).toISOString(),
+      }),
+    ]);
+    const status = (await loop.readChargeLimits()).batteries[0];
+    expect(status.state).toBe("active");
+    expect(status.requestedW).toBe(400);
+    expect(status.requestedDischargeW).toBeNull();
+    // Nothing is written to an entity any more.
+    expect(mocks.set).not.toHaveBeenCalled();
+  });
+
+  it("carries the AC output boundary when the battery can limit discharge", async () => {
+    await saveBattery({ ...battery, dischargeLimitSupported: true });
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+
+    expect(commands()[0]).toMatchObject({
+      charge_limit_w: 400,
+      discharge_limit_w: 100,
+    });
+    expect(
+      (await loop.readChargeLimits()).batteries[0].requestedDischargeW,
+    ).toBe(100);
+  });
+
+  it("does not repeat an unchanged command when it replans inside the interval", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    loop.invalidateChargePlans();
+    await loop.chargeLimitTick(now + 30_000);
+
+    expect(mocks.calculate).toHaveBeenCalledTimes(2);
+    expect(commands()).toHaveLength(1);
+  });
+
+  it("reports disabled and conflicting settings without calculating a plan", async () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await saveBattery({ ...battery, steered: false });
     let data = await loop.readChargeLimits();
     expect(data.batteries[0].control.state).toBe("blocked");
     expect(renderPlan(data)).toContain("Edit battery");
     await saveBattery(battery);
-    await writeFile(
-      path.join(directory, "charge-limit-leases.json"),
-      JSON.stringify([
-        {
-          batteryId: battery.id,
-          entityId: battery.chargeLimitEntityId,
-          originalW: 2000,
-          previousW: 2000,
-          requestedW: 400,
-          at: now,
-          paused: true,
-        },
-      ]),
-    );
-    data = await loop.readChargeLimits();
-    expect(data.batteries[0].control.state).toBe("paused");
-    expect(renderPlan(data)).toContain("Save battery settings");
-    await writeFile(
-      path.join(directory, "control.json"),
-      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
-    );
+    await saveControl(false);
     data = await loop.readChargeLimits();
     expect(data.batteries[0].control.state).toBe("disabled");
     expect(renderPlan(data)).toContain("Configure battery control");
     expect(mocks.calculate).not.toHaveBeenCalled();
-    expect(mocks.set).not.toHaveBeenCalled();
+    expect(commands()).toEqual([]);
+  });
+
+  it("only plans batteries opted in to charge-limit planning", async () => {
+    await saveBattery({ ...battery, chargeLimitPlanning: false });
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect((await loop.readChargeLimits()).batteries).toEqual([]);
   });
 
   it("shows planning failures without telling an enabled user to enable control again", async () => {
@@ -201,10 +253,9 @@ describe("charge limit execution and recovery", () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain("Forecast gap");
     expect(html).not.toContain("Configure battery control");
-    expect(html).not.toContain("Save battery settings");
   });
 
-  it("publishes active status only after the charge-limit write completes", async () => {
+  it("publishes active status only after the command has gone out", async () => {
     let enter!: () => void;
     let release!: () => void;
     const entered = new Promise<void>((resolve) => {
@@ -213,10 +264,9 @@ describe("charge limit execution and recovery", () => {
     const pending = new Promise<void>((resolve) => {
       release = resolve;
     });
-    mocks.set.mockImplementationOnce(async (_id: string, w: number) => {
+    mocks.fire.mockImplementationOnce(async () => {
       enter();
       await pending;
-      current = w;
     });
     const loop = await import("../../app/lib/charge-limit-loop.server");
     const tick = loop.chargeLimitTick(now);
@@ -225,7 +275,6 @@ describe("charge limit execution and recovery", () => {
       const status = (await loop.readChargeLimits()).batteries[0];
       expect(status.state).toBe("waiting");
       expect(status.requestedW).toBeNull();
-      expect(current).toBe(2000);
     } finally {
       release();
       await tick;
@@ -233,259 +282,181 @@ describe("charge limit execution and recovery", () => {
     const status = (await loop.readChargeLimits()).batteries[0];
     expect(status.state).toBe("active");
     expect(status.requestedW).toBe(400);
-    expect(current).toBe(400);
   });
-  it("ignores legacy active mode after upgrade until the new strategy is enabled", async () => {
-    await writeFile(
-      path.join(directory, "control.json"),
-      JSON.stringify({ enabled: false, strategy: "net-zero-energy" }),
-    );
+
+  it("reports a command that did not go out as an error", async () => {
+    mocks.fire.mockRejectedValue(new Error("Disconnected"));
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    const status = (await loop.readChargeLimits()).batteries[0];
+    expect(status.state).toBe("error");
+    expect(status.message).toContain("Disconnected");
+  });
+
+  it("previews without publishing while the strategy is disabled or another is active", async () => {
+    await saveControl(false, "net-zero-energy");
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
     expect(mocks.calculate).toHaveBeenCalledOnce();
-    expect(mocks.set).not.toHaveBeenCalled();
+    expect(commands()).toEqual([]);
     expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
   });
-  it("keeps a hypothetical plan and live readback when curtailment blocks writes", async () => {
+
+  it("previews without publishing when the battery is not steered", async () => {
+    await saveBattery({ ...battery, steered: false });
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    expect(commands()).toEqual([]);
+    const status = (await loop.readChargeLimits()).batteries[0];
+    expect(status.state).toBe("preview");
+    expect(status.message).toContain("Steer this battery");
+  });
+
+  it("keeps a hypothetical plan without publishing when curtailment blocks control", async () => {
     mocks.curtail.mockResolvedValue({ enabled: true });
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
     const status = (await loop.readChargeLimits()).batteries[0];
     expect(status.plan).not.toBeNull();
-    expect(status.reportedW).toBe(2000);
     expect(status.message).toContain("Hypothetical");
-    expect(mocks.set).not.toHaveBeenCalled();
+    expect(commands()).toEqual([]);
   });
-  it("does not write in preview even when steering is enabled", async () => {
-    await writeFile(
-      path.join(directory, "control.json"),
-      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
-    );
+
+  it("releases the battery when steering is unchecked between plans", async () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
-    expect(mocks.calculate).toHaveBeenCalledOnce();
-    expect(mocks.set).not.toHaveBeenCalled();
-    expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
-  });
-  it("previews without writing when the battery is not steered", async () => {
-    await saveBattery({ ...battery, steered: false });
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await loop.chargeLimitTick(now);
-    expect(mocks.calculate).toHaveBeenCalledOnce();
-    expect(mocks.set).not.toHaveBeenCalled();
-    expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
-  });
-  it("restores owned limits when steering is unchecked between plans", async () => {
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await loop.chargeLimitTick(now);
-    expect(current).toBe(400);
     await saveBattery({ ...battery, steered: false });
     await loop.chargeLimitTick(now + 30_000);
-    expect(current).toBe(2000);
+
+    expect(commands().at(-1)).toMatchObject({
+      action: "release",
+      release_reason: "unsteered",
+      strategy: "charge-limit",
+    });
     expect((await loop.readChargeLimits()).batteries[0].control.state).toBe(
       "blocked",
     );
   });
-  it("writes a cap, confirms readback, throttles and restores the previous value on disable", async () => {
+
+  it("releases the battery once, when the strategy is disabled", async () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
-    expect(mocks.set).toHaveBeenCalledWith("number.charge_limit", 400);
+    await saveControl(false);
     await loop.chargeLimitTick(now + 30_000);
-    expect(mocks.set).toHaveBeenCalledTimes(1);
-    expect((await loop.readChargeLimits()).batteries[0].reportedW).toBe(400);
-    await writeFile(
-      path.join(directory, "control.json"),
-      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
-    );
     await loop.chargeLimitTick(now + 60_000);
-    expect(current).toBe(2000);
+
+    expect(commands().map((c) => c.action)).toEqual(["apply", "release"]);
+    expect(commands()[1]).toMatchObject({ release_reason: "disabled" });
   });
-  it("restores on forecast failure and keeps a failed restoration for retry", async () => {
+
+  it("does not release a battery it never commanded", async () => {
+    await saveControl(true, "net-zero-energy");
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    expect(commands()).toEqual([]);
+  });
+
+  it("releases the battery when planning fails", async () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
     mocks.calculate.mockRejectedValueOnce(new Error("Forecast gap"));
-    mocks.set.mockRejectedValueOnce(new Error("Disconnected"));
     await loop.chargeLimitTick(now + 300_000);
+
+    expect(commands().at(-1)).toMatchObject({
+      action: "release",
+      release_reason: "failure",
+    });
     expect((await loop.readChargeLimits()).batteries[0].message).toContain(
-      "Restoration will be retried",
-    );
-    await loop.chargeLimitTick(now + 330_000);
-    expect(current).toBe(2000);
-    expect(
-      JSON.parse(
-        await readFile(
-          path.join(directory, "charge-limit-leases.json"),
-          "utf8",
-        ),
-      ),
-    ).toEqual([]);
-  });
-  it("respects manual edits and pauses until settings are saved", async () => {
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await loop.chargeLimitTick(now);
-    current = 800;
-    await loop.chargeLimitTick(now + 90_000);
-    await loop.chargeLimitTick(now + 300_000);
-    expect(current).toBe(800);
-    expect(mocks.set).toHaveBeenCalledTimes(1);
-    expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
-    await loop.releaseChargeLimit(battery.id);
-    expect(current).toBe(800);
-  });
-  it("recovers an outstanding limit after process restart", async () => {
-    current = 400;
-    await writeFile(
-      path.join(directory, "charge-limit-leases.json"),
-      JSON.stringify([
-        {
-          batteryId: "one",
-          entityId: "number.charge_limit",
-          originalW: 2000,
-          previousW: 2000,
-          requestedW: 400,
-          at: now - 300_000,
-        },
-      ]),
-    );
-    await writeFile(
-      path.join(directory, "control.json"),
-      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
-    );
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await loop.chargeLimitTick(now);
-    expect(current).toBe(2000);
-  });
-  it("blocks unchecked steering and curtailment", async () => {
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await saveBattery({ ...battery, steered: false });
-    await loop.chargeLimitTick(now);
-    expect(mocks.set).not.toHaveBeenCalled();
-    expect((await loop.readChargeLimits()).batteries[0].message).toContain(
-      "Steer this battery",
-    );
-    await saveBattery(battery);
-    mocks.curtail.mockResolvedValue({ enabled: true });
-    await loop.chargeLimitTick(now + 300_000);
-    expect((await loop.readChargeLimits()).batteries[0].message).toContain(
-      "curtailment",
+      "Released the battery",
     );
   });
 });
 
-describe("paired charge and AC output limits", () => {
-  let output: number;
-  beforeEach(async () => {
-    output = 2000;
-    await saveBattery({
-      ...battery,
-      dischargeLimitEntityId: "number.ac_output",
-    });
-    mocks.fetch.mockImplementation(async (id: string) => ({
-      entity_id: id,
-      state: String(id === "number.ac_output" ? output : current),
-      attributes: { min: 0, max: 2000, step: 10, unit_of_measurement: "W" },
-    }));
-    mocks.set.mockImplementation(async (id: string, w: number) => {
-      if (id === "number.ac_output") output = w;
-      else current = w;
-    });
-    const calculate = mocks.calculate.getMockImplementation();
-    mocks.calculate.mockImplementation(async () => {
-      const result = await calculate?.();
-      result.plan.points[0].dischargeLimitW = 100;
-      result.reportedDischargeW = output;
-      return result;
-    });
+describe("limits written by an earlier version", () => {
+  const lease = (entityId: string, extra = {}) => ({
+    batteryId: "one",
+    entityId,
+    originalW: 2000,
+    previousW: 2000,
+    requestedW: 400,
+    at: now - 300_000,
+    ...extra,
   });
-  it("writes, monitors and independently restores both original values", async () => {
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await loop.chargeLimitTick(now);
-    expect(current).toBe(400);
-    expect(output).toBe(100);
-    await loop.chargeLimitTick(now + 30_000);
-    expect(
-      (await loop.readChargeLimits()).batteries[0].reportedDischargeW,
-    ).toBe(100);
-    expect(mocks.set).toHaveBeenCalledTimes(2);
-    await loop.releaseChargeLimit(battery.id);
-    expect(current).toBe(2000);
-    expect(output).toBe(2000);
-    expect(
-      JSON.parse(
-        await readFile(
-          path.join(directory, "charge-limit-leases.json"),
-          "utf8",
-        ),
-      ),
-    ).toEqual([]);
-  });
-  it("rolls back the charge cap if the output write fails", async () => {
-    mocks.set.mockImplementation(async (id: string, w: number) => {
-      if (id === "number.ac_output") throw new Error("Output unavailable");
-      current = w;
-    });
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await loop.chargeLimitTick(now);
-    expect(current).toBe(2000);
-    expect(output).toBe(2000);
-    expect((await loop.readChargeLimits()).batteries[0].state).toBe("error");
-  });
-  it("preserves a manual output edit and releases the charge cap", async () => {
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await loop.chargeLimitTick(now);
-    output = 900;
-    await loop.chargeLimitTick(now + 90_000);
-    expect(output).toBe(900);
-    expect(current).toBe(2000);
-    await loop.chargeLimitTick(now + 300_000);
-    expect((await loop.readChargeLimits()).batteries[0].state).toBe("preview");
-    expect(output).toBe(900);
-    await loop.releaseChargeLimit(battery.id);
-    expect(output).toBe(900);
-  });
-  it("recovers both limits after restart", async () => {
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await loop.chargeLimitTick(now);
-    vi.resetModules();
-    await writeFile(
-      path.join(directory, "control.json"),
-      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
+  const leases = async () =>
+    JSON.parse(
+      await readFile(path.join(directory, "charge-limit-leases.json"), "utf8"),
     );
-    const restarted = await import("../../app/lib/charge-limit-loop.server");
-    await restarted.chargeLimitTick(now + 30_000);
-    expect(current).toBe(2000);
-    expect(output).toBe(2000);
-  });
-  it("restores output even if charge restoration fails, then retries charge", async () => {
+
+  it("restores an outstanding limit before publishing any command", async () => {
+    await writeFile(
+      path.join(directory, "charge-limit-leases.json"),
+      JSON.stringify([lease("number.charge_limit")]),
+    );
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
+
+    expect(mocks.set).toHaveBeenCalledWith("number.charge_limit", 2000);
+    expect(legacyLimit).toBe(2000);
+    expect(await leases()).toEqual([]);
+    // Restored in the same tick, so the command goes out straight after.
+    expect(commands()).toHaveLength(1);
+    expect(mocks.set.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.fire.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("holds commands back while a restoration keeps failing, and retries it", async () => {
+    await writeFile(
+      path.join(directory, "charge-limit-leases.json"),
+      JSON.stringify([lease("number.charge_limit")]),
+    );
+    mocks.set.mockRejectedValueOnce(new Error("Disconnected"));
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+
+    expect(commands()).toEqual([]);
+    const data = await loop.readChargeLimits();
+    expect(data.batteries[0].control.state).toBe("migrating");
+    expect(data.batteries[0].message).toContain("earlier version");
+
+    loop.invalidateChargePlans();
+    await loop.chargeLimitTick(now + 30_000);
+    expect(legacyLimit).toBe(2000);
+    expect(await leases()).toEqual([]);
+    expect(commands()).toHaveLength(1);
+  });
+
+  it("leaves a value somebody changed by hand alone", async () => {
+    legacyLimit = 800;
+    await writeFile(
+      path.join(directory, "charge-limit-leases.json"),
+      JSON.stringify([lease("number.charge_limit", { paused: true })]),
+    );
+    await saveControl(false);
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+
+    expect(mocks.set).not.toHaveBeenCalled();
+    expect(legacyLimit).toBe(800);
+    expect(await leases()).toEqual([]);
+  });
+
+  it("restores each direction independently", async () => {
+    await writeFile(
+      path.join(directory, "charge-limit-leases.json"),
+      JSON.stringify([lease("number.charge_limit"), lease("number.ac_output")]),
+    );
     const fetch = mocks.fetch.getMockImplementation();
-    if (!fetch) throw new Error("Missing HA fetch mock");
     mocks.fetch.mockImplementation(async (id: string) =>
       id === "number.charge_limit" ? null : fetch?.(id),
     );
-    await expect(loop.releaseChargeLimit(battery.id)).rejects.toThrow(
-      "unavailable",
-    );
-    expect(output).toBe(2000);
-    expect(current).toBe(400);
-    const records = JSON.parse(
-      await readFile(path.join(directory, "charge-limit-leases.json"), "utf8"),
-    );
-    expect(records).toHaveLength(1);
-    expect(records[0].entityId).toBe("number.charge_limit");
-    expect(records[0].restoring).toBe(true);
-    mocks.fetch.mockImplementation(fetch);
-    await loop.releaseChargeLimit(battery.id);
-    expect(current).toBe(2000);
-  });
-  it("never writes either limit in preview", async () => {
-    await writeFile(
-      path.join(directory, "control.json"),
-      JSON.stringify({ enabled: false, strategy: "charge-limit" }),
-    );
+    await saveControl(false);
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
-    expect(mocks.set).not.toHaveBeenCalled();
+
+    expect(mocks.set).toHaveBeenCalledWith("number.ac_output", 2000);
+    expect(
+      (await leases()).map((l: { entityId: string }) => l.entityId),
+    ).toEqual(["number.charge_limit"]);
   });
 });

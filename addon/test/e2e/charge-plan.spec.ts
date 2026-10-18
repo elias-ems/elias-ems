@@ -4,7 +4,6 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   chargeBatteryFixture,
-  chargeEntityFixture,
   chargeForecastFixture,
 } from "../charge-forecast-fixture.js";
 import { defaultStates } from "../ha-mock.js";
@@ -22,11 +21,7 @@ for (const modeled of [false, true]) {
       await writeFile(
         path.join(directory, "batteries.json"),
         JSON.stringify([
-          {
-            ...chargeBatteryFixture,
-            chargeLimitMode: "off",
-            dischargeLimitEntityId: "number.ac_output",
-          },
+          { ...chargeBatteryFixture, dischargeLimitSupported: true },
         ]),
       );
       await writeFile(
@@ -65,18 +60,7 @@ for (const modeled of [false, true]) {
       );
       stack = await startStack({
         dataDir: directory,
-        haStates: [
-          ...(await defaultStates()),
-          chargeEntityFixture,
-          {
-            ...chargeEntityFixture,
-            entity_id: "number.ac_output",
-            attributes: {
-              ...chargeEntityFixture.attributes,
-              friendly_name: "Battery maximum AC output",
-            },
-          },
-        ],
+        haStates: await defaultStates(),
         haCommandResults: chargeForecastFixture(),
       });
       const errors: string[] = [];
@@ -203,17 +187,19 @@ for (const modeled of [false, true]) {
         .filter({ hasText: "Home battery" })
         .getByRole("button", { name: "Edit", exact: true })
         .click();
-      const entity = page.getByLabel("Maximum charge limit (W)", {
-        exact: true,
-      });
+      // The limits are carried by the battery command event now, so the
+      // form asks what the battery's automation can do rather than which
+      // entities to write.
       await expect(
-        page.getByLabel("Maximum AC output power (W) — optional", {
+        page.getByLabel("Plan charge limits", { exact: true }),
+      ).toBeChecked();
+      await expect(
+        page.getByLabel("Can limit discharge (AC output) in balance", {
           exact: true,
         }),
-      ).toHaveValue("number.ac_output");
-      await entity.fill("Battery maximum charge");
+      ).toBeChecked();
       await expect(
-        page.getByRole("option", { name: /Battery maximum charge limit/ }),
+        page.getByText("elias_ems_home_battery_battery_command"),
       ).toBeVisible();
       expect(errors).toEqual([]);
     } finally {

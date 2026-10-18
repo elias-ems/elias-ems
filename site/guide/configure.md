@@ -72,20 +72,25 @@ capable of. Setting 20 and 90 does not stop the battery's own logic charging to
 Both strategies use **Steer this battery** to select which batteries they may
 control. Leave it unchecked to monitor a battery without controlling it.
 
-**Optimize charge limits** writes the configured power-limit entities while the
-device stays in native self-consumption. It currently supports one configured
-household battery; see [setup and requirements](/internals/charge-limit).
+Both send each battery's **command** as a Home Assistant **event**, and an
+automation you write turns that into whatever your inverter wants. **Net zero
+energy** commands a power to hold, charge or discharge at. **Optimize charge
+limits** keeps the device in native self-consumption and commands its charge and
+AC output limits; it currently supports one configured household battery,
+ticked **Plan charge limits** — see [setup and requirements](/internals/charge-limit).
 
-**Net zero energy** sends each target as a Home Assistant **event**, and an
-automation you write turns that into whatever your inverter wants.
+Because the add-on never talks to the inverter itself, the battery form asks
+what *your automation* can do: which modes it can carry out (net zero energy
+needs hold, charge and discharge), whether it can limit discharge, and the power
+step its limit setting moves in.
 
 Each battery gets **its own event type, named after its title**:
 
 | Title | Event your automation listens for |
 | --- | --- |
-| Home battery | `elias_ems_home_battery_target_power` |
-| Garage | `elias_ems_garage_target_power` |
-| Réserve #2 | `elias_ems_reserve_2_target_power` |
+| Home battery | `elias_ems_home_battery_battery_command` |
+| Garage | `elias_ems_garage_battery_command` |
+| Réserve #2 | `elias_ems_reserve_2_battery_command` |
 
 The name is lowercased, accents are folded, and anything that isn't a letter or
 digit becomes a single `_`. You don't type it — the Settings page shows it under
@@ -97,8 +102,8 @@ automation.
 **Steer this battery** authorizes either strategy. Leave it
 unticked and the battery still appears on the dashboard, still counts as part of
 the house, and simply never gets told what to do — a supported state, not an
-unfinished one. **Control cannot be switched on until at least one battery is
-steered**, and the checkbox stays disabled until then. For Net zero energy,
+unfinished one. **Control cannot be switched on until a battery can be steered
+by the selected strategy**, and the checkbox stays disabled until then. For Net zero energy,
 the rule is "at least one", not "all" — a house can reasonably have one steered battery and one that
 only reports.
 
@@ -112,14 +117,15 @@ automation's trigger to match, or rename the battery back.
 
 Two batteries whose titles produce the same name are refused for the same
 reason: "Home battery" and "home-battery" would share one event and take each
-other's targets.
+other's commands.
 :::
 
-::: warning Upgrading from a version with a "Target power" field
-Earlier versions wrote the value straight to an entity. Batteries configured
-that way come across as **watched, not steered**, and the target entity is
-forgotten — nothing is listening for the new event until you write the
-automation, so carrying them across as steered would be a claim that isn't true.
+::: warning Upgrading from target-power events or limit entities
+Earlier versions published a bare `_target_power` event, or wrote charge and
+AC output limit entities directly. Batteries configured either way come across
+as **watched, not steered** — nothing is listening for the new command event
+until you write the automation, so carrying them across as steered would be a
+claim that isn't true. Any limit Elias ems had left in place is restored once.
 Write the automation, tick **Steer this battery**, then switch control back on.
 :::
 
@@ -204,7 +210,7 @@ its state of charge, and each tick that decided something ends in a `Published:`
 line.
 
 Then check the other end. Developer Tools → **Events** → listen to the
-battery's event name (`elias_ems_home_battery_target_power`, as shown on the Settings
+battery's event name (`elias_ems_home_battery_battery_command`, as shown on the Settings
 page) to see exactly what your automation is being handed, and the automation's
 own trace for what it did with it.
 

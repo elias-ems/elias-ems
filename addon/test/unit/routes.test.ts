@@ -15,6 +15,7 @@ import {
   it,
   vi,
 } from "vitest";
+import type { BatteryMode } from "../../app/lib/battery-command";
 import { defaultStates, startHaMock } from "../ha-mock.js";
 
 let ha: Awaited<ReturnType<typeof startHaMock>>;
@@ -41,13 +42,16 @@ const postedBattery = {
   socEntityId: "sensor.battery_state_of_charge",
   // What a ticked checkbox posts, rather than the boolean it becomes.
   steered: "on",
+  // One value per ticked mode box; balance needs no box.
+  controlModes: ["hold", "charge", "discharge"],
 };
 
 /** The same battery as it should end up on disk, with real numbers. */
 const storedBattery = {
-  chargeLimitMode: "off" as const,
-  chargeLimitEntityId: "",
-  dischargeLimitEntityId: "",
+  dischargeLimitSupported: false,
+  powerStepW: 100,
+  chargeLimitPlanning: false,
+  commandContract: 1,
   chargeEfficiencyPercent: 95,
   solarMarginPercent: 20,
   chargeWearPerKwh: 0,
@@ -56,6 +60,7 @@ const storedBattery = {
   minChargePercent: 10,
   maxChargePercent: 90,
   steered: true,
+  controlModes: ["balance", "hold", "charge", "discharge"] as BatteryMode[],
   maxChargePowerW: null,
   maxDischargePowerW: null,
 };
@@ -547,9 +552,13 @@ describe("POST /settings", () => {
     return { route, loop };
   }
 
-  async function post(fields: Record<string, string>) {
+  async function post(fields: Record<string, string | string[]>) {
     const { route } = await loadSettings();
-    const body = new URLSearchParams(fields);
+    const body = new URLSearchParams(
+      Object.entries(fields).flatMap(([key, value]) =>
+        (Array.isArray(value) ? value : [value]).map((v) => [key, v]),
+      ),
+    );
     return route.action({
       request: new Request("http://localhost/settings", {
         method: "POST",
@@ -638,6 +647,46 @@ describe("POST /settings", () => {
     expect(result).toEqual({ section: "battery", ok: true });
   });
 
+  it("releases a battery under its old name when it is renamed", async () => {
+    // The automation listening for the old event type would otherwise keep
+    // the last command standing; settings is the one place that knows it.
+    const { addBattery } = await import("../../app/lib/batteries.server");
+    const battery = await addBattery(storedBattery);
+    ha.events.length = 0;
+
+    await post({
+      intent: "battery-update",
+      id: battery.id,
+      ...postedBattery,
+      title: "Garage battery",
+    });
+
+    expect(ha.events).toEqual([
+      expect.objectContaining({
+        eventType: "elias_ems_home_battery_battery_command",
+        data: expect.objectContaining({
+          action: "release",
+          release_reason: "unsteered",
+        }),
+      }),
+    ]);
+  });
+
+  it("does not release a battery on an ordinary edit", async () => {
+    const { addBattery } = await import("../../app/lib/batteries.server");
+    const battery = await addBattery(storedBattery);
+    ha.events.length = 0;
+
+    await post({
+      intent: "battery-update",
+      id: battery.id,
+      ...postedBattery,
+      capacityKwh: "15",
+    });
+
+    expect(ha.events).toEqual([]);
+  });
+
   it("points a rejected edit at the row being edited, not at the add form", async () => {
     const { addBattery } = await import("../../app/lib/batteries.server");
     const battery = await addBattery(storedBattery);
@@ -724,7 +773,7 @@ describe("POST /settings", () => {
       await addBattery({
         ...storedBattery,
         steered,
-        chargeLimitEntityId: "number.charge_limit",
+        chargeLimitPlanning: true,
       });
       const result = await post({
         intent: "control-save",

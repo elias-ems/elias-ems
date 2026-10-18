@@ -1,4 +1,4 @@
-import type { Battery } from "./batteries";
+import { type Battery, steerableBy } from "./batteries";
 import type { ChargePlan } from "./charge-plan";
 import type { ControlConfig } from "./control";
 
@@ -10,9 +10,9 @@ export type ChargeLimitStatus = {
   message: string;
   calculatedAt: number | null;
   validUntil: number | null;
-  reportedW: number | null;
+  /** The charge boundary of the command standing for this battery, in W. */
   requestedW: number | null;
-  reportedDischargeW?: number | null;
+  /** Its discharge boundary; null when native or nothing is standing. */
   requestedDischargeW?: number | null;
   plan: ChargePlan | null;
   currency: string;
@@ -25,18 +25,21 @@ export type ChargeLimitStatus = {
   checks?: Record<string, string>;
 };
 export type ChargeLimitControl = {
-  state: "enabled" | "disabled" | "blocked" | "paused";
+  state: "enabled" | "disabled" | "blocked" | "migrating";
   message: string;
   settingsHref: string | null;
   action: string | null;
 };
+
+export const CHARGE_LIMIT_BATTERY_ERROR =
+  "Configure exactly one battery with Plan charge limits and Steer this battery enabled.";
 
 /** Saved authorization is independent of forecasts and plan execution. */
 export function chargeLimitControl(
   control: ControlConfig,
   battery: Battery,
   batteryCount: number,
-  paused: boolean,
+  legacyPending: boolean,
 ): ChargeLimitControl {
   if (!control.enabled || control.strategy !== "charge-limit")
     return {
@@ -46,26 +49,25 @@ export function chargeLimitControl(
       settingsHref: "/settings#battery-control",
       action: "Configure battery control",
     };
-  if (batteryCount !== 1 || !battery.chargeLimitEntityId || !battery.steered)
+  if (batteryCount !== 1 || !steerableBy(battery, "charge-limit"))
     return {
       state: "blocked",
-      message:
-        "Configure one battery with a maximum charge limit entity and enable Steer this battery.",
+      message: CHARGE_LIMIT_BATTERY_ERROR,
       settingsHref: "/settings#batteries",
       action: "Edit battery",
     };
-  if (paused)
+  if (legacyPending)
     return {
-      state: "paused",
+      state: "migrating",
       message:
-        "Control paused after an external limit change. Re-save the battery settings to resume.",
-      settingsHref: "/settings#batteries",
-      action: "Save battery settings",
+        "Restoring the power limits an earlier version wrote directly. Commands start once they are back; check the add-on log if this persists.",
+      settingsHref: null,
+      action: null,
     };
   return {
     state: "enabled",
     message:
-      "Battery limit control is enabled. Limits will apply once a valid plan is ready; no settings need to be saved.",
+      "Battery limit control is enabled. Commands are published once a valid plan is ready; no settings need to be saved.",
     settingsHref: null,
     action: null,
   };

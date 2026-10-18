@@ -5,7 +5,8 @@ control only batteries with **Steer this battery** checked.
 
 To keep the battery in native self-consumption and optimize its maximum charging
 power and optional maximum AC output power, use
-[Optimize charge limits](/internals/charge-limit). It currently supports one
+[Optimize charge limits](/internals/charge-limit). Both strategies publish the
+same [battery command event](#the-event). It currently supports one
 configured household battery. The rest of this page describes **Net zero energy**.
 
 The goal is one sentence: **keep the grid meter at zero.** If the house is
@@ -17,9 +18,9 @@ each one should be doing, publishes that as a Home Assistant event, and records
 both halves in the [diagnostics log](/guide/diagnostics).
 
 **It does not touch your battery itself.** Each steered battery gets its own
-event, named after its title — `elias_ems_home_battery_target_power` — and an
-automation you write listens for it and turns it into whatever your inverter
-wants — see [Connecting the
+command event, named after its title — `elias_ems_home_battery_battery_command`
+— and an automation you write listens for it and turns it into whatever your
+inverter wants — see [Connecting the
 event to your battery](#connecting-the-event-to-your-battery), which is the step
 that makes any of this do something.
 
@@ -85,242 +86,229 @@ A decision and a command are not the same thing, and the log shows both:
 
 | Situation | What the log reports | What gets published |
 | --- | --- | --- |
-| Charge or discharge | the share, after capping | the same |
-| At a charge or power limit | 0 | **0** — an active stop |
+| Charge or discharge | the share, after capping | `charge` or `discharge` at that power |
+| At a charge or power limit | 0 | `hold` — an active stop |
 | Meter inside the 25 W deadband | the battery's measured power | **nothing** |
-| Grid sensor unreadable | measured power | **0** for steerable batteries |
+| Grid sensor unreadable | measured power | `hold` for steerable batteries |
 | Not steered | measured power | nothing |
 
 The deadband row is the interesting one. A hold reports what the battery is
 measured to be doing, which is the right thing to *show* and the wrong thing to
-*command* — publishing a measurement back as a target would let sensor noise
-walk the commanded value around on a house that is already balanced. So a hold
-says nothing and the previous target stands.
+*command* — publishing a measurement back would let sensor noise walk the
+commanded value around on a house that is already balanced. So it says nothing
+and the previous command stands.
 
 The unreadable-grid row goes the other way, deliberately. A battery left forcing
-kilowatts because the meter it was following broke is the one hold that must not
-persist, so that case stops the battery rather than holding it.
+kilowatts because the meter it was following broke is the one command that must
+not persist, so that case stops the battery.
 
-**Targets are deduplicated.** One only goes out when it differs from the last
-one published for that battery by at least 50 W — otherwise a loop ticking every
+**Commands are deduplicated.** One only goes out when the mode or a limit
+changes, or the power moves by at least 50 W — otherwise a loop ticking every
 second would fire thousands of events an hour, and on the other end of each one
-is your automation doing real work. A target older than 30 seconds is restated
+is your automation doing real work. A command older than 30 seconds is restated
 anyway, so an automation you reloaded or an inverter you power-cycled picks the
-current value back up within a tick or two instead of waiting for the house to
-swing by 50 W.
+current value back up within a tick or two.
 
 ## The event
 
 Each steered battery has **its own event type, named after its title** —
-`elias_ems_home_battery_target_power` for a battery called "Home battery". The
-Settings page shows the exact string under the Title field.
+`elias_ems_home_battery_battery_command` for a battery called "Home battery".
+The Settings page shows the exact string under the Title field. Both battery
+strategies publish on it, so one automation per battery serves either.
 
-Every event carries:
+Each event is a **command**: a mode, the power limits that go with it, and how
+long it is valid for.
+
+| Mode | What the battery should do |
+| --- | --- |
+| `balance` | its own self-consumption, within `charge_limit_w` and `discharge_limit_w` |
+| `hold` | nothing: 0 W, whatever the meter does |
+| `charge` | charge at `setpoint_w` |
+| `discharge` | discharge at `-setpoint_w` |
+
+Net zero energy sends `hold`, `charge` and `discharge`;
+[Optimize charge limits](/internals/charge-limit) sends `balance`.
+
+The fields you are most likely to use:
 
 | Field | Meaning |
 | --- | --- |
-| `slug` | the same name the event type carries, for an automation listening to several |
-| `battery_id` | the stored record's id, which survives renaming the battery |
-| `title` | what the settings page and the log call this battery |
-| `power_w` | the target, signed: **positive charging, negative discharging** |
-| `charge_w` | `power_w` when charging, otherwise 0 — an unsigned magnitude |
-| `discharge_w` | the same for discharging |
-| `released` | `true` only when Elias ems is [letting go](#switching-it-off) |
+| `action` | `apply`, or `release` when Elias ems is [letting go](#switching-it-off) |
+| `released` | `true` for a release — the same thing as one condition |
+| `mode` | one of the four above; empty on a release |
+| `setpoint_w` | the power, signed: **positive charging, negative discharging**; empty in `balance` |
+| `charge_w` / `discharge_w` | the setpoint as unsigned magnitudes, 0 in the other direction |
+| `charge_limit_w` / `discharge_limit_w` | the most it may charge or discharge at; empty means "your battery's own limit" |
+| `valid_until` | after this, the command is stale and the battery should be handed back |
+| `slug`, `battery_id`, `title` | which battery, for an automation listening to several |
 
-`charge_w` and `discharge_w` are the same number restated, for the many
-inverters that have a charge register and a discharge register instead of one
-signed value. Use whichever pair your hardware speaks; the sign arithmetic is
-already done.
+The rest — `schema_version`, `command_id`, `owner_epoch`, `issued_at`,
+`strategy`, `grid_charging`, `battery_export`, `valid_from`, `release_reason` —
+are in [the full reference](/internals/battery-control#the-event).
 
 ::: tip See it before you wire anything to it
 Developer Tools → **Events** → listen to your battery's event name, then enable
-control. Every payload shows up there, which is how to check the sign and the
-magnitude before an inverter is involved.
+control. Every payload shows up there, which is how to check the mode, the sign
+and the magnitude before an inverter is involved.
 :::
 
 ::: danger Renaming the battery renames the event
 An automation listening for the old name simply stops hearing that battery —
-Home Assistant has no idea the two were related, so nothing anywhere reports a
-problem. The edit form names both while you type; update the trigger to match.
+Home Assistant has no idea the two were related. Saving the rename sends a
+release under the old name, and the edit form names both while you type;
+update the trigger to match.
 :::
+
+### Tell Elias ems what your automation can do
+
+Under **Settings → Batteries**, each battery says which modes its automation
+can carry out. Net zero energy needs **hold, charge and discharge** all ticked,
+and leaves a battery without them alone. Tick **Can limit discharge (AC output)
+in balance** only if your automation applies `discharge_limit_w`.
 
 ## Connecting the event to your battery
 
 This is the part Elias ems cannot do for you, because it is the part that knows
 what your inverter is. All of the examples use a battery titled "Home battery",
-whose event the Settings page shows as `elias_ems_home_battery_target_power`.
+whose event the Settings page shows as
+`elias_ems_home_battery_battery_command`.
 
 ::: warning mode: queued, not the default
 Home Assistant's default automation mode is `single`, which **drops** an event
 that arrives while the previous run is still going. On a house that has just
-swung hard, the dropped one is the target you most wanted. Use `mode: queued`
+swung hard, the dropped one is the command you most wanted. Use `mode: queued`
 with a small `max`, as below.
 :::
 
-### A Modbus register
+### Setpoints: an inverter with a forced mode
 
-The common case for a plain Modbus setup — and note there is no `input_number`
-helper in it any more:
+Most inverters ignore a power setpoint until a `select` entity is put into a
+forced or manual mode, and want it back on self-consumption when Elias ems
+stands down:
 
 ```yaml
-alias: Battery target → inverter
+alias: Battery command → inverter
 mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type: elias_ems_home_battery_target_power
-actions:
-  - action: modbus.write_register
-    data:
-      hub: inverter
-      slave: 1
-      address: 40200
-      value: "{{ trigger.event.data.power_w | int }}"
-```
-
-If your inverter has a separate register per direction, use the unsigned pair
-instead:
-
-```yaml
-actions:
-  - action: modbus.write_register
-    data:
-      hub: inverter
-      slave: 1
-      address: 40200
-      value: "{{ trigger.event.data.charge_w | int }}"
-  - action: modbus.write_register
-    data:
-      hub: inverter
-      slave: 1
-      address: 40201
-      value: "{{ trigger.event.data.discharge_w | int }}"
-```
-
-### A `number` entity from an inverter integration
-
-`huawei_solar`, `solaredge_modbus_multi`, Victron and friends publish a writable
-`number`. One action:
-
-```yaml
-alias: Battery target → inverter
-mode: queued
-max: 10
-triggers:
-  - trigger: event
-    event_type: elias_ems_home_battery_target_power
-actions:
-  - action: number.set_value
-    target:
-      entity_id: number.battery_target_power
-    data:
-      value: "{{ trigger.event.data.power_w }}"
-```
-
-Setting an entity is a state change, so this puts a row in your logbook and
-recorder every time the target moves. That is a real cost and it is now your
-choice rather than the add-on's: write the register directly if you would rather
-not have it, or exclude the entity under `recorder:`/`logbook:`.
-
-### An inverter that needs its mode set
-
-Many inverters ignore a target until a `select` entity is put into a forced or
-manual mode — and want it back on self-consumption when Elias ems stands down.
-`released` is what tells the two apart:
-
-```yaml
-alias: Battery target → inverter
-mode: queued
-max: 10
-triggers:
-  - trigger: event
-    event_type: elias_ems_home_battery_target_power
+    event_type: elias_ems_home_battery_battery_command
 actions:
   - choose:
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.event.data.released }}"
+      - conditions: "{{ trigger.event.data.released }}"
         sequence:
-          # Elias ems is standing down — hand the battery back to its own logic
-          # rather than leaving it forced at 0 W.
+          # Elias ems is standing down: hand the battery back to its own logic.
           - action: select.select_option
             target:
               entity_id: select.inverter_working_mode
             data:
               option: Self consumption
-    default:
-      - action: select.select_option
-        target:
-          entity_id: select.inverter_working_mode
-        data:
-          option: Forced charge/discharge
-      - action: number.set_value
-        target:
-          entity_id: number.battery_target_power
-        data:
-          value: "{{ trigger.event.data.power_w }}"
+      - conditions: "{{ trigger.event.data.mode in ['hold', 'charge', 'discharge'] }}"
+        sequence:
+          - action: select.select_option
+            target:
+              entity_id: select.inverter_working_mode
+            data:
+              option: Forced charge/discharge
+          - action: number.set_value
+            target:
+              entity_id: number.battery_target_power
+            data:
+              value: "{{ trigger.event.data.setpoint_w }}"
 ```
 
-Re-selecting the mode that is already selected is harmless, so it needs no
-guard.
-
-### Several batteries
-
-**One automation per battery is usually the right answer** — that is the point
-of each battery having its own event. Each one then runs only when *its* battery
-moved, and a battery sitting at its charge limit while the other takes the whole
-swing wakes nothing at all.
-
-If you would rather have one, an event trigger takes a list of types and `slug`
-says which arrived (Home Assistant has no wildcard for event types, so the list
-is explicit):
+For a plain Modbus register, swap the `number.set_value` for a register write:
 
 ```yaml
-alias: Battery targets → inverters
+          - action: modbus.write_register
+            data:
+              hub: inverter
+              slave: 1
+              address: 40200
+              value: "{{ trigger.event.data.setpoint_w | int }}"
+```
+
+If your inverter has a register per direction, write `charge_w` and
+`discharge_w` instead — the sign arithmetic is already done. Re-selecting the
+mode that is already selected is harmless, so it needs no guard.
+
+Setting an entity is a state change, so a `number.set_value` puts a row in your
+logbook and recorder every time the setpoint moves. Write the register directly
+if you would rather not have that, or exclude the entity under
+`recorder:`/`logbook:`.
+
+### Limits in balance
+
+Optimize charge limits keeps the battery in self-consumption and only moves its
+limits:
+
+```yaml
+alias: Battery limits → inverter
 mode: queued
 max: 10
 triggers:
   - trigger: event
-    event_type:
-      - elias_ems_home_battery_target_power
-      - elias_ems_garage_battery_target_power
+    event_type: elias_ems_home_battery_battery_command
 actions:
+  - variables:
+      # Your battery's normal limits, used when Elias ems sends none or lets go.
+      normal_w: 2000
+      charge: "{{ trigger.event.data.charge_limit_w if trigger.event.data.charge_limit_w is not none else normal_w }}"
+      output: "{{ trigger.event.data.discharge_limit_w if trigger.event.data.discharge_limit_w is not none else normal_w }}"
   - action: number.set_value
     target:
-      entity_id: >-
-        {{ {'home_battery': 'number.home_battery_target_power',
-            'garage_battery': 'number.garage_battery_target_power'}[trigger.event.data.slug] }}
+      entity_id: number.battery_charge_limit
     data:
-      value: "{{ trigger.event.data.power_w }}"
+      value: "{{ normal_w if trigger.event.data.released else charge }}"
+  - action: number.set_value
+    target:
+      entity_id: number.battery_ac_output_limit
+    data:
+      value: "{{ normal_w if trigger.event.data.released else output }}"
 ```
+
+The release branch is what puts your normal limits back. Earlier versions of
+Elias ems wrote these entities themselves; on upgrade it restores any limit it
+had left in place once, and from then on only publishes.
+
+### Several batteries
+
+**One automation per battery is usually the right answer** — that is the point
+of each battery having its own event, and it is what lets batteries of different
+brands live side by side: each automation knows its own inverter. Each one then
+runs only when *its* battery moved.
+
+If you would rather have one, an event trigger takes a list of types and `slug`
+says which arrived (Home Assistant has no wildcard for event types, so the list
+is explicit).
 
 ### Your sign convention is not ours
 
 Elias ems always publishes **positive charging, negative discharging**. If your
 inverter is the other way round, negate it in the automation — a template of
-`-trigger.event.data.power_w` — rather than anywhere else. Doing it in the
+`-trigger.event.data.setpoint_w` — rather than anywhere else. Doing it in the
 one place that talks to the hardware keeps the log, the dashboard and the
 strategy all agreeing with each other.
 
 ## Switching it off
 
-Switching control off, and shutting the add-on down cleanly, both publish **0 W**
-for every steerable battery, with `released: true`. A battery left forcing
-kilowatts because the thing that told it to is gone is the worst failure this
-feature has — from the battery's side there is no difference between a target
-that is still wanted and one whose author died ten minutes ago.
+Switching control off, changing strategy, un-steering a battery, and shutting
+the add-on down cleanly all publish a **release** — `action: release`,
+`released: true` — for the batteries that strategy was commanding. A battery
+left forcing kilowatts because the thing that told it to is gone is the worst
+failure this feature has.
 
-Two honest limits:
+A release is **not** a hold. Hold means "stay at 0 W, I'm still in charge";
+release means "I'm no longer in charge of you", and your automation is what
+knows how to hand this inverter back to its own logic — see [the forced-mode
+example](#setpoints-an-inverter-with-a-forced-mode).
 
-- Zero is the **safe** value, not necessarily the *correct* one. It stops the
-  battery being driven either way, which is safe on every inverter, but handing
-  it back to its own self-consumption logic means restoring a mode on many
-  brands. `released` is there so your automation can do that — see [the mode
-  example](#an-inverter-that-needs-its-mode-set) — but Elias ems itself only
-  knows how to say "stop".
-- Nothing runs at all on a hard kill, a power cut, or a container the Supervisor
-  destroys without asking. The only real protection against those is an inverter
-  whose forced mode expires on its own — some brands have that, others do not.
+Nothing runs at all on a hard kill, a power cut, or a container the Supervisor
+destroys without asking. That is what `valid_until` is for. The best protection
+is an inverter whose forced mode expires on its own — set its timeout a little
+longer than the commands' validity. Without one, an automation can watch
+`valid_until` itself; [the internals](/internals/battery-control#honouring-valid_until)
+show how.
 
 ## What it cannot do yet
 
@@ -328,7 +316,7 @@ Two honest limits:
 An event goes on the bus and nothing comes back. No automation, one still
 listening for a battery's old name, an automation dropping events because it is
 still `mode: single`,
-or an inverter that quietly ignores a target all look **exactly the same**
+or an inverter that quietly ignores a command all look **exactly the same**
 from Elias ems' side: a log full of correct-looking decisions and a battery that
 does nothing.
 
@@ -354,7 +342,7 @@ A tick in the diagnostics log looks like this:
 22:50:57 Grid net +842 W (importing), batteries at 0 W → discharge 842 W total. (via live cache, oldest reading 3s)
          Home battery: discharge at 561 W (SoC 76%, 6.6 kWh to 10%)
          Garage battery: discharge at 281 W (SoC 76%, 2.8 kWh to 20%)
-         Published: Home battery → -561 W; Garage battery → -281 W
+         Published: Home battery → discharge 561 W; Garage battery → discharge 281 W
 ```
 
 The summary line is the arithmetic above, made visible. The clause in brackets

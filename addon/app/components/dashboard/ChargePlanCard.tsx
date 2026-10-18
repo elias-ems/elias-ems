@@ -92,12 +92,8 @@ function BatteryPlan({
         <span style={hintStyle}>
           Recommended charge ceiling{expired ? " (previous plan)" : ""}
         </span>
-        <span style={hintStyle}>
-          Reported:{" "}
-          {status.reportedW === null ? "unavailable" : `${status.reportedW} W`}
-        </span>
         {status.requestedW !== null && (
-          <span style={hintStyle}>Requested: {status.requestedW} W</span>
+          <span style={hintStyle}>Commanded: {status.requestedW} W</span>
         )}
       </div>
       {first?.dischargeLimitW !== undefined && (
@@ -115,15 +111,9 @@ function BatteryPlan({
           <span style={hintStyle}>
             Recommended AC output ceiling{expired ? " (previous plan)" : ""}
           </span>
-          <span style={hintStyle}>
-            Reported:{" "}
-            {status.reportedDischargeW == null
-              ? "unavailable"
-              : `${status.reportedDischargeW} W`}
-          </span>
           {status.requestedDischargeW != null && (
             <span style={hintStyle}>
-              Requested: {status.requestedDischargeW} W
+              Commanded: {status.requestedDischargeW} W
             </span>
           )}
         </div>
@@ -204,8 +194,8 @@ function BatteryPlan({
               <strong
                 style={{ display: "block", color: "var(--color-danger)" }}
               >
-                {status.control.state === "paused"
-                  ? "Battery limit control paused"
+                {status.control.state === "migrating"
+                  ? "Restoring earlier power limits"
                   : status.control.state === "disabled"
                     ? "Preview only — the battery's settings are unchanged."
                     : "Battery limit control needs attention"}

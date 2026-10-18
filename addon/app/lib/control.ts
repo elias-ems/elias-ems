@@ -34,13 +34,13 @@ export const STRATEGIES: Array<{
     id: "charge-limit",
     label: "Optimize charge limits",
     description:
-      "Plan automatically with solar forecasts and prices. When enabled, adjust maximum charging and optional AC output power limits while the battery stays in native self-consumption.",
+      "Plan automatically with solar forecasts and prices. When enabled, publish balance commands with maximum charging and optional AC output power limits, so the battery stays in native self-consumption.",
   },
   {
     id: "net-zero-energy",
     label: "Net zero energy",
     description:
-      "Charge with what would otherwise be exported and discharge to cover what would otherwise be imported, so the meter sits at zero.",
+      "Charge with what would otherwise be exported and discharge to cover what would otherwise be imported, so the meter sits at zero. Publishes hold, charge and discharge setpoint commands.",
   },
 ];
 
@@ -119,7 +119,7 @@ export type ControlErrors = {
  * cannot drift apart.
  */
 export const NO_STEERABLE_BATTERY_ERROR =
-  "At least one battery needs to be steered before control can be enabled — without one there is nothing to steer.";
+  "At least one battery needs to be steered, with hold, charge and discharge enabled, before net zero energy can be enabled — without one there is nothing to steer.";
 
 export function parseControlConfig(
   formData: FormData,

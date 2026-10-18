@@ -576,7 +576,7 @@ what the array "should" be able to do.
 
 Quantising to whole percent is also what makes a publish deadband unnecessary.
 A battery target is a continuous number of watts, so
-[targets.server.ts](../../addon/app/lib/targets.server.ts) needs
+[battery-commands.server.ts](../../addon/app/lib/battery-commands.server.ts) needs
 `PUBLISH_DEADBAND_W` to stop a 4 W drift firing an event every tick; here "the
 value changed" already means "it moved by at least one step". One percent of a
 5 kW inverter is 50 W — the same order as the battery deadband, arrived at by
