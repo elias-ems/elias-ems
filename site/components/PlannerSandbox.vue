@@ -1,10 +1,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
+import type { compare } from "../lib/comparison";
 import type { PlannerDataset, runPlanner } from "../lib/planner";
 import { parseDataset } from "../lib/planner";
 
 const dataset = shallowRef<PlannerDataset>();
 const plan = shallowRef<Awaited<ReturnType<typeof runPlanner>>>();
+const comparison = shallowRef<Awaited<ReturnType<typeof compare>>>();
+const options = ref({
+  expanded: false,
+  gridCharging: false,
+  batteryExport: false,
+  setpointStepW: 100,
+  priority: "evening-first" as "evening-first" | "cost-first",
+  shortfallPerKwh: 1,
+  timeLimitSeconds: 30,
+});
 const error = ref("");
 const busy = ref(false);
 const filename = ref("");
@@ -18,7 +29,9 @@ const settings = ref({
 });
 let worker: Worker | undefined;
 let importSequence = 0;
+let runSequence = 0;
 function stop() {
+  runSequence++;
   worker?.terminate();
   worker = undefined;
   busy.value = false;
@@ -30,6 +43,7 @@ onBeforeUnmount(() => {
 function invalidate() {
   stop();
   plan.value = undefined;
+  comparison.value = undefined;
   error.value = "";
 }
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
@@ -47,7 +61,7 @@ async function importFile(event: Event) {
     if (sequence !== importSequence) return;
     dataset.value = parsed;
     settings.value = {
-      targetSoc: parsed.settings.targetSoc,
+      targetSoc: parsed.model.maxSoc,
       solarHaircut: parsed.settings.solarHaircut,
       switchCost: parsed.settings.switchCost,
       passes: parsed.settings.passes,
@@ -72,16 +86,21 @@ function run() {
       type: "module",
     });
     busy.value = true;
+    const sequence = runSequence;
     worker.onmessage = ({ data }) => {
-      plan.value = data.plan;
+      if (sequence !== runSequence) return;
+      comparison.value = data.comparison;
+      plan.value = data.comparison?.legacy;
       error.value = data.error ?? "";
       stop();
     };
     worker.onerror = () => {
-      error.value = "The planner could not finish. Try fewer search passes.";
+      if (sequence !== runSequence) return;
+      error.value =
+        "The planning worker failed. Check the inputs and try again.";
       stop();
     };
-    worker.postMessage(input);
+    worker.postMessage({ dataset: input, options: { ...options.value } });
   } catch (e) {
     stop();
     error.value = e instanceof Error ? e.message : String(e);
@@ -127,6 +146,7 @@ function download() {
             dataset: { ...dataset.value, settings: settings.value },
             algorithm: "evening-target",
             plan: plan.value,
+            comparison: comparison.value,
           },
           null,
           2,
@@ -158,16 +178,51 @@ function download() {
       <form @submit.prevent="run" @input="invalidate" @change="invalidate">
         <div class="planner-fields">
           <label>Evening deadline<select v-model="settings.deadline"><option v-for="slot in dataset.slots" :key="slot.end" :value="new Date(slot.end).toISOString()">{{ time(slot.end) }}</option></select></label>
-          <label>Target SoC (%)<input v-model.number="settings.targetSoc" type="number" :min="dataset.model.minSoc" :max="dataset.model.maxSoc" step="any" required /></label>
+          <p>Comparison target: configured maximum SoC {{ dataset.model.maxSoc }}% (imported target {{ dataset.settings.targetSoc }}%).</p>
           <label>Solar reduction (0–1)<input v-model.number="settings.solarHaircut" type="number" min="0" max="0.999" step="any" required /></label>
           <label>Cost per limit change<input v-model.number="settings.switchCost" type="number" min="0" step="any" required /></label>
           <label>Search passes<input v-model.number="settings.passes" type="number" min="1" max="20" required /></label>
           <label>Spike buffer (kWh)<input v-model.number="settings.spikeBufferKwh" type="number" min="0" step="any" required /></label>
         </div>
-        <button type="submit" :disabled="busy">{{ busy ? "Calculating…" : "Run production planner" }}</button>
+        <fieldset>
+          <legend>HiGHS capability assumptions (not established by this export)</legend>
+          <label>Comparison<select aria-label="Comparison capabilities" v-model="options.expanded"><option :value="false">Equivalent: balance + existing boundaries</option><option :value="true">Expanded: assume all four modes</option></select></label>
+          <template v-if="options.expanded">
+            <p>Hypothetical direct control with signed AC setpoints and native SoC protection. A local adapter is assumed to enforce the permissions below against live power. No device compatibility is inferred from limit entities.</p>
+            <label><input v-model="options.gridCharging" type="checkbox" /> Permit grid charging</label>
+            <label><input v-model="options.batteryExport" type="checkbox" /> Permit battery export</label>
+            <label>Assumed setpoint step (W)<input v-model.number="options.setpointStepW" type="number" min="1" required /></label>
+          </template>
+          <label>Objective<select v-model="options.priority"><option value="evening-first">Minimize evening shortfall first, then cost</option><option value="cost-first">Cost with priced evening shortfall</option></select></label>
+          <label v-if="options.priority === 'cost-first'">Shortfall cost per kWh<input v-model.number="options.shortfallPerKwh" type="number" min="0" step="any" required /></label>
+          <label>Solver budget (seconds)<input v-model.number="options.timeLimitSeconds" type="number" min="1" max="120" required /></label>
+        </fieldset>
+        <button type="submit" :disabled="busy">{{ busy ? "Calculating…" : "Compare planners" }}</button>
         <button v-if="busy" type="button" @click="stop">Cancel</button>
       </form>
-      <p role="status" aria-live="polite">{{ busy ? "Running Evening target locally…" : plan ? "Plan calculated." : "Ready to calculate." }}</p>
+      <p role="status" aria-live="polite">{{ busy ? "Running both planners in a local worker…" : plan ? "Plan calculated." : "Ready to calculate." }}</p>
+    </template>
+    <template v-if="comparison">
+      <h2>Evening target / HiGHS comparison</h2>
+      <p>HiGHS: {{ comparison.engine?.status ?? comparison.engineError }}. {{ comparison.engine?.targetStatus }}</p>
+      <p>Runtime: Evening target {{ comparison.legacyRuntimeMs.toFixed(0) }} ms; HiGHS {{ comparison.engine?.runtimeMs.toFixed(0) ?? '—' }} ms (including solver initialization). Solver phases: {{ comparison.engine?.statuses.join(' / ') }}.</p>
+      <p>HiGHS minimizes mean nominal/reduced-solar cost, wear and terminal reserve penalty. Evening-first minimizes the sum of both evening shortfalls before cost. Evening target also uses switching and spike-buffer preferences; HiGHS does not. Lower final SoC can explain lower cost. Neither forecast guarantees live savings.</p>
+      <div class="planner-table" tabindex="0">
+        <table><thead><tr><th>Scenario / algorithm</th><th>Cost incl. wear</th><th>Evening SoC</th><th>Final SoC</th><th>Shortfall kWh</th><th>PV generated / curtailed kWh</th></tr></thead>
+          <tbody><template v-for="(old, i) in comparison.legacyScenarios" :key="i">
+            <tr><td>{{ i ? 'Reduced solar' : 'Nominal' }} / Evening target</td><td>{{ old.cost.toFixed(3) }}</td><td>{{ old.eveningSoc.toFixed(1) }}%</td><td>{{ old.finalSoc.toFixed(1) }}%</td><td>{{ old.shortfallKwh.toFixed(3) }}</td><td>{{ old.generatedKwh.toFixed(2) }} / {{ old.curtailedKwh.toFixed(2) }}</td></tr>
+            <tr v-if="comparison.engine?.scenarios"><td>{{ i ? 'Reduced solar' : 'Nominal' }} / HiGHS</td><td>{{ comparison.engine.scenarios[i].cost.toFixed(3) }}</td><td>{{ comparison.engine.scenarios[i].eveningSoc.toFixed(1) }}%</td><td>{{ comparison.engine.scenarios[i].finalSoc.toFixed(1) }}%</td><td>{{ comparison.engine.scenarios[i].shortfallKwh.toFixed(3) }}</td><td>{{ comparison.engine.scenarios[i].generatedKwh.toFixed(2) }} / {{ comparison.engine.scenarios[i].curtailedKwh.toFixed(2) }}</td></tr>
+          </template></tbody>
+        </table>
+      </div>
+      <details v-if="comparison.engine?.scenarios"><summary>Side-by-side interval controls and predictions (nominal)</summary>
+        <p>Each cell shows mode; charge/discharge boundaries W; signed setpoint W (— for balance); predicted signed battery W; end SoC; interval cost. Positive battery power means charging.</p>
+        <div class="planner-table" tabindex="0"><table><thead><tr><th>Interval</th><th>Evening target</th><th>HiGHS</th></tr></thead><tbody>
+          <tr v-for="(p, i) in comparison.engine.scenarios[0].points" :key="p.start"><td>{{ time(p.start) }} – {{ time(p.end) }}</td>
+            <td v-for="(q, j) in [comparison.legacyScenarios[0].points[i], p]" :key="j">{{ q.mode }}; {{ q.chargeLimitW }}/{{ q.dischargeLimitW }}; {{ q.setpointW ?? '—' }}; {{ q.batteryW.toFixed(0) }}; {{ q.soc.toFixed(1) }}%; {{ q.cost.toFixed(3) }}</td>
+          </tr>
+        </tbody></table></div>
+      </details>
     </template>
     <template v-if="plan">
       <h2>Calculated plan</h2>

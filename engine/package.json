@@ -1,0 +1,16 @@
+{
+  "name": "@elias-ems/engine",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "npm --prefix ../addon exec --no -- tsc -p ../engine",
+    "lint": "npm --prefix ../addon exec --no -- biome check --config-path ../addon ."
+  },
+  "dependencies": {
+    "highs": "1.15.4"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

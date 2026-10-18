@@ -15,6 +15,7 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "engine/**"
       - "addon/app/lib/charge-evening.ts"
       - "addon/app/lib/charge-plan.ts"
       - "docs/**"
@@ -22,6 +23,7 @@ on:
   pull_request:
     paths:
       - "site/**"
+      - "engine/**"
       - "addon/app/lib/charge-evening.ts"
       - "addon/app/lib/charge-plan.ts"
       - "docs/**"
@@ -50,6 +52,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
         working-directory: site
+
+      - name: Install planner engine
+        run: npm ci
+        working-directory: engine
 
       - name: Build
         run: npm run docs:build

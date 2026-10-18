@@ -39,6 +39,7 @@ export const PAGES = new Map([
   ["docs/architecture.md", "architecture"],
   ["docs/features/battery-control.md", "battery-control"],
   ["docs/features/charge-limit.md", "charge-limit"],
+  ["docs/features/planning-engine.md", "planning-engine"],
   ["docs/features/live-readings.md", "live-readings"],
   ["docs/features/diagnostics.md", "diagnostics"],
   ["docs/features/dynamic-prices.md", "dynamic-prices"],

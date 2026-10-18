@@ -1,6 +1,10 @@
 {
   // Check VitePress configuration and the browser planner boundary.
-  "include": [".vitepress/config.ts", "lib/**/*.ts"],
+  "include": [
+    ".vitepress/config.ts",
+    "lib/**/*.ts",
+    "../engine/src/assets.d.ts"
+  ],
   "compilerOptions": {
     "lib": ["ES2022", "DOM"],
     "types": [],

@@ -121,6 +121,10 @@ jobs:
         run: npm ci
         working-directory: addon
 
+      - name: Install planner engine
+        run: npm ci
+        working-directory: engine
+
       - name: Install dependencies
         id: install
         run: npm ci
@@ -142,3 +146,30 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm test
         working-directory: site
+
+  engine:
+    name: Planning engine (${{ matrix.runner }})
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - run: npm ci
+        working-directory: addon
+      - run: npm ci
+        working-directory: engine
+        id: install
+      - run: npm run lint
+        working-directory: engine
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+      - run: npm run typecheck
+        working-directory: engine
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+      - run: npm test
+        working-directory: engine
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}

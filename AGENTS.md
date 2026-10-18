@@ -288,3 +288,14 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope
 - Scope is optional; use it for the affected area (e.g. `addon`).
 - Description is imperative mood, lowercase, no trailing period.
 - Keep the subject line under ~72 characters; add a body for context when needed.
+
+## Experimental planning engine
+
+`engine/` is a separate npm project using HiGHS/WASM. It calculates plans only;
+production device control remains unchanged. Read `engine/AGENTS.md` and
+`engine/README.md` for the model, worker entry points and future event contract.
+Run `npm ci` in `engine/` before building or typechecking the documentation site.
+Engine lint/typecheck borrow `addon/node_modules`; tests use Node's built-in
+runner and real WASM in worker threads. CI defines native amd64 and aarch64 jobs.
+The production-browser smoke test lives at `site/test/browser-planner.mjs` and
+requires a built site preview plus the add-on's Playwright dependency.

@@ -72,3 +72,11 @@
 - Curtailment for reasons other than price — a grid operator's feed-in cap, or a
   fixed export limit. The same mechanism with a different trigger.
 - Telemetry cloud / backend service to remotely follow up / offer support
+
+## Experimental planning engine
+
+Implemented for offline/sandbox evaluation: HiGHS/WASM, explicit modes and
+boundaries, permissions, shared physical comparison, and worker isolation.
+See [Planning engine](features/planning-engine.md). Live event execution, exclusive
+ownership migration, adapter acknowledgement and device watchdogs remain future
+work. Validate ARM64 CI and additional browsers before production integration.

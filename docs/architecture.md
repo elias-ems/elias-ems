@@ -1,3 +1,10 @@
+The experimental `engine/` project is a pure TypeScript HiGHS/WASM planner.
+The public Planner sandbox compares it with Evening target in a Web Worker;
+Node consumers use the isolated `engine/node.mjs` worker entry. It is not wired
+into production control. See [Planning engine](features/planning-engine.md).
+Site builds require `npm ci` in `engine/` as well as `site/`. Engine tests run
+in native amd64 and aarch64 CI jobs; the add-on toolchain supplies lint and types.
+
 # Architecture
 
 The root `gym/` directory provides an offline battery-planner experiment harness.
