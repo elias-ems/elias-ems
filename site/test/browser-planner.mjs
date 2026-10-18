@@ -112,6 +112,8 @@ try {
       .filter({ hasText: /^charge$/ })
       .count()) > 0,
   );
+  for (const name of ["Expected load W", "Expected solar W"])
+    await page.getByRole("columnheader", { name }).waitFor();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
     page

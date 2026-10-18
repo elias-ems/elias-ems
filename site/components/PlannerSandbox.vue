@@ -239,13 +239,15 @@ function download() {
         </table>
       </div>
       <details v-if="comparison.engine?.scenarios"><summary>Side-by-side interval controls and predictions (nominal)</summary>
-        <p>Times are in {{ dataset!.timeZone }}. Prices are the snapshot’s configured consumption/import and production/export tariffs, including pricing formulas—not raw EPEX spot prices. Positive battery power means charging; negative means discharging. “—” means balance has no requested setpoint.</p>
+        <p>Times are in {{ dataset!.timeZone }}. Prices are the snapshot’s configured consumption/import and production/export tariffs, including pricing formulas—not raw EPEX spot prices. Expected load and solar are the snapshot’s forecasts, before curtailment and the solar reduction. Positive battery power means charging; negative means discharging. “—” means balance has no requested setpoint.</p>
         <div class="planner-table" tabindex="0" role="region" aria-label="Side-by-side interval comparison"><table>
           <thead>
             <tr>
               <th scope="col" rowspan="2">Interval</th>
               <th scope="col" rowspan="2">Consumption<br />{{ dataset!.currency }}/kWh</th>
               <th scope="col" rowspan="2">Production<br />{{ dataset!.currency }}/kWh</th>
+              <th scope="col" rowspan="2">Expected<br />load W</th>
+              <th scope="col" rowspan="2">Expected<br />solar W</th>
               <th scope="colgroup" colspan="6">Evening target</th>
               <th scope="colgroup" colspan="6">HiGHS</th>
             </tr>
@@ -265,6 +267,8 @@ function download() {
               <td :title="`${time(p.start)} – ${time(p.end)}`">{{ intervalTime(p.start, p.end) }}</td>
               <td>{{ comparison.input.slots[i].buy.toFixed(4) }}{{ comparison.input.slots[i].estimatedPrice ? ' *' : '' }}</td>
               <td>{{ comparison.input.slots[i].sell.toFixed(4) }}{{ comparison.input.slots[i].estimatedPrice ? ' *' : '' }}</td>
+              <td>{{ comparison.input.slots[i].loadW.toFixed(0) }}</td>
+              <td>{{ comparison.input.slots[i].solarW.toFixed(0) }}</td>
               <template v-for="(q, j) in [comparison.legacyScenarios[0].points[i], p]" :key="j">
                 <td>{{ q.mode }}</td>
                 <td>{{ q.chargeLimitW }} / {{ q.dischargeLimitW }}</td>
