@@ -77,6 +77,11 @@ optimal, a second solve maximizes time in balance mode while keeping that cost
 (with a 1e-8 currency-unit numerical tolerance over the horizon). This is a
 lexicographic tie-breaker, not a monetary incentive. It uses the remaining shared
 budget and is skipped for balance-only capabilities or when balance is unavailable.
+After either outcome, any direct-mode interval that a balance command (with
+boundaries at its setpoint, or at the minimum) reproduces exactly in both
+scenarios is relabelled to balance. The replay must agree on every interval's
+battery flow, PV generation, energy and cost, so this never changes the plan,
+and it also tidies a plan whose cost could not be proven within the budget.
 A limited or rejected second result never replaces the first with a costlier plan;
 the original cost-optimal plan remains available. `balancePreference` reports
 whether the tie-break itself was proven. Limits still apply in balance mode;

@@ -239,7 +239,7 @@ function download() {
         </table>
       </div>
       <details v-if="comparison.engine?.scenarios"><summary>Side-by-side interval controls and predictions (nominal)</summary>
-        <p>Times are in {{ dataset!.timeZone }}. Prices are the snapshot’s configured consumption/import and production/export tariffs, including pricing formulas—not raw EPEX spot prices. Expected load and solar are the snapshot’s forecasts, before curtailment and the solar reduction. Positive battery power means charging; negative means discharging. “—” means balance has no requested setpoint.</p>
+        <p>Times are in {{ dataset!.timeZone }}. Prices are the snapshot’s configured consumption/import and production/export tariffs, including pricing formulas—not raw EPEX spot prices. Expected load and solar are the snapshot’s forecasts, before curtailment and the solar reduction. Positive battery power means charging; negative means discharging. “—” means balance has no requested setpoint. Balance only moves the battery within its limits: with a 0 W discharge limit it cannot discharge, so check predicted battery power rather than the mode alone.</p>
         <div class="planner-table" tabindex="0" role="region" aria-label="Side-by-side interval comparison"><table>
           <thead>
             <tr>

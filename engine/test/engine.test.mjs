@@ -3,6 +3,7 @@ import test from "node:test";
 import { simulateCharge } from "../../addon/app/lib/charge-plan.ts";
 import { plan } from "../node.mjs";
 import { evaluate } from "../src/physics.ts";
+import { preferBalance } from "../src/relabel.ts";
 
 function fixture() {
   return {
@@ -450,3 +451,47 @@ test("selling above the buy price cannot manufacture simultaneous grid flows", a
   }
 });
 
+test("identical intervals are relabelled to balance without changing the plan", () => {
+  const input = fixture();
+  input.capabilities = {
+    modes: ["balance", "hold", "charge", "discharge"],
+    gridCharging: true,
+    batteryExport: true,
+    setpointStepW: 500,
+  };
+  const commands = input.slots.map((s, i) =>
+    i === 0
+      ? {
+          start: s.start,
+          end: s.end,
+          mode: "charge",
+          setpointW: 1000,
+          chargeLimitW: 2000,
+          dischargeLimitW: 2000,
+        }
+      : {
+          start: s.start,
+          end: s.end,
+          mode: "hold",
+          setpointW: 0,
+          chargeLimitW: 2000,
+          dischargeLimitW: 2000,
+        },
+  );
+  const before = [0, input.solarHaircut].map((h) =>
+    evaluate(input, commands, h),
+  );
+  const result = preferBalance(input, commands);
+  // Grid charging at night has no balance equivalent; holding does.
+  assert.equal(result.commands[0].mode, "charge");
+  for (const u of result.commands.slice(1)) {
+    assert.equal(u.mode, "balance");
+    assert.equal(u.chargeLimitW, 0);
+    assert.equal(u.dischargeLimitW, 0);
+  }
+  assert.equal(result.relabelled, 2);
+  for (const [j, scenario] of result.scenarios.entries()) {
+    assert.ok(Math.abs(scenario.cost - before[j].cost) < 1e-12);
+    assert.ok(Math.abs(scenario.finalSoc - before[j].finalSoc) < 1e-9);
+  }
+});

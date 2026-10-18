@@ -1,6 +1,7 @@
 import loadHighs from "highs";
 import { type Expr, Milp } from "./algebra.ts";
 import { evaluate, step } from "./physics.ts";
+import { preferBalance } from "./relabel.ts";
 import { inspectSolution } from "./solver-result.ts";
 import type { Command, Input, Mode } from "./types.ts";
 import { validate } from "./validate.ts";
@@ -224,6 +225,23 @@ export async function solve(input: Input, wasmUrl?: string) {
           ? "Maximum balance time at optimal cost"
           : "Feasible balance preference; maximum not proven";
       }
+    }
+  }
+  if (
+    input.capabilities.modes.includes("balance") &&
+    input.capabilities.modes.length > 1
+  ) {
+    // Intervals the solver labelled differently from an identical balance
+    // command, including every interval of a plan whose cost is not proven.
+    const relabelled = preferBalance(input, selected.commands);
+    if (relabelled.relabelled) {
+      selected = {
+        commands: relabelled.commands,
+        scenarios: relabelled.scenarios,
+      };
+      if (!balancePreference.startsWith("Maximum"))
+        balancePreference =
+          "Identical intervals relabelled to balance; maximum not proven";
     }
   }
   const optimal = answer.optimal;
