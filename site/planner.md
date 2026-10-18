@@ -1,5 +1,6 @@
 ---
 layout: doc
+pageClass: planner-page
 sidebar: false
 aside: false
 ---

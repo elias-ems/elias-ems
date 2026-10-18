@@ -2,7 +2,7 @@
   --site-content-max-width: 1240px;
 }
 
-/* Share a bounded reading/work area across docs and the planner. Navigation
+/* Share a bounded reading area across documentation pages. Navigation
    and the optional outline still consume space on pages that include them. */
 :root .Layout .VPDoc .container,
 :root .Layout .VPDoc:not(.has-sidebar) .container {
@@ -18,4 +18,11 @@
 :root .Layout .VPDoc .content-container,
 :root .Layout .VPDoc.has-aside .content-container {
   max-width: var(--site-content-max-width);
+}
+
+/* The planner needs the viewport width for its side-by-side schedules.
+   Keep VitePress gutters and scroll individual tables on smaller screens. */
+:root .Layout.planner-page .VPDoc:not(.has-sidebar) .container,
+:root .Layout.planner-page .VPDoc .content-container {
+  max-width: none;
 }
