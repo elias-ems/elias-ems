@@ -39,8 +39,9 @@ Time-limited feasible plans are unproven, infeasible/no-incumbent runs return no
 schedule, and only proven solver results claim modeled optimality. Reduced solar
 is a second modeled scenario, not a guarantee against unexpected weather.
 
-The versioned future event contract carries a coherent command with mode,
-boundaries, setpoint, permissions, identity and validity. Future execution must own mode and
-limits exclusively, restore old leases during migration, reject expired commands,
-and distinguish publication from device confirmation. This implementation
-publishes no events and performs no live writes.
+The versioned event contract — a coherent command with mode, boundaries,
+setpoint, permissions, identity and validity — is now what both production
+strategies publish ([battery commands](battery-control.md#publishing-commands)),
+including the hold, charge and discharge modes this engine plans in. The engine
+itself still publishes no events and performs no live writes; production uses
+Evening target and net zero energy.

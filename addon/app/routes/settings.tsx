@@ -7,9 +7,10 @@ import GridSection from "../components/settings/GridSection";
 import PricesSection from "../components/settings/PricesSection";
 import PvSection from "../components/settings/PvSection";
 import {
+  batterySlug,
   DUPLICATE_SLUG_ERROR,
-  isSteerable,
   parseBattery,
+  steerableBy,
 } from "../lib/batteries";
 import {
   addBattery,
@@ -19,9 +20,9 @@ import {
 } from "../lib/batteries.server";
 import {
   invalidateChargePlans,
-  releaseChargeLimit,
   withChargeLimitLock,
 } from "../lib/charge-limit-loop.server";
+import { CHARGE_LIMIT_BATTERY_ERROR } from "../lib/charge-limit-status";
 import { NO_STEERABLE_BATTERY_ERROR, parseControlConfig } from "../lib/control";
 import {
   readControlConfig,
@@ -30,6 +31,7 @@ import {
 import {
   pendingControlTick,
   releaseBatteries,
+  releaseBattery,
   releasePvArray,
   stopControlLoop,
   syncControlLoop,
@@ -215,7 +217,16 @@ async function settingsAction({ request }: Route.ActionArgs) {
           parsed.fields.solarMarginPercent = previous?.solarMarginPercent ?? 20;
         if (!formData.has("chargeWearPerKwh"))
           parsed.fields.chargeWearPerKwh = previous?.chargeWearPerKwh ?? 0;
-        await releaseChargeLimit(recordId);
+        // Let go under the old name before it changes, or before the battery
+        // stops being steered: afterwards nothing would publish to the event
+        // its automation is listening for.
+        if (
+          previous &&
+          (!parsed.fields.steered ||
+            batterySlug(previous) !==
+              batterySlug({ id: previous.id, title: parsed.fields.title }))
+        )
+          await releaseBattery(previous);
       }
       if (recordId) await updateBattery(recordId, parsed.fields);
       else await addBattery(parsed.fields);
@@ -223,7 +234,10 @@ async function settingsAction({ request }: Route.ActionArgs) {
     }
 
     case "battery-remove": {
-      await releaseChargeLimit(String(formData.get("id")));
+      const removed = (await listBatteries()).find(
+        (b) => b.id === String(formData.get("id")),
+      );
+      if (removed) await releaseBattery(removed);
       await removeBattery(String(formData.get("id")));
       return { section: "battery" as const, ok: true as const };
     }
@@ -246,9 +260,8 @@ async function settingsAction({ request }: Route.ActionArgs) {
         if (
           parsed.config.strategy === "charge-limit"
             ? batteries.length !== 1 ||
-              !batteries[0].chargeLimitEntityId ||
-              !batteries[0].steered
-            : !batteries.some(isSteerable)
+              !steerableBy(batteries[0], "charge-limit")
+            : !batteries.some((b) => steerableBy(b, "net-zero-energy"))
         ) {
           return failed({
             section: "control",
@@ -256,7 +269,7 @@ async function settingsAction({ request }: Route.ActionArgs) {
             errors: {
               enabled:
                 parsed.config.strategy === "charge-limit"
-                  ? "Configure one battery with a maximum charge limit entity and enable Steer this battery."
+                  ? CHARGE_LIMIT_BATTERY_ERROR
                   : NO_STEERABLE_BATTERY_ERROR,
             },
           });
@@ -267,15 +280,14 @@ async function settingsAction({ request }: Route.ActionArgs) {
       stopControlLoop();
       await pendingControlTick();
       try {
-        for (const battery of await listBatteries())
-          await releaseChargeLimit(battery.id);
+        // The outgoing strategy lets go of what it holds; a battery the other
+        // strategy already commands is left alone.
         if (
           previous.enabled &&
-          previous.strategy === "net-zero-energy" &&
           (!parsed.config.enabled ||
-            parsed.config.strategy !== "net-zero-energy")
+            parsed.config.strategy !== previous.strategy)
         )
-          await releaseBatteries();
+          await releaseBatteries(previous.strategy);
         await saveControlConfig(parsed.config);
       } finally {
         // Resume the stored strategy even when restoration or saving failed.
@@ -398,11 +410,10 @@ export default function Settings({
           ready={{
             grid: isGridConfigured(grid),
             batteries: batteries.length > 0,
-            steerable: batteries.some(isSteerable),
+            steerable: batteries.some((b) => steerableBy(b, "net-zero-energy")),
             chargeLimit:
               batteries.length === 1 &&
-              Boolean(batteries[0].chargeLimitEntityId) &&
-              batteries[0].steered,
+              steerableBy(batteries[0], "charge-limit"),
           }}
           actionData={actionData}
         />

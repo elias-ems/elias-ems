@@ -71,7 +71,7 @@ export async function exportPlannerData(
   }
   const battery =
     (batteryId ? batteries.find((b) => b.id === batteryId) : undefined) ||
-    batteries.find((b) => Boolean(b.chargeLimitEntityId)) ||
+    batteries.find((b) => b.chargeLimitPlanning) ||
     batteries[0];
 
   const [inputs, pvEntities, grid, control, curtailment, priceConfig] =

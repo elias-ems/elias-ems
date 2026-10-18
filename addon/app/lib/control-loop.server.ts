@@ -19,7 +19,7 @@
  *
  * Each tick publishes what it decided as an event per battery and per array and
  * records both halves. Deciding and acting stay separable — `net-zero.ts` and
- * `curtail.ts` work out what should happen, `targets.server.ts` and
+ * `curtail.ts` work out what should happen, `battery-commands.server.ts` and
  * `pv-limits.server.ts` put it on Home Assistant's bus for an automation to
  * carry out — which is what lets both strategies stay pure functions with no
  * idea that Home Assistant exists.
@@ -37,8 +37,18 @@ import {
   batterySlug,
   isSteerable,
   resolvePowerLimits,
+  steerableBy,
 } from "./batteries";
 import { listBatteries } from "./batteries.server";
+import { type ReleaseReason, setpointCommand } from "./battery-command";
+import {
+  type CommandPublish,
+  describePublishes,
+  forgetPublishedCommands,
+  PUBLISH_DEADBAND_W,
+  publishCommands,
+  releaseCommands,
+} from "./battery-commands.server";
 import type { ControlConfig, ControlLoopStatus } from "./control";
 import { readControlConfig } from "./control-config.server";
 import {
@@ -69,11 +79,6 @@ import {
 } from "./pv-limits.server";
 import { toBoolean, toNumber } from "./readings.server";
 import { readingAge, readStates } from "./states.server";
-import {
-  describePublishes,
-  forgetPublishedTargets,
-  publishTargets,
-} from "./targets.server";
 
 /**
  * How often a tick happens when nothing at all is moving.
@@ -84,6 +89,27 @@ import {
  * the diagnostics log honest. It reads memory and costs nothing.
  */
 const IDLE_TICK_MS = 60_000;
+
+/**
+ * How long an unchanged setpoint may stand before it is said again.
+ *
+ * The deadband compares against what we last published rather than against
+ * what the battery is doing, because an event has no read-back. This keeps that
+ * assumption from becoming an indefinite one: an automation that was reloaded,
+ * an inverter that was power-cycled, or a Home Assistant that restarted
+ * mid-tick all converge again within a tick or two. Half the idle tick, so a
+ * quiet house restates on the next idle tick rather than every other one.
+ */
+export const REPUBLISH_MS = 30_000;
+
+/**
+ * How long a net zero energy command is valid for. Comfortably more than the
+ * longest a running loop goes between restatements (an idle tick plus
+ * `REPUBLISH_MS`), so a healthy loop never lets one lapse, and short enough
+ * that an adapter honouring `valid_until` stops forcing power within minutes
+ * of the add-on dying.
+ */
+export const NET_ZERO_VALIDITY_MS = 3 * 60_000;
 
 type LoopState = {
   /** The idle heartbeat. Its presence is also what "the loop is running" means. */
@@ -249,8 +275,9 @@ type Snapshots = {
    */
   carCharging: boolean | null;
   currency: string;
-  /** Each steerable battery's slug, by battery id, ready to publish under. */
+  /** Each steerable battery's slug and caps, by battery id, ready to publish. */
   slugs: Map<string, string>;
+  limits: Map<string, ReturnType<typeof resolvePowerLimits>>;
   /** The same for each curtailable array. */
   pvSlugs: Map<string, string>;
 };
@@ -301,7 +328,10 @@ async function readSnapshots(config: TickConfig): Promise<Snapshots> {
       maxChargePercent: battery.maxChargePercent,
       socPercent: toNumber(stateOf(battery.socEntityId)),
       powerW: toNumber(stateOf(battery.powerEntityId)),
-      steerable: isSteerable(battery),
+      // Net zero energy can only steer a battery whose automation follows a
+      // setpoint; one that can only balance is counted, like an unsteered
+      // one, as part of the house it is balancing.
+      steerable: steerableBy(battery, "net-zero-energy"),
       ...resolvePowerLimits(battery),
     })),
     arrays: pvEntities.map((entity) => ({
@@ -321,8 +351,11 @@ async function readSnapshots(config: TickConfig): Promise<Snapshots> {
     provenance: describeSource(readings),
     slugs: new Map(
       batteries
-        .filter(isSteerable)
+        .filter((battery) => steerableBy(battery, "net-zero-energy"))
         .map((battery) => [battery.id, batterySlug(battery)]),
+    ),
+    limits: new Map(
+      batteries.map((battery) => [battery.id, resolvePowerLimits(battery)]),
     ),
     pvSlugs: new Map(
       pvEntities
@@ -372,16 +405,34 @@ async function tickBatteryControl(inputs: Snapshots): Promise<void> {
   // buffer fills with near-duplicates instead of holding useful history.
   // Published before the decision is logged, so that a line saying what was
   // decided and a line saying what was done cannot end up in the other order.
-  const publishes = await publishTargets(
+  const now = Date.now();
+  const publishes = await publishCommands(
     plan.decisions.flatMap((decision) => {
       const slug = inputs.slugs.get(decision.batteryId);
       if (!slug) return [];
+      const limits = inputs.limits.get(decision.batteryId) ?? {
+        maxChargeW: null,
+        maxDischargeW: null,
+      };
       return [
         {
           batteryId: decision.batteryId,
           title: decision.title,
           slug,
-          commandW: decision.commandW,
+          strategy: "net-zero-energy" as const,
+          // A null commandW is a deadband hold: say nothing, and let the
+          // standing command carry on.
+          command:
+            decision.commandW === null
+              ? null
+              : setpointCommand(
+                  decision.commandW,
+                  limits,
+                  now,
+                  now + NET_ZERO_VALIDITY_MS,
+                ),
+          restateAt: now + REPUBLISH_MS,
+          deadbandW: PUBLISH_DEADBAND_W,
         },
       ];
     }),
@@ -560,50 +611,72 @@ export async function runControlTick(): Promise<void> {
 }
 
 /**
- * Hands every steerable battery back by publishing 0 for it, and waits for it.
+ * Hands steered batteries back by publishing a `release` command for each, and
+ * waits for it.
  *
- * Called when control is switched off and when the process is asked to stop. A
- * battery left forcing kilowatts because the thing that told it to is gone is
- * the worst failure that feature has: from the battery's side there is no
- * difference between a target that is still wanted and one whose author died
- * ten minutes ago.
+ * Called when net zero energy is switched off or away (with that strategy, so
+ * a battery Optimize charge limits has since taken over is left alone) and when
+ * the process is asked to stop (with none, so every steered battery is let go).
+ * A battery left forcing kilowatts because the thing that told it to is gone is
+ * the worst failure this feature has: from the battery's side there is no
+ * difference between a command still wanted and one whose author died ten
+ * minutes ago.
  *
- * Zero is the safe value rather than the *correct* one, and the distinction is
- * worth being honest about. It stops the battery being driven in either
- * direction, which is safe on every inverter; it does not necessarily hand the
- * battery back to its own self-consumption logic, which on many brands means
- * putting a mode entity back rather than commanding a power. The event says
- * which of the two this is — `released: true` — so an automation that knows how
- * to restore its inverter's mode has something to trigger on, but the add-on
- * itself still only knows how to say "stop".
+ * A release is not a hold. Hold is "keep the battery at 0 W"; release is "I am
+ * no longer in charge of you", and the automation behind it is what knows how
+ * to put this inverter back into its own self-consumption.
  *
  * Nothing here can survive `kill -9`, a power cut, or a container the
- * supervisor destroys without asking. The only real answer to those is an
- * inverter whose forced mode expires on its own — a command timeout, which
- * some brands have and others do not.
+ * supervisor destroys without asking. That is what `valid_until` is for: an
+ * adapter that honours it lets go on its own.
  */
-export async function releaseBatteries(): Promise<void> {
+export async function releaseBatteries(
+  strategy?: "net-zero-energy" | "charge-limit",
+  reason: ReleaseReason = strategy ? "disabled" : "shutdown",
+): Promise<void> {
   const batteries = (await listBatteries()).filter(isSteerable);
   if (batteries.length === 0) return;
 
-  const publishes = await publishTargets(
+  const publishes = await releaseCommands(
     batteries.map((battery) => ({
       batteryId: battery.id,
       title: battery.title,
       slug: batterySlug(battery),
-      commandW: 0,
-      // Past the deadband: letting go is worth one event even when we think
-      // the battery is already at 0, because what we think is the very thing
-      // in doubt when something has gone wrong enough to be stopping.
-      force: true,
     })),
+    reason,
+    { strategy },
   );
+  if (publishes.length === 0) return;
 
-  // Nothing is steering these batteries any more, so nothing should be
-  // remembered about them either — the next tick after control comes back on
-  // publishes from scratch rather than deciding it already said this.
-  forgetPublishedTargets();
+  logRelease(publishes);
+}
 
+/**
+ * Hands **one** battery back under the name it had, for when it alone stops
+ * being commandable — removed, un-steered, or renamed. A rename matters as
+ * much as the others: the automation listening for the old event type would
+ * otherwise keep the last command standing until it expired.
+ *
+ * Unconditional, unlike `releaseBatteries`: settings is the one place that
+ * knows the old name, so this is the one chance to say it.
+ */
+export async function releaseBattery(battery: Battery): Promise<void> {
+  if (!isSteerable(battery)) return;
+  logRelease(
+    await releaseCommands(
+      [
+        {
+          batteryId: battery.id,
+          title: battery.title,
+          slug: batterySlug(battery),
+        },
+      ],
+      "unsteered",
+    ),
+  );
+}
+
+function logRelease(publishes: CommandPublish[]): void {
   const trouble = publishes.filter((publish) => publish.status !== "published");
   log(
     "battery-control",
@@ -615,7 +688,7 @@ export async function releaseBatteries(): Promise<void> {
               `${publish.title} (${publish.detail ?? publish.status})`,
           )
           .join(", ")} did not go out — check it is not still being driven.`
-      : `Released ${publishes.length === 1 ? "the battery" : "the batteries"} to 0 W.`,
+      : `Released ${publishes.length === 1 ? "the battery" : "the batteries"}.`,
   );
 }
 
@@ -880,7 +953,10 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
       // Waited for, not fired and forgotten: the settings form is still
       // sitting on this response, and "it is off" should not come back before
       // the hardware has actually been let go.
-      await Promise.all([releaseBatteries(), releasePvArrays()]);
+      await Promise.all([
+        releaseBatteries("net-zero-energy"),
+        releasePvArrays(),
+      ]);
     }
     return controlLoopStatus();
   }
@@ -894,7 +970,7 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
     (!config.enabled || config.strategy !== "net-zero-energy")
   ) {
     log("battery-control", "info", "Battery control disabled.");
-    await releaseBatteries();
+    await releaseBatteries("net-zero-energy");
   }
   if (previousCurtailment?.enabled && !curtailment.enabled) {
     log("pv-curtailment", "info", "PV curtailment disabled.");
@@ -1003,7 +1079,7 @@ export function resetControlLoop(): void {
   // Including what was published: a case that starts with a battery already
   // "told" what the previous case told it would see its first target held
   // back by the deadband.
-  forgetPublishedTargets();
+  forgetPublishedCommands();
   forgetPublishedLimits();
   state.config = null;
   state.curtailment = null;

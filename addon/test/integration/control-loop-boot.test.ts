@@ -44,6 +44,7 @@ beforeAll(async () => {
         powerEntityId: "sensor.battery_power",
         socEntityId: "sensor.battery_state_of_charge",
         steered: true,
+        commandContract: 1,
       },
     ]),
     // One second, so the assertions below don't have to wait on a real clock.

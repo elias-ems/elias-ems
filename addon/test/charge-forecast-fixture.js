@@ -59,13 +59,20 @@ export const chargeBatteryFixture = {
   steered: true,
   maxChargePowerW: 2000,
   maxDischargePowerW: 2000,
-  chargeLimitEntityId: "number.battery_charge_limit",
-  chargeLimitMode: "preview",
+  controlModes: ["balance", "hold", "charge", "discharge"],
+  dischargeLimitSupported: false,
+  powerStepW: 10,
+  chargeLimitPlanning: true,
+  commandContract: 1,
   chargeEfficiencyPercent: 95,
   solarMarginPercent: 20,
   chargeWearPerKwh: 0,
 };
 
+/**
+ * A power-limit entity as an earlier version wrote to it directly — what the
+ * migration that restores those writes reads back.
+ */
 export const chargeEntityFixture = {
   entity_id: "number.battery_charge_limit",
   state: "2000",

@@ -87,7 +87,7 @@ import GridSection from "../components/settings/GridSection";
 import PricesSection from "../components/settings/PricesSection";
 import PvSection from "../components/settings/PvSection";
 import Section from "../components/settings/Section";
-import { targetEventType } from "../lib/batteries";
+import { commandEventType } from "../lib/battery-command";
 import type { PriceCurvePoint } from "../lib/dashboard";
 import {
   batteryControlSummary,
@@ -561,8 +561,8 @@ export default function Playground({
             <EventNameField
               placeholder="e.g. Home battery"
               noun="battery"
-              carries="target power"
-              eventType={targetEventType}
+              carries="command"
+              eventType={commandEventType}
             />
           </Variant>
           <Variant label="Renaming a saved array">
@@ -581,8 +581,8 @@ export default function Playground({
               placeholder="e.g. Home battery"
               error="Another battery already makes the same event type."
               noun="battery"
-              carries="target power"
-              eventType={targetEventType}
+              carries="command"
+              eventType={commandEventType}
             />
           </Variant>
         </Specimen>

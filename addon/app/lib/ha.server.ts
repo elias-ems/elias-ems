@@ -209,7 +209,11 @@ export async function fireHaEvent(
   }
 }
 
-/** Slow charge-ceiling updates use readback; no target power or operating mode is written. */
+/**
+ * Writes a power-limit `number` entity. Only the migration that restores
+ * limits an earlier version wrote directly still uses this; every strategy now
+ * publishes battery commands instead.
+ */
 export async function setHaChargeLimit(
   entityId: string,
   value: number,

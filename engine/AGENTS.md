@@ -42,6 +42,11 @@ browser-based replay of exported planning inputs.
   publishing successfully from confirmation that a device applied the command.
   Coordinate ownership so old limit writes and new events cannot control the
   same battery simultaneously; preserve restoration during migration.
+  *Status:* the add-on now publishes this contract
+  (`elias_ems_<slug>_battery_command`, see
+  [`battery-command.ts`](../addon/app/lib/battery-command.ts)) for both
+  production strategies, with ownership, release and the lease migration in
+  place. What remains is publishing the engine's own plans through it.
 - **Produce an inspectable interval schedule.** Respect price boundaries,
   including 15-minute and hourly tariffs. Show the selected mode, power
   boundaries, applicable setpoint, expected charge/discharge and resulting state

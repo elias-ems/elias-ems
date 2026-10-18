@@ -2,24 +2,54 @@
  * The configured batteries. Capacity and the charge window are things the
  * installer knows and Home Assistant does not, so they are typed in; the three
  * live values come from HA entities, and the title is what names the battery on
- * Home Assistant's event bus — see `targetEventType`.
+ * Home Assistant's event bus — see `commandEventType`.
  *
  * Both power entities are read with the sign convention **positive = charging,
  * negative = discharging**. That is a decision rather than an observation —
  * inverters disagree, and plenty publish the opposite — and it is the convention
  * the strategy's arithmetic and the log lines are written against, so it is also
- * the one the target event carries.
+ * the one the battery command event carries.
  *
  * Pure; persistence lives in `batteries.server.ts`.
  */
 
+import {
+  BATTERY_COMMAND_SCHEMA_VERSION,
+  BATTERY_MODES,
+  type BatteryMode,
+  isBatteryMode,
+  SETPOINT_MODES,
+} from "./battery-command";
+import type { StrategyId } from "./control";
 import { slugifyTitle } from "./slug";
 
 export type BatteryFields = {
-  /** Legacy preview setting; authorization comes from steered and global control. */
-  chargeLimitMode?: "off" | "preview" | "active";
-  chargeLimitEntityId?: string;
-  dischargeLimitEntityId?: string;
+  /**
+   * The modes this battery's automation (or adapter) can carry out when it
+   * receives a battery command. `balance` is always there: it is the battery's
+   * own self-consumption, which needs nothing but boundaries. The direct modes
+   * — `hold`, `charge`, `discharge` — need something that can force a power
+   * setpoint, and net zero energy commands nothing else.
+   */
+  controlModes: BatteryMode[];
+  /**
+   * Whether the automation can cap discharge (AC output) in `balance`. Without
+   * it a command's `discharge_limit_w` is null and discharge stays native.
+   */
+  dischargeLimitSupported: boolean;
+  /**
+   * The resolution boundaries and setpoints are planned in, in W. What a
+   * `number` entity's `step` used to supply, now that nothing reads one.
+   */
+  powerStepW: number;
+  /** Whether Optimize charge limits plans (and previews) this battery. */
+  chargeLimitPlanning: boolean;
+  /**
+   * Which version of the battery command event this record was saved against.
+   * A record without one predates the event, and is read as unsteered — see
+   * `normalizeBattery`.
+   */
+  commandContract?: number;
   chargeEfficiencyPercent?: number;
   solarMarginPercent?: number;
   chargeWearPerKwh?: number;
@@ -71,7 +101,50 @@ export type BatteryErrors = Partial<Record<keyof BatteryFields, string>>;
 export const BATTERY_DEFAULTS = {
   minChargePercent: 10,
   maxChargePercent: 95,
+  powerStepW: 100,
 } as const;
+
+/**
+ * Fields from before the battery command event: the two power-limit entities
+ * Optimize charge limits wrote to directly, and its per-battery mode. Read only
+ * by `normalizeBattery`, to carry the intent across an upgrade.
+ */
+type LegacyBatteryFields = {
+  chargeLimitMode?: string;
+  chargeLimitEntityId?: string;
+  dischargeLimitEntityId?: string;
+};
+
+/**
+ * A battery as it may be on disk: anything saved before a field existed lacks
+ * it, and `normalizeBattery` is where it is given something to be.
+ */
+export type StoredBattery = Omit<
+  Battery,
+  | "controlModes"
+  | "dischargeLimitSupported"
+  | "powerStepW"
+  | "chargeLimitPlanning"
+> &
+  Partial<
+    Pick<
+      Battery,
+      | "controlModes"
+      | "dischargeLimitSupported"
+      | "powerStepW"
+      | "chargeLimitPlanning"
+    >
+  > &
+  LegacyBatteryFields;
+
+function toControlModes(value: unknown): BatteryMode[] {
+  // Missing means "never chosen", and every mode is what a new battery is
+  // offered by default.
+  if (!Array.isArray(value)) return [...BATTERY_MODES];
+  return BATTERY_MODES.filter(
+    (mode) => mode === "balance" || value.some((v) => v === mode),
+  );
+}
 
 function toFiniteNumber(value: unknown, fallback: number): number {
   // `Number("")` and `Number(null)` are both 0, so an empty or missing field
@@ -105,20 +178,38 @@ function toOptionalPowerW(value: unknown): number | null {
  * strategy's arithmetic into silent string concatenation.
  *
  * This is also where a record written before a field existed is given something
- * sensible to be: the three control fields below all read as "not configured"
- * when they are missing, so an installation that predates them keeps behaving
- * exactly as it did.
+ * sensible to be: the power caps read as "not configured" when they are
+ * missing, and the control modes as "everything".
  *
- * A record from the version that wrote to a target entity lands here too, and
- * comes out unsteered — `steered` is absent, so it reads as false.
- * That is the honest reading rather than a lossy one: the target power now goes
- * out as an event that nothing is listening for until an automation exists, so
- * keeping the battery steered through the upgrade would mean claiming to
- * command hardware that has stopped hearing us.
+ * A record saved before the battery command event — no `commandContract` —
+ * comes out **unsteered**, whatever it said before. Both of the shapes it could
+ * have been steered under (a `_target_power` event, or limit entities written
+ * directly) are gone, and nothing is listening for the new event until an
+ * automation exists, so keeping it steered would mean claiming to command
+ * hardware that has stopped hearing us.
  */
-export function normalizeBattery(battery: Battery): Battery {
+export function normalizeBattery(battery: StoredBattery): Battery {
+  const {
+    chargeLimitMode: _mode,
+    chargeLimitEntityId,
+    dischargeLimitEntityId,
+    ...rest
+  } = battery;
+  // A record saved before the battery command event existed. Its strategy
+  // either published `_target_power` events or wrote power-limit entities
+  // itself; an automation listening for either hears nothing now, so carrying
+  // it across as steered would be claiming to command hardware that has
+  // stopped hearing us. Its *intent* survives: a battery that had limit
+  // entities keeps charge-limit planning, and discharge limiting if it had an
+  // output entity.
+  const current = battery.commandContract === BATTERY_COMMAND_SCHEMA_VERSION;
+  const powerStepW = toFiniteNumber(
+    battery.powerStepW,
+    BATTERY_DEFAULTS.powerStepW,
+  );
+
   return {
-    ...battery,
+    ...rest,
     title: battery.title?.trim() || battery.powerEntityId,
     capacityKwh: toFiniteNumber(battery.capacityKwh, 0),
     minChargePercent: toFiniteNumber(
@@ -129,14 +220,16 @@ export function normalizeBattery(battery: Battery): Battery {
       battery.maxChargePercent,
       BATTERY_DEFAULTS.maxChargePercent,
     ),
-    steered: battery.steered === true,
-    chargeLimitMode: ["preview", "active"].includes(
-      battery.chargeLimitMode || "",
-    )
-      ? battery.chargeLimitMode
-      : "off",
-    chargeLimitEntityId: battery.chargeLimitEntityId?.trim() || "",
-    dischargeLimitEntityId: battery.dischargeLimitEntityId?.trim() || "",
+    steered: current && battery.steered === true,
+    controlModes: toControlModes(battery.controlModes),
+    dischargeLimitSupported: current
+      ? battery.dischargeLimitSupported === true
+      : Boolean(dischargeLimitEntityId?.trim()),
+    chargeLimitPlanning: current
+      ? battery.chargeLimitPlanning === true
+      : Boolean(chargeLimitEntityId?.trim()),
+    powerStepW: powerStepW > 0 ? powerStepW : BATTERY_DEFAULTS.powerStepW,
+    commandContract: BATTERY_COMMAND_SCHEMA_VERSION,
     chargeEfficiencyPercent: toFiniteNumber(
       battery.chargeEfficiencyPercent,
       95,
@@ -149,14 +242,37 @@ export function normalizeBattery(battery: Battery): Battery {
 }
 
 /**
- * Whether a target can be published for this battery at all.
- *
- * The one thing that separates a battery the strategy may command from one it
- * can only watch, so it is a named function rather than a truthiness check
- * spelled out at each of the three call sites that need it.
+ * Whether the add-on may command this battery at all. The one thing that
+ * separates a battery a strategy may command from one it can only watch.
  */
 export function isSteerable(battery: Pick<BatteryFields, "steered">): boolean {
   return battery.steered === true;
+}
+
+/** Whether the battery's automation can follow hold, charge and discharge. */
+export function supportsSetpoints(
+  battery: Pick<BatteryFields, "controlModes">,
+): boolean {
+  return SETPOINT_MODES.every((mode) => battery.controlModes.includes(mode));
+}
+
+/**
+ * Whether this strategy may command this battery: steered, and able to carry
+ * out the kind of command the strategy issues. Net zero energy issues
+ * setpoints; Optimize charge limits issues `balance` with boundaries, which
+ * every battery supports, but only plans batteries opted in to it.
+ */
+export function steerableBy(
+  battery: Pick<
+    BatteryFields,
+    "steered" | "controlModes" | "chargeLimitPlanning"
+  >,
+  strategy: StrategyId,
+): boolean {
+  if (!isSteerable(battery)) return false;
+  return strategy === "net-zero-energy"
+    ? supportsSetpoints(battery)
+    : battery.chargeLimitPlanning;
 }
 
 /** The battery's slug, with a last-resort fallback so it is never empty. */
@@ -165,33 +281,10 @@ export function batterySlug(battery: Pick<Battery, "id" | "title">): string {
 }
 
 /**
- * The Home Assistant event type this battery's target power goes out on.
- *
- * `target_power` rather than a bare `target`, so that a battery growing a
- * second kind of target later — a state of charge to aim for, once the
- * price-aware strategies land — has somewhere to go that does not collide.
- *
- * One type per battery rather than one shared type with the battery named in
- * the payload: an automation's event trigger then says which battery it is for
- * in the line that matters most — `event_type: elias_ems_home_battery_target_power`
- * reads as what it is, where a shared type plus an `event_data` filter puts the
- * identity somewhere easy to leave off by mistake, in which case the automation
- * quietly drives every battery in the house from one battery's target.
- *
- * The cost is that renaming a battery renames its event. The settings page says
- * so while the rename is being typed, because nothing downstream can: Home
- * Assistant does not know that two event types were ever related, and an
- * automation listening for the old one simply stops hearing anything.
- */
-export function targetEventType(slug: string): string {
-  return `elias_ems_${slug}_target_power`;
-}
-
-/**
  * Why two batteries may not have names that slugify the same way.
  *
  * "Home battery" and "home-battery" are different titles and the same event
- * type, which would leave both batteries taking each other's targets with
+ * type, which would leave both batteries taking each other's commands with
  * nothing anywhere reporting a problem. Checked in the settings action rather
  * than in `parseBattery`, because it needs the other batteries and this module
  * is pure; the constant lives here so the message cannot drift from the rule.
@@ -274,11 +367,13 @@ export function parseBattery(
   const maxDischargePowerW = readOptionalPowerW(formData, "maxDischargePowerW");
 
   const errors: BatteryErrors = {};
-  const chargeLimitMode = formData.get("chargeLimitMode")?.toString() || "off";
-  const chargeLimitEntityId =
-    formData.get("chargeLimitEntityId")?.toString().trim() || "";
-  const dischargeLimitEntityId =
-    formData.get("dischargeLimitEntityId")?.toString().trim() || "";
+  const chargeLimitPlanning = formData.get("chargeLimitPlanning") === "on";
+  const dischargeLimitSupported =
+    formData.get("dischargeLimitSupported") === "on";
+  const requestedModes = formData.getAll("controlModes").map(String);
+  const powerStepW =
+    readNumber(formData, "powerStepW") ??
+    (formData.get("powerStepW") ? NaN : BATTERY_DEFAULTS.powerStepW);
   const chargeEfficiencyPercent =
     readNumber(formData, "chargeEfficiencyPercent") ??
     (formData.get("chargeEfficiencyPercent") ? NaN : 95);
@@ -288,25 +383,11 @@ export function parseBattery(
   const chargeWearPerKwh =
     readNumber(formData, "chargeWearPerKwh") ??
     (formData.get("chargeWearPerKwh") ? NaN : 0);
-  if (!["off", "preview", "active"].includes(chargeLimitMode))
-    errors.chargeLimitMode = "Choose off, preview, or active.";
-  if (chargeLimitEntityId && !/^number\.[a-z0-9_]+$/.test(chargeLimitEntityId))
-    errors.chargeLimitEntityId =
-      "Choose a number entity controlling maximum charging power in W.";
-  if (dischargeLimitEntityId) {
-    if (!/^number\.[a-z0-9_]+$/.test(dischargeLimitEntityId))
-      errors.dischargeLimitEntityId =
-        "Choose a number entity controlling maximum AC output power in W.";
-    else if (dischargeLimitEntityId === chargeLimitEntityId)
-      errors.dischargeLimitEntityId =
-        "Charge and discharge limits must use different entities.";
-    if (!chargeLimitEntityId)
-      errors.chargeLimitEntityId =
-        "Configure the charge limit alongside the discharge limit.";
-  }
-  if (chargeLimitMode !== "off") {
-    if (!chargeLimitEntityId)
-      errors.chargeLimitEntityId = "Pick the maximum charge limit entity.";
+  if (requestedModes.some((mode) => !isBatteryMode(mode)))
+    errors.controlModes = "Choose from balance, hold, charge and discharge.";
+  if (!Number.isFinite(powerStepW) || powerStepW <= 0)
+    errors.powerStepW = "Power step must be a number above 0.";
+  if (chargeLimitPlanning) {
     if (!maxChargePowerW.ok || maxChargePowerW.value === null)
       errors.maxChargePowerW =
         "Set the hardware charge ceiling for charge-limit planning.";
@@ -393,9 +474,11 @@ export function parseBattery(
       powerEntityId,
       socEntityId,
       steered,
-      chargeLimitMode: chargeLimitMode as "off" | "preview" | "active",
-      chargeLimitEntityId,
-      dischargeLimitEntityId,
+      controlModes: toControlModes(requestedModes),
+      dischargeLimitSupported,
+      powerStepW,
+      chargeLimitPlanning,
+      commandContract: BATTERY_COMMAND_SCHEMA_VERSION,
       chargeEfficiencyPercent,
       solarMarginPercent,
       chargeWearPerKwh,

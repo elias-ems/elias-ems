@@ -74,7 +74,12 @@ export type Input = {
   };
   timeLimitSeconds: number;
 };
-/** Contract only: no publisher or live execution is installed. */
+/**
+ * The battery command contract, version 1. The add-on publishes it for its
+ * production strategies as `elias_ems_<slug>_battery_command`, in the flat
+ * snake_case form built by `addon/app/lib/battery-command.ts`; this engine
+ * does not publish anything itself.
+ */
 export type BatteryControlEvent = {
   schemaVersion: 1;
   batteryId: string;

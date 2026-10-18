@@ -77,7 +77,6 @@ describe("forecast planning through Home Assistant", () => {
       "No PV entity matches Energy dashboard counter pv",
     );
     expect(result.plan.points.length).toBeGreaterThan(0);
-    expect(result.reportedW).toBe(2000);
   });
   it("models a fully matched threshold setup and blocks unmapped solar", async () => {
     configMocks.curtailment.mockResolvedValue({
@@ -150,26 +149,22 @@ describe("forecast planning through Home Assistant", () => {
       0.15,
     );
     expect(result.forecastEnd).toBeGreaterThan(Date.now() + 5 * 86_400_000);
-    expect(result.reportedW).toBe(2000);
   });
-  it("rejects the wrong unit or invalid range instead of applying guessed bounds", async () => {
+  it("builds its boundaries from settings rather than guessing them", async () => {
     const { chargeModel } = await import("../../app/lib/charge-planner.server");
+    expect(chargeModel(chargeBatteryFixture as Battery, 50)).toMatchObject({
+      minW: 0,
+      maxW: 2000,
+      stepW: 10,
+      dischargeW: 2000,
+    });
+    expect(() => chargeModel(chargeBatteryFixture as Battery, NaN)).toThrow();
     expect(() =>
       chargeModel(
-        chargeBatteryFixture as Battery,
-        {
-          ...chargeEntityFixture,
-          attributes: {
-            ...chargeEntityFixture.attributes,
-            unit_of_measurement: "%",
-          },
-        },
+        { ...chargeBatteryFixture, maxChargePowerW: null } as Battery,
         50,
       ),
-    ).toThrow("in W");
-    expect(() =>
-      chargeModel(chargeBatteryFixture as Battery, chargeEntityFixture, NaN),
-    ).toThrow();
+    ).toThrow("hardware charge and discharge limits");
   });
   it("reports rejected WebSocket commands and authentication failures", async () => {
     const { haCommands } = await import("../../app/lib/ha-command.server");
@@ -247,39 +242,19 @@ it("keeps ordinary curtailment planning available with an unpredictable EV overr
   ).toContain("No PV entity matches");
 });
 
-it("validates the AC output entity and caps its range at the hardware limit", async () => {
+it("plans an AC output boundary only when the battery can limit discharge", async () => {
   const { chargeModel } = await import("../../app/lib/charge-planner.server");
-  const battery = {
-    ...chargeBatteryFixture,
-    dischargeLimitEntityId: "number.ac_output",
-  } as Battery;
-  const output = {
-    ...chargeEntityFixture,
-    entity_id: "number.ac_output",
-    attributes: {
-      ...chargeEntityFixture.attributes,
-      min: 50,
-      max: 3000,
-      step: 50,
-    },
-  };
-  expect(chargeModel(battery, chargeEntityFixture, 60, output)).toMatchObject({
+  expect(chargeModel(chargeBatteryFixture as Battery, 60)).not.toHaveProperty(
+    "dischargeStepW",
+  );
+  expect(
+    chargeModel(
+      { ...chargeBatteryFixture, dischargeLimitSupported: true } as Battery,
+      60,
+    ),
+  ).toMatchObject({
     dischargeW: 2000,
-    dischargeMinW: 50,
-    dischargeStepW: 50,
+    dischargeMinW: 0,
+    dischargeStepW: 10,
   });
-  for (const invalid of [
-    undefined,
-    { ...output, state: "unavailable" },
-    {
-      ...output,
-      attributes: { ...output.attributes, unit_of_measurement: "%" },
-    },
-    { ...output, attributes: { ...output.attributes, step: 0 } },
-    { ...output, attributes: { ...output.attributes, min: 2500 } },
-  ]) {
-    expect(() =>
-      chargeModel(battery, chargeEntityFixture, 60, invalid),
-    ).toThrow();
-  }
 });

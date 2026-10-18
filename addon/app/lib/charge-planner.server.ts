@@ -18,32 +18,16 @@ export function numericState(state: HaState | null | undefined): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-export function chargeModel(
-  battery: Battery,
-  state: HaState | null | undefined,
-  soc: number | null,
-  dischargeState?: HaState | null,
-): ChargeModel {
-  const a = state?.attributes;
-  const min = a?.min;
-  const max = a?.max;
-  const step = a?.step;
-  if (
-    !state?.entity_id.startsWith("number.") ||
-    a?.unit_of_measurement !== "W" ||
-    typeof min !== "number" ||
-    typeof max !== "number" ||
-    typeof step !== "number" ||
-    ![min, max, step].every(Number.isFinite) ||
-    min < 0 ||
-    max <= min ||
-    step <= 0 ||
-    numericState(state) === null
-  ) {
-    throw new Error(
-      "The maximum charge limit must be an available number entity in W with valid min, max and step attributes.",
-    );
-  }
+/**
+ * The planner's battery model, from settings alone.
+ *
+ * Both boundaries run from 0 W in `powerStepW` steps: what a `number` entity's
+ * `min`/`max`/`step` used to supply when this strategy wrote to one. A command
+ * event has no range to read, so the hardware caps are the ceiling and the
+ * battery's automation is what turns a boundary into whatever its inverter
+ * accepts.
+ */
+export function chargeModel(battery: Battery, soc: number | null): ChargeModel {
   if (soc === null || !Number.isFinite(soc) || soc < 0 || soc > 100)
     throw new Error(
       "Battery state of charge is unavailable or outside 0–100%.",
@@ -52,52 +36,21 @@ export function chargeModel(
     throw new Error(
       "Configure hardware charge and discharge limits before planning.",
     );
-  const maxW = Math.min(max, battery.maxChargePowerW);
-  if (maxW < min)
-    throw new Error(
-      "The hardware charge ceiling is below the entity's minimum.",
-    );
-  let dischargeRange = {};
-  if (battery.dischargeLimitEntityId) {
-    const d = dischargeState?.attributes;
-    if (
-      battery.dischargeLimitEntityId === battery.chargeLimitEntityId ||
-      dischargeState?.entity_id !== battery.dischargeLimitEntityId ||
-      !dischargeState?.entity_id.startsWith("number.") ||
-      d?.unit_of_measurement !== "W" ||
-      typeof d.min !== "number" ||
-      typeof d.max !== "number" ||
-      typeof d.step !== "number" ||
-      ![d.min, d.max, d.step].every(Number.isFinite) ||
-      d.min < 0 ||
-      d.max <= d.min ||
-      d.step <= 0 ||
-      numericState(dischargeState) === null
-    )
-      throw new Error(
-        "The maximum AC output limit must be a distinct available number entity in W with valid min, max and step attributes.",
-      );
-    const maxOutput = Math.min(d.max, battery.maxDischargePowerW);
-    if (maxOutput < d.min)
-      throw new Error(
-        "The hardware discharge ceiling is below the entity's minimum.",
-      );
-    dischargeRange = {
-      dischargeW: maxOutput,
-      dischargeMinW: d.min,
-      dischargeStepW: d.step,
-    };
-  }
+  const stepW = battery.powerStepW;
+  if (!Number.isFinite(stepW) || stepW <= 0)
+    throw new Error("Configure a power step above 0 W before planning.");
   return {
     capacityKwh: battery.capacityKwh,
     minSoc: battery.minChargePercent,
     maxSoc: battery.maxChargePercent,
     soc,
-    minW: min,
-    maxW,
-    stepW: step,
+    minW: 0,
+    maxW: battery.maxChargePowerW,
+    stepW,
     dischargeW: battery.maxDischargePowerW,
-    ...dischargeRange,
+    ...(battery.dischargeLimitSupported
+      ? { dischargeMinW: 0, dischargeStepW: stepW }
+      : {}),
     efficiency: (battery.chargeEfficiencyPercent ?? 95) / 100,
     wearPerKwh: battery.chargeWearPerKwh ?? 0,
   };
@@ -123,8 +76,6 @@ export type PlannerInputs = {
   controlBlocker: string | null;
   planningNote: string | null;
   curtailmentModeled: boolean;
-  reportedW: number | null;
-  reportedDischargeW: number | null;
   currency: string;
   forecastEnd: number;
   sources: number;
@@ -174,22 +125,11 @@ export async function preparePlannerInputs(
     ),
     checked(
       "battery",
-      readStates([
-        battery.socEntityId,
-        battery.chargeLimitEntityId || "",
-        ...(battery.dischargeLimitEntityId
-          ? [battery.dischargeLimitEntityId]
-          : []),
-      ]).then((readings) => {
+      readStates([battery.socEntityId]).then((readings) => {
         const soc = readings.states.get(battery.socEntityId)?.state;
         if (soc?.attributes?.unit_of_measurement !== "%")
           throw new Error("The SoC entity must report percent.");
-        chargeModel(
-          battery,
-          readings.states.get(battery.chargeLimitEntityId || "")?.state,
-          numericState(soc),
-          readings.states.get(battery.dischargeLimitEntityId || "")?.state,
-        );
+        chargeModel(battery, numericState(soc));
         return readings;
       }),
     ),
@@ -199,19 +139,10 @@ export async function preparePlannerInputs(
   if (p.status === "rejected") throw p.reason;
   if (r.status === "rejected") throw r.reason;
   const [energy, prices, readings] = [e.value, p.value, r.value] as const;
-  const state = readings.states.get(battery.chargeLimitEntityId || "")?.state;
   const socState = readings.states.get(battery.socEntityId)?.state;
   if (socState?.attributes?.unit_of_measurement !== "%")
     throw new Error("The SoC entity must report percent.");
-  const dischargeState = readings.states.get(
-    battery.dischargeLimitEntityId || "",
-  )?.state;
-  const model = chargeModel(
-    battery,
-    state,
-    numericState(socState),
-    dischargeState,
-  );
+  const model = chargeModel(battery, numericState(socState));
   const [curtailment, arrays] = await Promise.all([
     readCurtailmentConfig(),
     listPvEntities(),
@@ -484,8 +415,6 @@ export async function preparePlannerInputs(
     controlBlocker,
     planningNote,
     curtailmentModeled,
-    reportedW: numericState(state),
-    reportedDischargeW: numericState(dischargeState),
     currency: prices.read.forecast.currency,
     forecastEnd: energy.forecastEnd,
     sources: energy.sources.length,
@@ -529,8 +458,6 @@ export async function calculateChargePlan(
     curtailmentModeled: inputs.curtailmentModeled,
     plan,
     model: inputs.model,
-    reportedW: inputs.reportedW,
-    reportedDischargeW: inputs.reportedDischargeW,
     currency: inputs.currency,
     forecastEnd: inputs.forecastEnd,
     sources: inputs.sources,

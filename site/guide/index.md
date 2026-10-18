@@ -25,14 +25,14 @@ configured entirely from its own pages — no YAML.
 | **Home Assistant** | A **Supervisor-based** install: Home Assistant OS or Home Assistant Supervised. Core-only and plain Docker installs have no Add-on Store and cannot run this. |
 | **Architecture** | `aarch64` or `amd64`. 32-bit ARM (`armv7`) is not supported — Home Assistant dropped it, and the Node 24 runtime the add-on is built on publishes no 32-bit ARM images to base one on. |
 | **A grid sensor** | One entity giving **instantaneous power in watts, signed**: positive importing, negative exporting. See [the note on signed sensors](/guide/configure#the-grid-sensor) if yours is an import/export pair. |
-| **A battery** | Entities for its cumulative energy (kWh), current power (W) and state of charge (%). Check **Steer this battery** to allow control. Net zero energy needs an [automation](/guide/battery-control#connecting-the-event-to-your-battery) listening for its target event; [Optimize charge limits](/internals/charge-limit) needs writable power-limit entities. |
+| **A battery** | Entities for its cumulative energy (kWh), current power (W) and state of charge (%). Check **Steer this battery** to allow control. Both strategies need an [automation](/guide/battery-control#connecting-the-event-to-your-battery) listening for the battery's command event, which turns it into what your inverter understands. |
 
 ## What works today
 
-- **Battery control** with a net-zero-energy strategy. It reads, decides,
-  publishes each battery's target as its own event —
-  `elias_ems_home_battery_target_power` for a battery called "Home battery" — and logs
-  both halves. See [Battery control](/guide/battery-control).
+- **Battery control** with a net-zero-energy strategy and a charge-limit
+  planner. It reads, decides, publishes each battery's command as its own
+  event — `elias_ems_home_battery_battery_command` for a battery called "Home
+  battery" — and logs both halves. See [Battery control](/guide/battery-control).
 - **Live readings** on the home page for your PV arrays, the grid and each
   battery, pushed rather than polled, with a health chip that tells you when the
   connection to Home Assistant is degraded. See [The dashboard](/guide/dashboard).

@@ -17,6 +17,7 @@
  */
 import type { Battery } from "./batteries";
 import { listBatteries } from "./batteries.server";
+import { publishedSetpointW } from "./battery-commands.server";
 import type {
   DashboardPrices,
   DashboardReadings,
@@ -37,10 +38,8 @@ import { readPriceConfig } from "./prices.server";
 import type { PvEntity } from "./pv-entities";
 import { listPvEntities } from "./pv-entities.server";
 import { publishedLimitPercent } from "./pv-limits.server";
-
 import { toNumber, toReading } from "./readings.server";
 import { readingAge, readStates, type StateRead } from "./states.server";
-import { publishedTargetW } from "./targets.server";
 
 /** The stored configuration everything on the page is derived from. */
 type DashboardConfig = {
@@ -267,7 +266,7 @@ export async function readDashboard(): Promise<DashboardReadings> {
       power: reading(battery.powerEntityId),
       energy: reading(battery.energyEntityId),
       chargePercent: value(battery.socEntityId),
-      targetW: publishedTargetW(battery.id),
+      targetW: publishedSetpointW(battery.id),
     })),
     prices: toPrices(config.prices, states, now),
     error,

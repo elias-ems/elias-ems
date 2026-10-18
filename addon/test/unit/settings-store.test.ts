@@ -3,6 +3,7 @@
  * is read per call by store.server.ts, so unlike the older suites these don't
  * need `vi.resetModules()` — setting the variable is enough.
  */
+
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +14,7 @@ import {
   removeBattery,
   updateBattery,
 } from "../../app/lib/batteries.server";
+import type { BatteryMode } from "../../app/lib/battery-command";
 import { DEFAULT_CONTROL_CONFIG } from "../../app/lib/control";
 import {
   readControlConfig,
@@ -38,6 +40,11 @@ const battery = {
   powerEntityId: "sensor.battery_power",
   socEntityId: "sensor.battery_state_of_charge",
   steered: true,
+  controlModes: ["balance", "hold", "charge", "discharge"] as BatteryMode[],
+  dischargeLimitSupported: false,
+  powerStepW: 100,
+  chargeLimitPlanning: false,
+  commandContract: 1,
   maxChargePowerW: null,
   maxDischargePowerW: null,
 };

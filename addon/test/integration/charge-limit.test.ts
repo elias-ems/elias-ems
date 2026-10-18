@@ -20,10 +20,21 @@ beforeAll(async () => {
   await writeFile(
     path.join(directory, "batteries.json"),
     JSON.stringify([
+      { ...chargeBatteryFixture, dischargeLimitSupported: true },
+    ]),
+  );
+  // An upgrade mid-plan: the version before the battery command event had
+  // capped this entity at 200 W and journalled its original 2000 W.
+  await writeFile(
+    path.join(directory, "charge-limit-leases.json"),
+    JSON.stringify([
       {
-        ...chargeBatteryFixture,
-        chargeLimitMode: "active",
-        dischargeLimitEntityId: "number.ac_output",
+        batteryId: chargeBatteryFixture.id,
+        entityId: chargeEntityFixture.entity_id,
+        originalW: 2000,
+        previousW: 2000,
+        requestedW: 200,
+        at: Date.now() - 600_000,
       },
     ]),
   );
@@ -59,7 +70,13 @@ afterAll(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
-it("plans in the background, serves Home through ingress and restores on a settings change", {
+/** Battery commands the add-on has published, as payloads. */
+const commands = () =>
+  stack.ha.events
+    .filter((event) => event.eventType.endsWith("_battery_command"))
+    .map((event) => event.data as Record<string, unknown>);
+
+it("restores an earlier version's limit, plans in the background, publishes commands and releases on a settings change", {
   timeout: 35_000,
 }, async () => {
   let status: ChargeLimitsData | undefined;
@@ -75,18 +92,33 @@ it("plans in the background, serves Home through ingress and restores on a setti
     { timeout: 30_000, interval: 100 },
   );
   expect(status?.batteries[0].plan?.points.length).toBeGreaterThan(3);
+
+  // The direct write from before the upgrade is undone, and nothing new is
+  // written to the entity.
   const state = await fetch(
     `${stack.ha.apiUrl}/states/${chargeEntityFixture.entity_id}`,
     { headers: { Authorization: `Bearer ${stack.ha.token}` } },
   ).then((r) => r.json());
-  expect(Number(state.state)).toBe(status?.batteries[0].requestedW);
+  expect(Number(state.state)).toBe(2000);
+
+  const [command] = commands();
+  expect(command).toMatchObject({
+    schema_version: 1,
+    action: "apply",
+    strategy: "charge-limit",
+    mode: "balance",
+    setpoint_w: null,
+    charge_limit_w: status?.batteries[0].requestedW,
+    discharge_limit_w: status?.batteries[0].requestedDischargeW,
+  });
+  expect(
+    stack.ha.events.find((e) => e.eventType.endsWith("_battery_command"))
+      ?.eventType,
+  ).toBe("elias_ems_home_battery_battery_command");
+
   const html = await fetch(stack.baseUrl).then((r) => r.text());
   expect(html).toContain("Recommended charge ceiling");
   expect(html).toContain("Recommended AC output ceiling");
-  const output = await fetch(`${stack.ha.apiUrl}/states/number.ac_output`, {
-    headers: { Authorization: `Bearer ${stack.ha.token}` },
-  }).then((r) => r.json());
-  expect(Number(output.state)).toBe(status?.batteries[0].requestedDischargeW);
   expect(html).toContain("View full plan");
   expect(html).not.toContain("Forecast and schedule details");
   const plans = await fetch(`${stack.baseUrl}plans`).then((r) => r.text());
@@ -107,14 +139,9 @@ it("plans in the background, serves Home through ingress and restores on a setti
     body,
   });
   expect(saved.ok).toBe(true);
-  const restored = await fetch(
-    `${stack.ha.apiUrl}/states/${chargeEntityFixture.entity_id}`,
-    { headers: { Authorization: `Bearer ${stack.ha.token}` } },
-  ).then((r) => r.json());
-  expect(Number(restored.state)).toBe(200);
-  const restoredOutput = await fetch(
-    `${stack.ha.apiUrl}/states/number.ac_output`,
-    { headers: { Authorization: `Bearer ${stack.ha.token}` } },
-  ).then((r) => r.json());
-  expect(Number(restoredOutput.state)).toBe(1700);
+  expect(commands().at(-1)).toMatchObject({
+    action: "release",
+    strategy: "charge-limit",
+    release_reason: "disabled",
+  });
 });

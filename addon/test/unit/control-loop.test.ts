@@ -23,6 +23,7 @@ import {
   it,
   vi,
 } from "vitest";
+import type { BatteryFields } from "../../app/lib/batteries";
 import {
   addBattery,
   listBatteries,
@@ -122,9 +123,14 @@ const BATTERY = {
   // Steered, since an unsteered battery sits out of every plan and these
   // cases are about scheduling.
   steered: true,
+  controlModes: ["balance", "hold", "charge", "discharge"],
+  dischargeLimitSupported: false,
+  powerStepW: 100,
+  chargeLimitPlanning: false,
+  commandContract: 1,
   maxChargePowerW: null,
   maxDischargePowerW: null,
-};
+} satisfies BatteryFields;
 
 /** Every message currently in the log, oldest first, for readable assertions. */
 function messages(): string[] {
@@ -137,13 +143,16 @@ function logged(fragment: string): boolean {
   return messages().some((message) => message.includes(fragment));
 }
 
-/** Every target published so far, as [event type, watts] pairs, in order. */
+/**
+ * Every battery command published so far, as [event type, setpoint] pairs, in
+ * order. A release has no setpoint, so it shows as null.
+ */
 function targetEvents(): Array<[string, unknown]> {
   return ha.events
-    .filter((event) => event.eventType.endsWith("_target_power"))
+    .filter((event) => event.eventType.endsWith("_battery_command"))
     .map((event) => [
       event.eventType,
-      (event.data as { power_w?: unknown }).power_w,
+      (event.data as { setpoint_w?: unknown }).setpoint_w,
     ]);
 }
 
@@ -267,9 +276,26 @@ describe("runControlTick", () => {
     // The fixture imports 842 W with the battery idle, so the decision is to
     // discharge 842 W.
     expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_target_power", -842],
+      ["elias_ems_home_battery_battery_command", -842],
     ]);
-    expect(logged("Published: Home battery → -842 W")).toBe(true);
+    expect(logged("Published: Home battery → discharge 842 W")).toBe(true);
+    expect(ha.events.at(-1)?.data).toMatchObject({
+      action: "apply",
+      strategy: "net-zero-energy",
+      mode: "discharge",
+      charge_w: 0,
+      discharge_w: 842,
+    });
+  });
+
+  it("does not command a battery whose automation cannot follow a setpoint", async () => {
+    // Net zero energy only ever asks for hold, charge or discharge. A battery
+    // that can only balance is part of the house, not something it steers.
+    await addBattery({ ...BATTERY, controlModes: ["balance"] });
+
+    await runControlTick();
+
+    expect(targetEvents()).toEqual([]);
   });
 
   it("does not publish again while the target has not moved", async () => {
@@ -309,7 +335,7 @@ describe("runControlTick", () => {
 
     expect(logged("grid power sensor is not readable")).toBe(true);
     expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_target_power", 0],
+      ["elias_ems_home_battery_battery_command", 0],
     ]);
   });
 
@@ -889,7 +915,7 @@ describe("syncControlLoop", () => {
     await pendingControlTick();
 
     expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_target_power", -842],
+      ["elias_ems_home_battery_battery_command", -842],
     ]);
 
     await saveControlConfig({
@@ -900,10 +926,14 @@ describe("syncControlLoop", () => {
     await syncControlLoop();
 
     expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_target_power", -842],
-      ["elias_ems_home_battery_target_power", 0],
+      ["elias_ems_home_battery_battery_command", -842],
+      ["elias_ems_home_battery_battery_command", null],
     ]);
-    expect(logged("Released the battery to 0 W")).toBe(true);
+    expect(ha.events.at(-1)?.data).toMatchObject({
+      action: "release",
+      release_reason: "disabled",
+    });
+    expect(logged("Released the battery.")).toBe(true);
   });
 
   it("releases unconditionally, and says it is letting go rather than stopping", async () => {
@@ -911,7 +941,7 @@ describe("syncControlLoop", () => {
     // should inherit: letting go is worth one event even when it looks
     // redundant, because what we think the battery is doing is the very thing
     // in doubt when something has gone wrong enough to be switching control
-    // off. `released` is what lets an automation tell the two zeros apart.
+    // off. A release is not a hold, and `action` is what tells an automation so.
     vi.useFakeTimers();
     ha.setState("sensor.grid_power", "4", { unit_of_measurement: "W" });
     await addBattery(BATTERY);
@@ -933,7 +963,7 @@ describe("syncControlLoop", () => {
     await syncControlLoop();
 
     expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_target_power", 0],
+      ["elias_ems_home_battery_battery_command", null],
     ]);
     expect(ha.events.at(-1)?.data).toMatchObject({ released: true });
   });

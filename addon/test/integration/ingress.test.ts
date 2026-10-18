@@ -16,11 +16,11 @@ import { startStack } from "../stack.js";
 let stack: Awaited<ReturnType<typeof startStack>>;
 let html: string;
 
-/** Every target the add-on has published, as an automation would see it. */
+/** Every battery command the add-on has published, as an automation would see it. */
 function targetEvents(): Array<Record<string, unknown>> {
   return stack.ha.events
     .filter(
-      (event) => event.eventType === "elias_ems_home_battery_target_power",
+      (event) => event.eventType === "elias_ems_home_battery_battery_command",
     )
     .map((event) => event.data as Record<string, unknown>);
 }
@@ -166,14 +166,18 @@ describe("Home Assistant data", () => {
 
 describe("battery control", () => {
   /** Posts one of the settings forms the way the browser would. */
-  async function post(fields: Record<string, string>) {
+  async function post(fields: Record<string, string | string[]>) {
     const response = await fetch(`${stack.baseUrl}settings`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Origin: stack.origin,
       },
-      body: new URLSearchParams(fields),
+      body: new URLSearchParams(
+        Object.entries(fields).flatMap(([key, value]) =>
+          (Array.isArray(value) ? value : [value]).map((v) => [key, v]),
+        ),
+      ),
       redirect: "manual",
     });
     expect(response.status).toBeLessThan(400);
@@ -209,8 +213,10 @@ describe("battery control", () => {
       powerEntityId: "sensor.battery_power",
       socEntityId: "sensor.battery_state_of_charge",
       // Control refuses to switch on without one, and the title is what the
-      // target event is named after.
+      // command event is named after.
       steered: "on",
+      // Net zero energy only steers a battery that can follow a setpoint.
+      controlModes: ["hold", "charge", "discharge"],
     });
 
     expect(await messages()).toEqual([]);
@@ -238,9 +244,13 @@ describe("battery control", () => {
       .toBeGreaterThan(0);
 
     expect(targetEvents()[0]).toMatchObject({
+      schema_version: 1,
       slug: "home_battery",
       title: "Home battery",
-      power_w: -842,
+      action: "apply",
+      strategy: "net-zero-energy",
+      mode: "discharge",
+      setpoint_w: -842,
       discharge_w: 842,
       released: false,
     });
@@ -253,12 +263,12 @@ describe("battery control", () => {
       intervalSeconds: "1",
     });
 
-    // Whatever it asked for along the way, the last thing it said before
-    // letting go has to be 0 — a stopped loop must not leave a battery being
-    // driven — and it has to say that it was letting go rather than merely
-    // commanding a stop.
+    // Whatever it asked for along the way, the last thing it said has to be
+    // a release — a stopped loop must not leave a battery being driven — and
+    // a release rather than a hold, which would still be driving it at 0 W.
     expect(targetEvents().at(-1)).toMatchObject({
-      power_w: 0,
+      action: "release",
+      mode: null,
       released: true,
     });
   });

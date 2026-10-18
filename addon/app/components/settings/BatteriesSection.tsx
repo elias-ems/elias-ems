@@ -4,8 +4,9 @@ import {
   BATTERY_DEFAULTS,
   batterySlug,
   isSteerable,
-  targetEventType,
+  supportsSetpoints,
 } from "../../lib/batteries";
+import { commandEventType, SETPOINT_MODES } from "../../lib/battery-command";
 import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
 import EntityAutocomplete from "../EntityAutocomplete";
@@ -33,7 +34,7 @@ export default function BatteriesSection({
     <Section
       id="batteries"
       title="Batteries"
-      description="Capacity and the charge window are typed in; the readings come from Home Assistant. The selected battery control strategy controls batteries with Steer this battery enabled."
+      description="Capacity and the charge window are typed in; the readings come from Home Assistant. The selected battery control strategy publishes a command event for each battery with Steer this battery enabled."
       add={{
         label: "Add battery",
         open: editor.showAdd,
@@ -67,17 +68,22 @@ export default function BatteriesSection({
             <div style={{ fontSize: "0.875rem" }}>
               {isSteerable(battery) ? (
                 <>
-                  Steered; net-zero event:{" "}
-                  <code>{targetEventType(batterySlug(battery))}</code>
+                  Steered; commands on{" "}
+                  <code>{commandEventType(batterySlug(battery))}</code>
                 </>
               ) : (
                 "Watched — steering off"
               )}
             </div>
-            {battery.chargeLimitEntityId && (
-              <div style={{ fontSize: "0.875rem" }}>
-                Automatic charge-limit preview
-              </div>
+            <div style={{ fontSize: "0.875rem" }}>
+              Modes: {battery.controlModes.join(", ")}
+              {battery.dischargeLimitSupported
+                ? "; discharge limit in balance"
+                : ""}
+              {supportsSetpoints(battery) ? "" : " — not usable by net zero"}
+            </div>
+            {battery.chargeLimitPlanning && (
+              <div style={{ fontSize: "0.875rem" }}>Charge-limit planning</div>
             )}
           </>
         )}
@@ -91,8 +97,8 @@ export default function BatteriesSection({
                 error={errors.title}
                 placeholder="e.g. Home battery"
                 noun="battery"
-                carries="target power"
-                eventType={targetEventType}
+                carries="command"
+                eventType={commandEventType}
               />
               <Field
                 name="capacityKwh"
@@ -151,26 +157,62 @@ export default function BatteriesSection({
                 defaultValue={battery?.socEntityId}
                 error={errors.socEntityId}
               />
-              <SteeredField defaultChecked={battery?.steered ?? true} />
-              <p style={hintStyle}>
-                A configured charge limit automatically produces a Home preview.
-                Enable Optimize charge limits under Battery control to apply it.
-              </p>
-              <EntityAutocomplete
-                name="chargeLimitEntityId"
-                label="Maximum charge limit (W)"
-                domain="number"
-                defaultValue={battery?.chargeLimitEntityId}
-                error={errors.chargeLimitEntityId}
-                hint="Select the entity that limits power entering the battery. Verify its behavior in Preview; entity names vary by integration."
+              <CheckboxField
+                name="steered"
+                label="Steer this battery"
+                defaultChecked={battery?.steered ?? true}
+                hint="Allows the selected battery control strategy to publish commands for this battery. An automation listening for the event above turns them into whatever this inverter needs. Leave this off to only monitor it."
               />
-              <EntityAutocomplete
-                name="dischargeLimitEntityId"
-                label="Maximum AC output power (W) — optional"
-                domain="number"
-                defaultValue={battery?.dischargeLimitEntityId}
-                error={errors.dischargeLimitEntityId}
-                hint="Select the battery discharge power limit to save energy during cheaper hours for higher-priced demand. Use a battery output limit, not a whole-inverter or grid export limit. Leave empty for native discharge. The minimum charge percentage stays unchanged."
+              <fieldset style={fieldsetStyle}>
+                <legend style={labelStyle}>
+                  Modes its automation can carry out
+                </legend>
+                <CheckboxField
+                  name="controlModes"
+                  value="balance"
+                  label="Balance: native self-consumption within limits"
+                  defaultChecked
+                  disabled
+                />
+                {SETPOINT_MODES.map((mode) => (
+                  <CheckboxField
+                    key={mode}
+                    name="controlModes"
+                    value={mode}
+                    label={MODE_LABELS[mode]}
+                    defaultChecked={
+                      battery?.controlModes.includes(mode) ?? true
+                    }
+                  />
+                ))}
+                <p style={hintStyle}>
+                  Net zero energy commands hold, charge and discharge setpoints
+                  and needs all three. Optimize charge limits commands balance.
+                </p>
+              </fieldset>
+              <CheckboxField
+                name="dischargeLimitSupported"
+                label="Can limit discharge (AC output) in balance"
+                defaultChecked={battery?.dischargeLimitSupported ?? false}
+                hint="Lets Optimize charge limits hold energy back for higher-priced hours. The automation must cap battery output, not whole-inverter or grid export. Off leaves discharge native."
+              />
+              <Field
+                name="powerStepW"
+                label="Power step (W)"
+                type="number"
+                min={1}
+                step="any"
+                defaultValue={
+                  battery?.powerStepW ?? BATTERY_DEFAULTS.powerStepW
+                }
+                error={errors.powerStepW}
+                hint="The resolution limits are planned in — the step of the setting the automation writes."
+              />
+              <CheckboxField
+                name="chargeLimitPlanning"
+                label="Plan charge limits"
+                defaultChecked={battery?.chargeLimitPlanning ?? false}
+                hint="Shows a charge-limit plan on Home, even while another strategy is selected. Enable Optimize charge limits under Battery control to publish it."
               />
               <Field
                 name="chargeEfficiencyPercent"
@@ -192,7 +234,7 @@ export default function BatteriesSection({
                 placeholder="e.g. 5000"
                 defaultValue={battery?.maxChargePowerW ?? ""}
                 error={errors.maxChargePowerW}
-                hint="Required for charge-limit planning. Otherwise, leave empty for no target-power limit."
+                hint="Required for charge-limit planning. Otherwise, leave empty to leave commands uncapped in this direction."
               />
               <Field
                 name="maxDischargePowerW"
@@ -203,7 +245,7 @@ export default function BatteriesSection({
                 placeholder="e.g. 5000"
                 defaultValue={battery?.maxDischargePowerW ?? ""}
                 error={errors.maxDischargePowerW}
-                hint="Required for charge-limit planning. Otherwise, leave empty for no target-power limit."
+                hint="Required for charge-limit planning. Otherwise, leave empty to leave commands uncapped in this direction."
               />
             </>
           );
@@ -213,17 +255,44 @@ export default function BatteriesSection({
   );
 }
 
+const MODE_LABELS = {
+  hold: "Hold: keep battery power at 0 W",
+  charge: "Charge at a given power",
+  discharge: "Discharge at a given power",
+} as const;
+
+const fieldsetStyle = {
+  border: "none",
+  margin: 0,
+  padding: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.25rem",
+} as const;
+
 /**
- * Whether this battery is steered at all — the one thing that decides if a
- * strategy may control it. A checkbox rather than the presence of
- * some other field, so that "watched, not steered" is something chosen rather
- * than something arrived at by leaving a box empty.
+ * A checkbox with its label beside it. Its own component only because a
+ * checkbox is the one control the shared `Field` does not render.
  *
- * Its own component only because a checkbox is the one control the shared
- * `Field` does not render: the label goes beside the input rather than above
- * it, and it has no value to carry.
+ * Steering is a checkbox rather than the presence of some other field, so that
+ * "watched, not steered" is something chosen rather than something arrived at
+ * by leaving a box empty.
  */
-function SteeredField({ defaultChecked }: { defaultChecked: boolean }) {
+function CheckboxField({
+  name,
+  value,
+  label,
+  hint,
+  defaultChecked,
+  disabled,
+}: {
+  name: string;
+  value?: string;
+  label: string;
+  hint?: string;
+  defaultChecked: boolean;
+  disabled?: boolean;
+}) {
   const inputId = useId();
 
   return (
@@ -232,18 +301,16 @@ function SteeredField({ defaultChecked }: { defaultChecked: boolean }) {
         <input
           id={inputId}
           type="checkbox"
-          name="steered"
+          name={name}
+          value={value}
           defaultChecked={defaultChecked}
+          disabled={disabled}
         />
         <label htmlFor={inputId} style={labelStyle}>
-          Steer this battery
+          {label}
         </label>
       </div>
-      <p style={hintStyle}>
-        Allows the selected battery control strategy to control this battery.
-        Net zero energy publishes target-power events; Optimize charge limits
-        adjusts its configured power limits. Leave this off to only monitor it.
-      </p>
+      {hint && <p style={hintStyle}>{hint}</p>}
     </div>
   );
 }
