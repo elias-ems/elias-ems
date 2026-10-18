@@ -50,7 +50,7 @@ not a simulation of controller ramps, delays or percent quantization. Fixed-step
 threshold ties can be numerically ambiguous; a result whose exact replay differs
 in energy, PV generation, battery flow or cost is rejected.
 
-The sole objective is mean nominal/reduced-solar cost: grid import charges minus
+The primary objective is mean nominal/reduced-solar cost: grid import charges minus
 export revenue plus configured battery wear. There is no evening deadline,
 SoC target, shortfall penalty, terminal reserve value, switching penalty or
 spike-buffer preference. SoC minimum/maximum bounds still protect the battery.
@@ -63,10 +63,18 @@ but the adapter does not pass them to HiGHS. Compare final SoC alongside cost:
 a cheaper schedule may simply leave less energy stored for later.
 
 Only HiGHS `Optimal` (within numerical tolerances), with validated primal constraints and physical replay, can
-produce an optimality claim for the modeled cost problem. A single solve is
-used. Feasible time-limited incumbents are labeled unproven; no feasible
+produce an optimality claim for the modeled cost problem. Once cost is proven
+optimal, a second solve maximizes time in balance mode while keeping that cost
+(with a 1e-8 currency-unit numerical tolerance over the horizon). This is a
+lexicographic tie-breaker, not a monetary incentive. It uses the remaining shared
+budget and is skipped for balance-only capabilities or when balance is unavailable.
+A limited or rejected second result never replaces the first with a costlier plan;
+the original cost-optimal plan remains available. `balancePreference` reports
+whether the tie-break itself was proven. Limits still apply in balance mode;
+this preference does not maximize those limits or guarantee unrestricted response
+to unexpected demand. Feasible time-limited incumbents are labeled unproven; no feasible
 incumbent, infeasibility, invalid input or replay mismatch yields no schedule.
-The solver time budget is shared by initialization, construction and the solve;
+The solver time budget is shared by initialization, construction and both solves;
 Node also has an outer termination deadline. Browser users can cancel the worker.
 The current input limit is 384 contiguous intervals. Initial SoC outside the configured window is explicitly unsupported rather
 than clamped, since clamping would invent energy. No forecast resampling occurs.

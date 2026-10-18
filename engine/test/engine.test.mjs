@@ -374,3 +374,54 @@ test("cost-only spends available energy without preserving an evening or termina
     );
   }
 });
+
+test("equal-cost expanded plans prefer balance throughout the horizon", async () => {
+  const input = fixture();
+  input.solarHaircut = 0;
+  input.capabilities = {
+    modes: ["balance", "hold", "charge", "discharge"],
+    gridCharging: true,
+    batteryExport: true,
+    setpointStepW: 500,
+  };
+  for (const slot of input.slots) {
+    slot.solarW = 500;
+    slot.loadW = 500;
+    slot.buy = 0.3;
+    slot.sell = 0;
+  }
+  const result = await plan(input);
+  assert.equal(result.optimal, true);
+  assert.equal(
+    result.balancePreference,
+    "Maximum balance time at optimal cost",
+  );
+  assert.equal(result.statuses.length, 2);
+  assert.ok(result.commands.every((c) => c.mode === "balance"));
+  for (const scenario of result.scenarios) {
+    assert.equal(scenario.cost, 0);
+    assert.equal(scenario.finalSoc, input.model.soc);
+  }
+});
+
+test("balance preference cannot sacrifice profitable direct charging", async () => {
+  const input = fixture();
+  input.slots = [input.slots[0]];
+  input.slots[0].loadW = 0;
+  input.model.soc = 0;
+  input.capabilities = {
+    modes: ["balance", "hold", "charge", "discharge"],
+    gridCharging: true,
+    batteryExport: true,
+    setpointStepW: 500,
+  };
+  const result = await plan(input);
+  assert.equal(result.optimal, true);
+  assert.equal(
+    result.balancePreference,
+    "Maximum balance time at optimal cost",
+  );
+  assert.equal(result.commands[0].mode, "charge");
+  assert.equal(result.commands[0].setpointW, 2000);
+  assert.ok(Math.abs(result.scenarios[0].cost - (-0.4 + 0.02)) < 1e-8);
+});

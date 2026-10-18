@@ -121,7 +121,11 @@ try {
   for (const field of ["deadline", "objective", "terminalReserveKwh"]) {
     assert.equal(field in exported.comparison.input, false);
   }
-  assert.equal(exported.comparison.engine.statuses.length, 1);
+  assert.equal(exported.comparison.engine.statuses.length, 2);
+  assert.equal(
+    exported.comparison.engine.balancePreference,
+    "Maximum balance time at optimal cost",
+  );
   assert.equal(
     "shortfallKwh" in exported.comparison.engine.scenarios[0],
     false,

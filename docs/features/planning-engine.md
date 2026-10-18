@@ -18,7 +18,10 @@ Existing snapshot exports remain version 1; downloaded comparison results add
 the engine inputs and assumptions alongside the original Evening target result.
 
 HiGHS optimizes only mean scenario cost: import charges minus export revenue
-plus configured wear. Losses are modeled physically. It has no evening target,
+plus configured wear. After proving optimal cost, it uses any remaining solver
+budget to prefer more time in balance at equal cost (within numerical tolerance),
+and reports that preference separately from cost optimality. Selected power
+boundaries still apply. Losses are modeled physically. It has no evening target,
 shortfall penalty or terminal reserve value. Evening target retains its deadline,
 reserve, switching and spike-buffer preferences. A cheaper schedule ending emptier is not
 a like-for-like saving. Solar use is priced through lost export revenue and

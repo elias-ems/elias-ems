@@ -231,9 +231,9 @@ function download() {
     </template>
     <template v-if="comparison">
       <h2>Evening target / HiGHS comparison</h2>
-      <p>HiGHS: {{ comparison.engine?.status ?? comparison.engineError }}</p>
-      <p>Runtime: Evening target {{ comparison.legacyRuntimeMs.toFixed(0) }} ms; HiGHS {{ comparison.engine?.runtimeMs.toFixed(0) ?? '—' }} ms (including solver initialization). Solver status: {{ comparison.engine?.statuses.join(' / ') }}.</p>
-      <p>HiGHS minimizes mean nominal/reduced-solar cost: import charges minus export revenue plus battery wear. It has no evening target or terminal-reserve penalty. Evening target retains its deadline, reserve, switching and spike-buffer preferences. Lower final SoC can explain lower cost. Neither forecast guarantees live savings.</p>
+      <p>HiGHS: {{ comparison.engine?.status ?? comparison.engineError }}. {{ comparison.engine?.balancePreference }}</p>
+      <p>Runtime: Evening target {{ comparison.legacyRuntimeMs.toFixed(0) }} ms; HiGHS {{ comparison.engine?.runtimeMs.toFixed(0) ?? '—' }} ms (including solver initialization). Solver statuses (cost, then balance preference when attempted): {{ comparison.engine?.statuses.join(' / ') }}.</p>
+      <p>HiGHS minimizes mean nominal/reduced-solar cost: import charges minus export revenue plus battery wear. At equal cost, it prefers more time in balance mode, within the selected power boundaries. It has no evening target or terminal-reserve penalty. Evening target retains its deadline, reserve, switching and spike-buffer preferences. Lower final SoC can explain lower cost. Neither forecast guarantees live savings.</p>
       <div class="planner-table" tabindex="0">
         <table><thead><tr><th>Scenario / algorithm</th><th>Cost incl. wear</th><th>Final SoC</th><th>PV generated / curtailed kWh</th></tr></thead>
           <tbody><template v-for="(old, i) in comparison.legacyScenarios" :key="i">

@@ -61,7 +61,8 @@ browser-based replay of exported planning inputs.
 - **Optimize cost only.** Minimize mean import charges minus export revenue plus
   configured battery wear over nominal and reduced-solar forecasts. The new
   engine has no evening deadline, SoC target, shortfall penalty or terminal
-  reserve value. Keep physical SoC bounds. The existing Evening target planner
+  reserve value. At equal cost, prefer more time in balance mode without
+  relaxing the selected boundaries. Keep physical SoC bounds. The existing Evening target planner
   retains its own deadline and reserve preferences for comparison; do not pass
   those settings to the new engine or change the legacy snapshot format.
 - **Respect the physical system and supported controls.** Account for SoC

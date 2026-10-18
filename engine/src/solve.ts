@@ -120,59 +120,66 @@ export async function solve(input: Input, wasmUrl?: string) {
       runtimeMs: performance.now() - started,
       commands: undefined,
     };
-  const value = (x: Expr) => a.value(x, answer.values);
-  const commands: Command[] = controls.map((u, i) => {
-    const mode = (["balance", "hold", "charge", "discharge"] as Mode[]).find(
-      (mode) => value(u[mode]) > 0.5,
+  const replay = (values: Record<string, number>) => {
+    const value = (x: Expr) => a.value(x, values);
+    const commands: Command[] = controls.map((u, i) => {
+      const mode = (["balance", "hold", "charge", "discharge"] as Mode[]).find(
+        (mode) => value(u[mode]) > 0.5,
+      );
+      if (!mode) throw new Error("Solver did not select a mode");
+      const quantize = (v: number, min: number, step: number) =>
+        min + Math.round((v - min) / step) * step;
+      const boundaries = {
+        start: input.slots[i].start,
+        end: input.slots[i].end,
+        chargeLimitW: quantize(value(u.chargeLimit) * 1000, m.minW, m.stepW),
+        dischargeLimitW:
+          m.dischargeStepW === undefined
+            ? m.dischargeW
+            : quantize(
+                value(u.dischargeLimit) * 1000,
+                m.dischargeMinW ?? 0,
+                m.dischargeStepW,
+              ),
+      };
+      if (mode === "balance") return { ...boundaries, mode };
+      if (mode === "hold") return { ...boundaries, mode, setpointW: 0 };
+      const increment = input.capabilities.setpointStepW ?? 1;
+      const request = mode === "charge" ? u.chargeRequest : u.dischargeRequest;
+      return {
+        ...boundaries,
+        mode,
+        setpointW:
+          Math.round((value(request) * 1000) / increment) *
+          increment *
+          (mode === "charge" ? 1 : -1),
+      };
+    });
+    const scenarios = [0, input.solarHaircut].map((h) =>
+      evaluate(input, commands, h),
     );
-    if (!mode) throw new Error("Solver did not select a mode");
-    const quantize = (v: number, min: number, step: number) =>
-      min + Math.round((v - min) / step) * step;
-    const boundaries = {
-      start: input.slots[i].start,
-      end: input.slots[i].end,
-      chargeLimitW: quantize(value(u.chargeLimit) * 1000, m.minW, m.stepW),
-      dischargeLimitW:
-        m.dischargeStepW === undefined
-          ? m.dischargeW
-          : quantize(
-              value(u.dischargeLimit) * 1000,
-              m.dischargeMinW ?? 0,
-              m.dischargeStepW,
-            ),
-    };
-    if (mode === "balance") return { ...boundaries, mode };
-    if (mode === "hold") return { ...boundaries, mode, setpointW: 0 };
-    const increment = input.capabilities.setpointStepW ?? 1;
-    const request = mode === "charge" ? u.chargeRequest : u.dischargeRequest;
-    return {
-      ...boundaries,
-      mode,
-      setpointW:
-        Math.round((value(request) * 1000) / increment) *
-        increment *
-        (mode === "charge" ? 1 : -1),
-    };
-  });
-  const scenarios = [0, input.solarHaircut].map((h) =>
-    evaluate(input, commands, h),
-  );
-  if (
-    scenarios.some((s, j) =>
-      s.points.some(
-        (p, i) =>
-          Math.abs((p.soc * m.capacityKwh) / 100 - value(energies[j][i])) >
-            2e-5 ||
-          Math.abs(p.cost - value(predictions[j][i].cost)) > 2e-5 ||
-          Math.abs(
-            p.generatedSolarW / 1000 - value(predictions[j][i].generated),
-          ) > 2e-5 ||
-          Math.abs(p.chargeW / 1000 - value(predictions[j][i].charge)) > 2e-5 ||
-          Math.abs(p.dischargeW / 1000 - value(predictions[j][i].discharge)) >
-            2e-5,
-      ),
+    if (
+      scenarios.some((s, j) =>
+        s.points.some(
+          (p, i) =>
+            Math.abs((p.soc * m.capacityKwh) / 100 - value(energies[j][i])) >
+              2e-5 ||
+            Math.abs(p.cost - value(predictions[j][i].cost)) > 2e-5 ||
+            Math.abs(
+              p.generatedSolarW / 1000 - value(predictions[j][i].generated),
+            ) > 2e-5 ||
+            Math.abs(p.chargeW / 1000 - value(predictions[j][i].charge)) >
+              2e-5 ||
+            Math.abs(p.dischargeW / 1000 - value(predictions[j][i].discharge)) >
+              2e-5,
+        ),
+      )
     )
-  )
+      return undefined;
+    return { commands, scenarios };
+  };
+  let selected = replay(answer.values);
+  if (!selected)
     return {
       status:
         "Rejected: solver schedule disagrees with physical replay (including PV threshold ties)",
@@ -181,6 +188,44 @@ export async function solve(input: Input, wasmUrl?: string) {
       runtimeMs: performance.now() - started,
       commands: undefined,
     };
+  let balancePreference = "Not attempted: cost optimum not proven";
+  if (!input.capabilities.modes.includes("balance")) {
+    balancePreference = "Not applicable: balance unavailable";
+  } else if (input.capabilities.modes.length === 1) {
+    balancePreference = "Already balance-only";
+  } else if (answer.optimal) {
+    // Lexicographic preference, never a monetary reward for choosing a mode.
+    // Keep the primary result if the second solve has no usable improvement.
+    const tolerance = 1e-8; // Currency units across the complete horizon.
+    const bestCost = a.value(objective, answer.values);
+    const balanceTime = a.add(
+      ...controls.map((u, i) =>
+        a.scale(
+          u.balance,
+          (input.slots[i].end - input.slots[i].start) / 3600000,
+        ),
+      ),
+    );
+    a.constrain(objective, "<=", bestCost + tolerance);
+    const preferred = run(a.scale(balanceTime, -1));
+    balancePreference = "Not proven: retained cost-optimal plan";
+    if (
+      preferred?.feasible &&
+      a.value(objective, preferred.values) <= bestCost + tolerance &&
+      a.value(balanceTime, preferred.values) >=
+        a.value(balanceTime, answer.values) - 1e-8
+    ) {
+      const candidate = replay(preferred.values);
+      const meanCost = (plan: NonNullable<typeof candidate>) =>
+        plan.scenarios.reduce((sum, scenario) => sum + scenario.cost, 0) / 2;
+      if (candidate && meanCost(candidate) <= meanCost(selected) + tolerance) {
+        selected = candidate;
+        balancePreference = preferred.optimal
+          ? "Maximum balance time at optimal cost"
+          : "Feasible balance preference; maximum not proven";
+      }
+    }
+  }
   const optimal = answer.optimal;
   return {
     status: optimal
@@ -189,7 +234,7 @@ export async function solve(input: Input, wasmUrl?: string) {
     optimal,
     statuses,
     runtimeMs: performance.now() - started,
-    commands,
-    scenarios,
+    balancePreference,
+    ...selected,
   };
 }
