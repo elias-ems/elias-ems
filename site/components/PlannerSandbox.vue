@@ -3,6 +3,9 @@ import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import type { compare } from "../lib/comparison";
 import type { PlannerDataset, runPlanner } from "../lib/planner";
 import { parseDataset } from "../lib/planner";
+import type { PlannerPreset } from "../lib/presets";
+// biome-ignore lint/correctness/noUnusedImports: Used by the Vue template.
+import { presets } from "../lib/presets";
 
 const dataset = shallowRef<PlannerDataset>();
 const plan = shallowRef<Awaited<ReturnType<typeof runPlanner>>>();
@@ -15,6 +18,8 @@ const options = ref({
 const error = ref("");
 const busy = ref(false);
 const filename = ref("");
+const presetKey = ref("");
+const fileInput = ref<HTMLInputElement>();
 const settings = ref({
   deadline: "",
   targetSoc: 100,
@@ -42,6 +47,18 @@ function invalidate() {
   comparison.value = undefined;
   error.value = "";
 }
+function load(parsed: PlannerDataset, name: string) {
+  dataset.value = parsed;
+  settings.value = {
+    targetSoc: parsed.model.maxSoc,
+    solarHaircut: parsed.settings.solarHaircut,
+    switchCost: parsed.settings.switchCost,
+    passes: parsed.settings.passes,
+    deadline: new Date(parsed.settings.deadline).toISOString(),
+    spikeBufferKwh: parsed.settings.spikeBufferKwh ?? 0.54,
+  };
+  filename.value = name;
+}
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 async function importFile(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
@@ -50,24 +67,33 @@ async function importFile(event: Event) {
   invalidate();
   dataset.value = undefined;
   filename.value = "";
+  presetKey.value = "";
   try {
     if (file.size > 10 * 1024 * 1024)
       throw new Error("Please choose a JSON export smaller than 10 MB.");
     const parsed = parseDataset(JSON.parse(await file.text()));
     if (sequence !== importSequence) return;
-    dataset.value = parsed;
-    settings.value = {
-      targetSoc: parsed.model.maxSoc,
-      solarHaircut: parsed.settings.solarHaircut,
-      switchCost: parsed.settings.switchCost,
-      passes: parsed.settings.passes,
-      deadline: new Date(parsed.settings.deadline).toISOString(),
-      spikeBufferKwh: parsed.settings.spikeBufferKwh ?? 0.54,
-    };
-    filename.value = file.name;
+    load(parsed, file.name);
   } catch (e) {
     if (sequence === importSequence)
       error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function loadPreset(preset: PlannerPreset) {
+  // Supersede a file import still being read, exactly as a new import would.
+  importSequence++;
+  invalidate();
+  if (fileInput.value) fileInput.value.value = "";
+  try {
+    // Clone so edits in the form never reach the shared preset object.
+    load(parseDataset(structuredClone(preset.dataset)), preset.name);
+    presetKey.value = preset.key;
+  } catch (e) {
+    dataset.value = undefined;
+    filename.value = "";
+    presetKey.value = "";
+    error.value = e instanceof Error ? e.message : String(e);
   }
 }
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
@@ -192,7 +218,14 @@ function download() {
 
 <template>
   <section class="planner" aria-label="Planner sandbox">
-    <label>Import planner export <input type="file" accept=".json,application/json" @change="importFile" /></label>
+    <label>Import planner export <input ref="fileInput" type="file" accept=".json,application/json" @change="importFile" /></label>
+    <fieldset class="planner-presets">
+      <legend>Or load a synthetic preset</legend>
+      <div class="planner-preset" v-for="preset in presets" :key="preset.key">
+        <button type="button" :aria-pressed="presetKey === preset.key" :aria-describedby="`preset-${preset.key}`" @click="loadPreset(preset)">{{ preset.name }}</button>
+        <p :id="`preset-${preset.key}`">{{ preset.description }}</p>
+      </div>
+    </fieldset>
     <p v-if="error" role="alert">{{ error }}</p>
     <template v-if="dataset">
       <h2>{{ dataset.id }}</h2>
@@ -324,6 +357,11 @@ function download() {
 .planner button { cursor: pointer; margin: 1rem 0.5rem 0 0; }
 .planner button:disabled { opacity: 0.6; cursor: wait; }
 .planner-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; margin-top: 1rem; }
+.planner-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; margin: 1rem 0 0; border: 1px solid var(--vp-c-divider); border-radius: 6px; padding: 0.75rem 1rem 1rem; min-width: 0; }
+.planner-presets legend { padding: 0 0.25rem; }
+.planner-preset p { margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--vp-c-text-2); }
+.planner .planner-preset button { margin: 0; width: 100%; font-weight: 600; text-align: left; }
+.planner .planner-preset button[aria-pressed="true"] { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
 .planner pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .planner-table { overflow-x: auto; }
 .planner-table table { display: table; width: 100%; font-size: 0.85rem; white-space: nowrap; }

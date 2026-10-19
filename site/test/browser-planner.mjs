@@ -1,4 +1,4 @@
-// Run after docs:build with docs:preview listening on port 4173.
+// Run after docs:build with docs:preview listening on port 4173 (or PLANNER_PORT).
 
 import assert from "node:assert/strict";
 import {
@@ -26,7 +26,9 @@ try {
   page.on("response", (r) => {
     if (r.url().includes(".wasm")) responses.push(r.status());
   });
-  await page.goto("http://127.0.0.1:4173/elias-ems/planner");
+  await page.goto(
+    `http://127.0.0.1:${process.env.PLANNER_PORT ?? 4173}/elias-ems/planner`,
+  );
   const start = Date.parse("2026-10-18T12:00:00Z");
   const data = {
     schemaVersion: 1,
@@ -146,6 +148,28 @@ try {
   assert.deepEqual(errors, []);
   assert.ok(responses.length >= 1);
   assert.ok(responses.every((s) => s === 200));
+  // A preset loads like an import: its name replaces the filename, and the
+  // equivalent comparison (the fast, provable one) completes.
+  await page.getByRole("button", { name: "Marginal autumn surplus" }).click();
+  await page.getByText("Marginal autumn surplus · 96 intervals").waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Marginal autumn surplus" })
+      .getAttribute("aria-pressed"),
+    "true",
+  );
+  await page
+    .getByLabel("Comparison capabilities", { exact: true })
+    .selectOption({ label: "Equivalent: balance + existing boundaries" });
+  await page.getByRole("button", { name: "Compare planners" }).click();
+  await page
+    .getByText("Optimal for modeled objective", { exact: false })
+    .waitFor({ timeout: 30000 })
+    .catch(async (error) => {
+      console.error(await page.locator("body").innerText());
+      throw error;
+    });
+  assert.deepEqual(errors, []);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(
     await page.evaluate(
@@ -153,7 +177,7 @@ try {
     ),
   );
   console.log(
-    `Production ${browserName}: both capability comparisons, WASM 200, direct charge, downloads, mobile width, no page errors`,
+    `Production ${browserName}: both capability comparisons, preset, WASM 200, direct charge, downloads, mobile width, no page errors`,
   );
 } finally {
   await browser.close();
