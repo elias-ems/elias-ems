@@ -6,13 +6,13 @@ This file provides guidance to coding agents working in this repository.
 
 See [docs/project.md](docs/project.md) for what we're building and architecture decisions, [docs/architecture.md](docs/architecture.md) for repo/code structure, [docs/roadmap.md](docs/roadmap.md) for current and future goals, and [docs/routines.md](docs/routines.md) for scheduled Claude routines. Keep these up to date as the project evolves.
 
-Per-feature docs live in [docs/features/](docs/features), one file per feature: [battery-control.md](docs/features/battery-control.md), [charge-limit.md](docs/features/charge-limit.md), [planning-engine.md](docs/features/planning-engine.md), [live-readings.md](docs/features/live-readings.md), [diagnostics.md](docs/features/diagnostics.md), [dynamic-prices.md](docs/features/dynamic-prices.md), [pv-curtailment.md](docs/features/pv-curtailment.md).
+Per-feature docs live in [docs/features/](docs/features), one file per feature: [battery-control.md](docs/features/battery-control.md), [strategies.md](docs/features/strategies.md), [charge-limit.md](docs/features/charge-limit.md), [planning-engine.md](docs/features/planning-engine.md), [live-readings.md](docs/features/live-readings.md), [diagnostics.md](docs/features/diagnostics.md), [dynamic-prices.md](docs/features/dynamic-prices.md), [pv-curtailment.md](docs/features/pv-curtailment.md).
 
 ## Commands
 
 Run from `addon/`:
 
-- `npm install` — install dependencies
+- `npm install` — install dependencies (and `npm ci` once in `../engine`, which the HiGHS strategy and the typecheck need)
 - `npm run dev` — start the React Router dev server (`react-router dev`)
 - `npm run build` — production build (`react-router build`)
 - `npm run typecheck` — regenerate route types and run `tsc` (`react-router typegen && tsc`)
@@ -73,7 +73,7 @@ The app is **React Router 8 in framework mode** (the successor to Remix — Remi
 - Route modules get generated per-route types in `.react-router/types` (gitignored). Import them as `import type { Route } from "./+types/<route-file-name>"` and prefer `Route.ComponentProps` over `useLoaderData`/`useActionData`. Run `npm run typecheck` after adding or renaming a route so the types exist.
 - `json()` and `defer()` were removed in v7 — return plain objects from loaders/actions, and use `data(value, { status })` when you need to set a status code.
 - `server.js` stays plain JavaScript on purpose: it is the Node entry point, it imports the generated `build/server/index.js`, and typechecking it would mean either compiling it separately or depending on Node's experimental type stripping. Everything under `addon/app/` is TypeScript.
-- [addon/app/entry.server.tsx](addon/app/entry.server.tsx) is the **stock** entry from `react-router reveal`, owned for exactly one reason: it is the only module the framework loads once when the server process starts, which is where the battery control loop is started. Keep local changes there to that one call — everything else in the file should stay diffable against the template. `app/entry.client.tsx` is deliberately *not* revealed; an unmodified copy would only be one more file to keep in step with the framework. `server.js` cannot do this job instead: it is plain JavaScript and can only import the bundled `build/server/index.js`, which exports no route or lib module.
+- [addon/app/entry.server.tsx](addon/app/entry.server.tsx) is the **stock** entry from `react-router reveal`, owned for exactly one reason: it is the only module the framework loads once when the server process starts, which is where the curtailment loop and the battery planning loop are started. Keep local changes there to those calls — everything else in the file should stay diffable against the template. `app/entry.client.tsx` is deliberately *not* revealed; an unmodified copy would only be one more file to keep in step with the framework. `server.js` cannot do this job instead: it is plain JavaScript and can only import the bundled `build/server/index.js`, which exports no route or lib module.
 
 ## Linting and formatting
 
@@ -95,7 +95,7 @@ There are two jobs, one per project, because the invocation differs: the `addon/
 Hooks install themselves on `npm install` in `addon/`, but the mechanism is worth being precise about: it is the **`lefthook` package's own `postinstall`** running `lefthook install -f`. [addon/package.json](addon/package.json) declares no `postinstall` of its own, so grepping for one and finding nothing does not mean a fresh clone goes unhooked — it doesn't. Two consequences:
 
 - The postinstall skips itself when `CI` is set and `LEFTHOOK` is not, so CI checkouts correctly get no hooks.
-- It still runs during the Docker build's first stage, which installs devDependencies. `.dockerignore` excludes `.git`, so `lefthook install` exits 128 with `fatal: not a git repository`. That is noise, not a failure — `postinstall.js` uses `spawnSync` and never checks the exit code — and the runtime stage installs with `--omit=dev`, so lefthook is absent there entirely.
+- It still runs during the Docker build's first stage, which installs devDependencies. `addon/Dockerfile.dockerignore` admits only `addon/` and `engine/`, so there is no `.git`, so `lefthook install` exits 128 with `fatal: not a git repository`. That is noise, not a failure — `postinstall.js` uses `spawnSync` and never checks the exit code — and the runtime stage installs with `--omit=dev`, so lefthook is absent there entirely.
 
 That postinstall only gets to run because the project **approved it**. npm 11 (what `node:24`/mise's Node 24 ships) refuses to run a dependency's install scripts unless they are listed in the `allowScripts` block of [addon/package.json](addon/package.json), and the entry it writes is pinned to an exact version:
 
@@ -152,7 +152,8 @@ Nothing enforces these on merge by itself — the job names have to be added as 
 - **A GitHub release, not a merge, is the release.** Publishing one (`gh release create v1.0.0-alpha.39 --title 1.0.0-alpha.39 --generate-notes --prerelease`) builds `amd64` and `aarch64`, pushes both, publishes the multi-arch manifest, and only then commits the new `version` into `addon/config.yaml` on `main` and pushes — see [Versioning](#versioning) for why that order can't be reversed. Release tags always use the `v<version>` form; release titles use the unprefixed version, and the workflow rejects an unprefixed tag before building. `main` has a ruleset blocking deletion and force-push but no PR requirement, which is what lets that last step push directly.
 - **The builder actions are `home-assistant/builder`'s, pinned to `2026.06.0`.** That repo's own `home-assistant/builder@master` action is deprecated and due for removal; the composite actions (`prepare-multi-arch-matrix`, `build-image`, `publish-multi-arch-manifest`) are the current path. Bumping the pin is a manual, deliberate edit — there is no Renovate/Dependabot config for GitHub Actions in this repo.
 - **Both architectures build natively, no QEMU.** `prepare-multi-arch-matrix` maps `amd64 → ubuntu-24.04` and `aarch64 → ubuntu-24.04-arm`; ARM runners are free on public repositories, which this one is.
-- **On a pull request nothing is pushed**, and only Dockerfile-shaped changes (`addon/Dockerfile`, `addon/.dockerignore`, the workflow itself) trigger a build at all — `addon-integration` in ci.yml already runs `npm run build` on every PR, so the image build only needs to prove the Dockerfile and build context, not the app.
+- **The build context is the repository root, not `addon/`.** The add-on loads the HiGHS planning engine at runtime from `../engine`, so the image carries `/app/engine` beside `/app/addon` and the workflow passes `context: "."` with `file: addon/Dockerfile`. The ignore file is therefore `addon/Dockerfile.dockerignore` — BuildKit's per-Dockerfile ignore — which admits `addon/` and `engine/` and nothing else; a `.dockerignore` inside `addon/` would no longer be read. Build locally with `docker build -f addon/Dockerfile .` from the root.
+- **On a pull request nothing is pushed**, and only Dockerfile-shaped changes (`addon/Dockerfile`, `addon/Dockerfile.dockerignore`, the engine's `package.json`/lockfile, the workflow itself) trigger a build at all — `addon-integration` in ci.yml already runs `npm run build` on every PR, so the image build only needs to prove the Dockerfile and build context, not the app.
 - **The GHCR packages must stay public.** They default to private on first push, which anonymous Supervisor pulls cannot read; this is a one-time manual step in the repo's Packages settings, not something the workflow can set.
 - **`workflow_dispatch` re-publishes a specific version**, for when a release's build failed partway — it takes the same path (build, push, manifest, bump) and needs `force: true` to overwrite a tag that already exists. Overwriting one otherwise fails the `init` job on purpose: a version string a user already has installed can never be re-offered to them, so publishing over it silently would leave that install stuck.
 
@@ -289,11 +290,28 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope
 - Description is imperative mood, lowercase, no trailing period.
 - Keep the subject line under ~72 characters; add a body for context when needed.
 
-## Experimental planning engine
+## Battery control strategies and the planning engine
+
+Battery control strategies live in one registry,
+[addon/app/lib/strategies/](addon/app/lib/strategies/index.ts), which Settings,
+the planning loop, the Planner sandbox (`site/lib/comparison.ts`) and the gym
+(`gym/strategies.mjs`) all read — adding one is a module and a registry line;
+see [docs/features/strategies.md](docs/features/strategies.md). Keep strategy
+modules pure and import with `.ts` extensions: Node runs them directly in the
+gym and site tests. The HiGHS solver is injected through the strategy context,
+never imported by a strategy. Production runs every strategy with balance-only
+capabilities (`PRODUCTION_CAPABILITIES` in `charge-planner.server.ts`); direct
+modes stay in the sandbox until the user approves them.
 
 `engine/` is a separate npm project using HiGHS/WASM. It calculates plans only;
-production device control remains unchanged. Read `engine/AGENTS.md` and
-`engine/README.md` for the model, worker entry points and future event contract.
+the add-on runs it for the HiGHS strategy through
+`addon/app/lib/highs-runner.server.ts`, which imports `engine/node.mjs` **at
+runtime** from `../engine` (or `ENGINE_DIR`) so Vite never bundles it — bundling
+would lose the worker file and the WASM beside it. So **`npm ci` in `engine/`
+is now a prerequisite for the add-on too**: its typecheck follows the imports
+into `engine/src`, and its tests and integration suite solve for real. Read
+`engine/AGENTS.md` and `engine/README.md` for the model, worker entry points
+and event contract.
 Run `npm ci` in `engine/` before building or typechecking the documentation site.
 Engine lint/typecheck borrow `addon/node_modules`; tests use Node's built-in
 runner and real WASM in worker threads. CI defines native amd64 and aarch64 jobs.

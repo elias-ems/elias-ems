@@ -29,8 +29,9 @@ configured entirely from its own pages — no YAML.
 
 ## What works today
 
-- **Battery control** with a net-zero-energy strategy and a charge-limit
-  planner. It reads, decides, publishes each battery's command as its own
+- **Battery control** with two planning strategies, Evening target and the
+  HiGHS cost optimizer, compared side by side in the [Planner
+  sandbox](/planner). It plans, publishes each battery's command as its own
   event — `elias_ems_home_battery_battery_command` for a battery called "Home
   battery" — and logs both halves. See [Battery control](/guide/battery-control).
 - **Live readings** on the home page for your PV arrays, the grid and each
@@ -57,10 +58,10 @@ configured entirely from its own pages — no YAML.
   listening for a battery's old name, and an inverter quietly ignoring the value
   all look identical from the add-on's side. This is the single most likely reason a correct-looking
   setup appears to do nothing.
-- **Charge your battery on price.** PV curtailment reads prices, but battery
-  control does not — it still runs net-zero-energy and knows nothing about what
-  electricity costs. Buying cheap to use later, and being paid to charge at a
-  negative price, are the next steps.
+- **Charge your battery from the grid on price.** Both strategies plan with
+  prices but stay within self-consumption. Buying cheap from the grid to use
+  later, and being paid to charge at a negative price, need the direct modes the
+  HiGHS engine already plans in the sandbox.
 - **Fetch prices itself.** It reads what a price integration publishes, so it
   needs one installed. There is no built-in client yet, and Home Assistant's
   *core* Nord Pool integration is not usable — see
