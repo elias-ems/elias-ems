@@ -4,6 +4,7 @@ import { simulateCharge } from "../../addon/app/lib/charge-plan.ts";
 import { plan } from "../node.mjs";
 import { evaluate } from "../src/physics.ts";
 import { preferBalance, widenBoundaries } from "../src/relabel.ts";
+import { validate } from "../src/validate.ts";
 
 function fixture() {
   return {
@@ -70,6 +71,86 @@ test("balance optimum conserves energy and reproduces native simulator", async (
     );
   }
   assert.equal(result.scenarios[0].points[0].chargeW, 0);
+});
+test("below-minimum live SoC stays unchanged without solar or grid charging", async () => {
+  const input = fixture();
+  input.model.minSoc = 5;
+  input.model.soc = 4.8;
+  for (const slot of input.slots) slot.solarW = 0;
+  const result = await plan(input);
+  assert.ok(result.commands, JSON.stringify(result));
+  for (const scenario of result.scenarios)
+    for (const point of scenario.points) {
+      assert.ok(Math.abs(point.soc - 4.8) < 1e-7);
+      assert.equal(point.chargeW, 0);
+      assert.equal(point.dischargeW, 0);
+      assert.equal(point.importW, 500);
+    }
+});
+test("below-minimum SoC recovers naturally and retains its discharge floor in each solar scenario", async () => {
+  const input = fixture();
+  input.model.minSoc = 5;
+  input.model.soc = 4.8;
+  // Native output makes discharge mandatory whenever stored energy allows it.
+  delete input.model.dischargeStepW;
+  input.slots[1].solarW = 600;
+  const result = await plan(input);
+  assert.ok(result.commands, JSON.stringify(result));
+  for (const [scenarioIndex, scenario] of result.scenarios.entries()) {
+    const haircut = scenarioIndex === 0 ? 0 : input.solarHaircut;
+    let energy = (input.model.capacityKwh * input.model.soc) / 100;
+    for (const [i, point] of scenario.points.entries()) {
+      const native = simulateCharge(
+        { ...input.slots[i], solarW: input.slots[i].solarW * (1 - haircut) },
+        energy,
+        point.chargeLimitW,
+        input.model,
+        false,
+        point.dischargeLimitW,
+      );
+      energy = native.energy;
+      assert.ok(
+        Math.abs((point.soc * input.model.capacityKwh) / 100 - energy) < 1e-7,
+      );
+      assert.ok(Math.abs(point.dischargeW - native.dischargeW) < 1e-7);
+    }
+    assert.ok(Math.abs(scenario.points[0].soc - 4.8) < 1e-7);
+  }
+  const nominal = result.scenarios[0].points;
+  assert.ok(nominal[1].soc > 5);
+  assert.ok(nominal[2].dischargeW > 0);
+  assert.ok(Math.abs(nominal[2].soc - 5) < 1e-7);
+  for (const point of result.scenarios[1].points) {
+    assert.ok(Math.abs(point.soc - 4.8) < 1e-7);
+    assert.equal(point.dischargeW, 0);
+  }
+});
+test("above-maximum live SoC is preserved until discharge makes charging room", async () => {
+  const input = fixture();
+  input.model.maxSoc = 90;
+  input.model.soc = 95;
+  input.slots[0].solarW = 3000;
+  input.slots[1].solarW = 0;
+  input.slots[2].solarW = 3000;
+  // Make charging worthwhile even at the end of the forecast.
+  input.slots[2].sell = -0.1;
+  delete input.model.dischargeStepW;
+  const result = await plan(input);
+  assert.ok(result.commands, JSON.stringify(result));
+  for (const scenario of result.scenarios) {
+    assert.ok(Math.abs(scenario.points[0].soc - 95) < 1e-7);
+    assert.equal(scenario.points[0].chargeW, 0);
+    assert.ok(scenario.points[1].soc < 90);
+    assert.ok(scenario.points[2].chargeW > 0);
+    assert.ok(scenario.points[2].soc <= 90 + 1e-7);
+  }
+});
+test("live SoC must still be finite and physically possible", () => {
+  for (const soc of [-0.1, 100.1, NaN, Infinity]) {
+    const input = fixture();
+    input.model.soc = soc;
+    assert.throws(() => validate(input), /Unsupported battery model/);
+  }
 });
 test("expanded explicit permissions exploit negative import price without simultaneous flows", async () => {
   const input = fixture();

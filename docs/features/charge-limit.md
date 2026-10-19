@@ -13,6 +13,10 @@ battery** is checked, and planning still requires one configured household
 battery.
 Elias does not request grid charging or change the operating mode or native SoC
 limits. The minimum charge setting (for example 5%) remains the protective floor.
+An actual SoC below that minimum (for example 4.8%) does not block planning or
+get rounded up: no discharge is modeled until charging restores energy above
+the floor. Similarly, a reading above the maximum prevents further charging
+until there is room again.
 
 **Elias no longer writes the limits itself.** An automation listening for the
 battery's command event applies `charge_limit_w` and `discharge_limit_w` to the

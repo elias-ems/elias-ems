@@ -62,11 +62,17 @@ export async function solve(input: Input, wasmUrl?: string) {
   });
   const floor = (m.capacityKwh * m.minSoc) / 100;
   const ceiling = (m.capacityKwh * m.maxSoc) / 100;
+  const initialEnergy = (m.capacityKwh * m.soc) / 100;
+  // Live SoC can drift outside the configured operating window. Preserve its
+  // actual energy while native protection in step() prevents further discharge
+  // below the floor or charging above the ceiling, including after recovery.
+  const low = Math.min(floor, initialEnergy);
+  const high = Math.max(ceiling, initialEnergy);
   const energies: Expr[][] = [],
     costs: Expr[] = [];
   const predictions: ReturnType<typeof step<Expr>>[][] = [];
   for (const haircut of [0, input.solarHaircut]) {
-    let energy = c((m.capacityKwh * m.soc) / 100),
+    let energy = c(initialEnergy),
       stepped = c(0);
     const scenarioEnergies: Expr[] = [];
     const predicted: ReturnType<typeof step<Expr>>[] = [];
@@ -80,7 +86,7 @@ export async function solve(input: Input, wasmUrl?: string) {
         controls[i],
         haircut,
       );
-      energy = a.variable(floor, ceiling);
+      energy = a.variable(low, high);
       a.constrain(a.add(energy, a.scale(result.energy, -1)), "=", 0);
       stepped = result.stepped;
       predicted.push(result);

@@ -34,7 +34,11 @@ The engine models discrete limits, all four modes, native SoC protection and PV
 curtailment. Expanded control assumes an adapter clips power to enforce explicit
 grid charging/export permissions against live conditions. Curtailment remains an
 equilibrium forecast, not a prediction of controller transients. Initial SoC
-outside the configured window is unsupported and reported; it is never clamped.
+may be outside the configured operating window, provided it is within 0–100%.
+Planning preserves the actual reading: below the minimum, discharge stops until
+charging restores energy above the floor; above the maximum, charging stops
+until discharge creates room. Neither boundary forces an immediate correction
+or changes permission to charge from the grid.
 
 Both strategies run in a browser worker in the sandbox; in the add-on and the
 gym the engine runs on a worker thread through `engine/node.mjs`.

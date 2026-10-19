@@ -20,8 +20,8 @@ export function validate(input: Input) {
     m.minSoc < 0 ||
     m.maxSoc > 100 ||
     m.minSoc >= m.maxSoc ||
-    m.soc < m.minSoc ||
-    m.soc > m.maxSoc ||
+    m.soc < 0 ||
+    m.soc > 100 ||
     m.minW < 0 ||
     m.maxW < m.minW ||
     m.stepW <= 0 ||
@@ -30,9 +30,7 @@ export function validate(input: Input) {
     m.efficiency > 1 ||
     m.wearPerKwh < 0
   )
-    throw new Error(
-      "Unsupported battery model: initial SoC must be inside configured bounds",
-    );
+    throw new Error("Unsupported battery model: invalid bounds or parameters");
   if (
     m.dischargeStepW !== undefined &&
     (m.dischargeStepW <= 0 ||
