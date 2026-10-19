@@ -1,6 +1,6 @@
 /**
  * Runs the built server behind a proxy that behaves like Home Assistant's
- * ingress, and pins down the three things CLAUDE.md records as separately
+ * ingress, and pins down the three things AGENTS.md records as separately
  * observed production failures. Each of them looked fine on a direct
  * `localhost:3000` — that is the whole reason this suite exists.
  *

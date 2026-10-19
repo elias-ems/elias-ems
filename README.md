@@ -40,7 +40,7 @@ Everything else — Vite, Biome, Playwright, lefthook — is an npm devDependenc
 cd addon && npm install && npm run dev:mock
 ```
 
-`npm install` is also what installs the git hooks. See [CLAUDE.md](CLAUDE.md) for the full command list, the ingress quirks worth knowing before touching `server.js`, and why this repo uses Biome rather than ESLint.
+`npm install` is also what installs the git hooks. See [AGENTS.md](AGENTS.md) for the full command list, the ingress quirks worth knowing before touching `server.js`, and why this repo uses Biome rather than ESLint.
 
 ### Releasing
 
@@ -50,7 +50,7 @@ A GitHub release is what publishes a new version — merging to `main` never doe
 gh release create v1.0.0-alpha.39 --title 1.0.0-alpha.39 --generate-notes --prerelease
 ```
 
-See [Versioning](CLAUDE.md#versioning) and [Publishing the add-on image](CLAUDE.md#publishing-the-add-on-image) in CLAUDE.md for why the order matters and what [.github/workflows/image.yml](.github/workflows/image.yml) does.
+See [Versioning](AGENTS.md#versioning) and [Publishing the add-on image](AGENTS.md#publishing-the-add-on-image) in AGENTS.md for why the order matters and what [.github/workflows/image.yml](.github/workflows/image.yml) does.
 
 ### The documentation site
 

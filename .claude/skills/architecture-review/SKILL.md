@@ -88,7 +88,7 @@ is still true comes back out of this run's own review, and anything that doesn't
 ## Step 1 — Read the architecture documentation
 
 Read [docs/architecture.md](../../../docs/architecture.md) in full, plus the context it depends on:
-[CLAUDE.md](../../../CLAUDE.md), [docs/project.md](../../../docs/project.md), and
+[AGENTS.md](../../../AGENTS.md), [docs/project.md](../../../docs/project.md), and
 [docs/roadmap.md](../../../docs/roadmap.md). The roadmap is both context and a target here — a gap
 the roadmap has already scheduled is not drift and must not be "fixed" in code, but a roadmap item
 that has since shipped is drift like any other.
@@ -161,7 +161,7 @@ Doc-only runs still need `npm run lint` to pass if any file under `addon/` was t
 ## Step 5 — Commit, then create or update the pull request
 
 Use [Conventional Commits](https://www.conventionalcommits.org/) per
-[CLAUDE.md](../../../CLAUDE.md) — typically `docs: …` for a doc-only run, `refactor(addon): …` when
+[AGENTS.md](../../../AGENTS.md) — typically `docs: …` for a doc-only run, `refactor(addon): …` when
 code moved. Add this run's work as a **new commit**; don't amend an earlier run's, so the branch
 stays legible as a sequence.
 
