@@ -34,16 +34,28 @@ export async function readJson<T>(fileName: string, fallback: T): Promise<T> {
   }
 }
 
+/**
+ * Written to a temporary file beside the target and renamed over it, which is
+ * atomic on the same filesystem. A plain `writeFile` truncates first, so a
+ * read landing in between parses an empty file — that is what broke the first
+ * page load in CI once a read could trigger a write (a migration at boot), and
+ * a power cut mid-write would leave the same empty file behind for good.
+ */
 export async function writeJson(
   fileName: string,
   value: unknown,
 ): Promise<void> {
   const directory = dataDir();
   await fs.mkdir(directory, { recursive: true });
-  await fs.writeFile(
-    path.join(directory, fileName),
-    JSON.stringify(value, null, 2),
-  );
+  const target = path.join(directory, fileName);
+  const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporary, JSON.stringify(value, null, 2));
+    await fs.rename(temporary, target);
+  } catch (error) {
+    await fs.rm(temporary, { force: true });
+    throw error;
+  }
 }
 
 /** A stored record, identified by a generated id the UI edits and removes by. */

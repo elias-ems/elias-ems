@@ -20,7 +20,12 @@ import {
   readControlConfig,
   saveControlConfig,
 } from "../../app/lib/control-config.server";
+import {
+  clearDiagnostics,
+  readDiagnostics,
+} from "../../app/lib/diagnostics.server";
 import { readGrid, saveGrid } from "../../app/lib/grid.server";
+import { readJson, writeJson } from "../../app/lib/store.server";
 
 let dataDir: string;
 
@@ -159,5 +164,58 @@ describe("control config", () => {
       enabled: true,
       intervalSeconds: 1,
     });
+  });
+
+  it("migrates a removed strategy once, even when reads race at boot", async () => {
+    // At startup the planning loop, the curtailment loop and the first page
+    // load all read this file at once. Each used to write the migration back,
+    // and a read landing mid-write saw an empty file — a 500 on the first
+    // page in CI.
+    clearDiagnostics();
+    await writeStored("control.json", {
+      enabled: true,
+      strategy: "net-zero-energy",
+      intervalSeconds: 5,
+    });
+
+    const reads = await Promise.all(
+      Array.from({ length: 50 }, () => readControlConfig()),
+    );
+
+    for (const config of reads)
+      expect(config).toEqual({
+        enabled: false,
+        strategy: "evening-target",
+        intervalSeconds: 5,
+      });
+    expect(
+      JSON.parse(await readFile(path.join(dataDir, "control.json"), "utf-8")),
+    ).toEqual({
+      enabled: false,
+      strategy: "evening-target",
+      intervalSeconds: 5,
+    });
+    // Identical lines collapse into one entry with a repeat count, so the
+    // count is what says how many times it was logged.
+    expect(
+      readDiagnostics()
+        .filter((entry) => entry.message.includes("has been removed"))
+        .reduce((total, entry) => total + entry.repeat, 0),
+    ).toBe(1);
+  });
+});
+
+describe("the JSON store", () => {
+  it("never shows a reader a half-written file", async () => {
+    const big = { padding: "x".repeat(200_000) };
+    await writeJson("race.json", big);
+
+    // A plain write truncates first, so a read in between parses "".
+    for (let round = 0; round < 20; round++) {
+      const work = Array.from({ length: 40 }, (_, i) =>
+        i % 2 ? writeJson("race.json", big) : readJson("race.json", null),
+      );
+      await expect(Promise.all(work)).resolves.toBeDefined();
+    }
   });
 });
