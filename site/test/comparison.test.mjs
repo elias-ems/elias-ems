@@ -32,6 +32,11 @@ test("compares every registered strategy on one snapshot", async () => {
     assert.equal(run.error, undefined, `${run.id}: ${run.error}`);
     assert.equal(run.result.commands.length, fixture.slots.length);
     assert.equal(run.scenarios.length, 2);
+    // More solar never means less generated before curtailment is counted.
+    assert.ok(
+      run.excess.generatedKwh + run.excess.curtailedKwh >=
+        run.scenarios[0].generatedKwh + run.scenarios[0].curtailedKwh,
+    );
     assert.ok(Number.isFinite(run.meanCost));
     assert.ok(run.result.commands.every((c) => c.mode === "balance"));
   }

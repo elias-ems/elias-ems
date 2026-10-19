@@ -181,6 +181,26 @@ function polyline(socs: number[]) {
     )
     .join(" ");
 }
+// The scenario table's row groups, each labelled with its solar adjustment.
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const replays = computed(() => {
+  const margin = Math.round((comparison.value?.input.solarHaircut ?? 0) * 100);
+  const group = (
+    name: string,
+    pick: (run: (typeof scored.value)[number]) => typeof run.excess,
+  ) => ({
+    name,
+    rows: scored.value.flatMap((run) => {
+      const result = pick(run);
+      return result ? [{ id: run.id, label: run.label, result }] : [];
+    }),
+  });
+  return [
+    group("Nominal", (run) => run.scenarios?.[0]),
+    group(`Reduced solar (−${margin}%)`, (run) => run.scenarios?.[1]),
+    group(`Excess solar (+${margin}%)`, (run) => run.excess),
+  ];
+});
 // One chart per registered strategy, nominal solar, side by side.
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const strategies = computed(() =>
@@ -303,11 +323,11 @@ function download() {
         </figure>
       </div>
       <p>Battery SoC across the horizon at nominal solar: solid = planned; dashed = unrestricted baseline. Exact values per interval are in the schedule below.</p>
-      <p>Every registered strategy plans the same snapshot under the same capabilities and is scored by the same physical replay, for nominal and reduced solar: import charges minus export revenue plus battery wear. Evening target keeps balance mode and aims for its deadline and reserve; HiGHS minimizes that mean cost directly and, at equal cost, prefers balance. HiGHS has no evening target or terminal-reserve value, so a lower final SoC can explain a lower cost. These are forecast simulations, not measured savings, and costs exclude Evening target’s switching and buffer penalties.</p>
+      <p>Every registered strategy plans the same snapshot under the same capabilities and is scored by the same physical replay, for nominal and reduced solar: import charges minus export revenue plus battery wear. Excess solar replays the same schedule with solar raised by the same margin, to show what each plan leaves on the table on a sunnier day; it is reported only, and no strategy plans for it. Evening target keeps balance mode and aims for its deadline and reserve; HiGHS minimizes that mean cost directly and, at equal cost, prefers balance. HiGHS has no evening target or terminal-reserve value, so a lower final SoC can explain a lower cost. These are forecast simulations, not measured savings, and costs exclude Evening target’s switching and buffer penalties.</p>
       <div class="planner-table" tabindex="0">
-        <table><thead><tr><th>Scenario / strategy</th><th>Cost incl. wear</th><th>Final SoC</th><th>PV generated / curtailed kWh</th></tr></thead>
-          <tbody><template v-for="i in [0, 1]" :key="i">
-            <tr v-for="run in scored" :key="run.id"><td>{{ i ? 'Reduced solar' : 'Nominal' }} / {{ run.label }}</td><td>{{ run.scenarios![i].cost.toFixed(3) }}</td><td>{{ run.scenarios![i].finalSoc.toFixed(1) }}%</td><td>{{ run.scenarios![i].generatedKwh.toFixed(2) }} / {{ run.scenarios![i].curtailedKwh.toFixed(2) }}</td></tr>
+        <table><thead><tr><th>Scenario</th><th>Strategy</th><th>Cost incl. wear</th><th>Final SoC</th><th>PV generated / curtailed kWh</th></tr></thead>
+          <tbody><template v-for="scenario in replays" :key="scenario.name">
+            <tr v-for="(row, j) in scenario.rows" :key="row.id"><th v-if="j === 0" scope="rowgroup" :rowspan="scenario.rows.length">{{ scenario.name }}</th><td>{{ row.label }}</td><td>{{ row.result.cost.toFixed(3) }}</td><td>{{ row.result.finalSoc.toFixed(1) }}%</td><td>{{ row.result.generatedKwh.toFixed(2) }} / {{ row.result.curtailedKwh.toFixed(2) }}</td></tr>
           </template></tbody>
         </table>
       </div>
