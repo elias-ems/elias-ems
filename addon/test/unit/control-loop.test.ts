@@ -724,6 +724,20 @@ describe("syncControlLoop", () => {
     expect(decisionTicks()).toBe(before + 1);
   });
 
+  it("lets the idle tick stand aside for a tick already in flight", async () => {
+    vi.useFakeTimers();
+    await curtailing();
+    await syncControlLoop();
+
+    // The tick from switching on is still waiting on Home Assistant when the
+    // heartbeat comes round. Readings on a fixed cadence made exactly this
+    // collision happen every minute, each time logged as a warning.
+    await advance(60_000);
+
+    expect(logged("still running")).toBe(false);
+    expect(decisionTicks()).toBe(1);
+  });
+
   it("stops the loop when curtailment is switched off", async () => {
     vi.useFakeTimers();
     await curtailing();

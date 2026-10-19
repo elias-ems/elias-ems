@@ -48,8 +48,7 @@ beforeEach(async () => {
   vi.resetModules();
   configMocks.control.mockResolvedValue({
     enabled: true,
-    strategy: "charge-limit",
-    chargeAlgorithm: "evening-target",
+    strategy: "highs",
   });
   configMocks.curtailment.mockResolvedValue(DEFAULT_CURTAILMENT_CONFIG);
   configMocks.arrays.mockResolvedValue([]);
@@ -120,7 +119,11 @@ describe("planner export data generation and route", () => {
     expect(dataset.devices.batteries).toHaveLength(1);
     expect(dataset.devices.grid.powerEntityId).toBe("sensor.grid_power");
     expect(dataset.settings.algorithm).toBe("evening-target");
-    expect(dataset.devices.control.strategy).toBe("charge-limit");
+    expect(dataset.devices.control.strategy).toBe("highs");
+    // `settings.algorithm` above is the Benchmark's default, not what steers.
+    expect(dataset.assumptions).toContain(
+      "Battery control strategy: HiGHS cost optimizer.",
+    );
     expect(dataset.devices.curtailment).toBeDefined();
     expect(dataset.devices.prices.forecastEntityId).toBe(
       "sensor.energi_epex_spot",

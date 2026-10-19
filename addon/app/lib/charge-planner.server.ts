@@ -160,7 +160,7 @@ export async function preparePlannerInputs(
   // is unknown, so plan ordinary curtailment and disclose that assumption.
   const planningNote =
     curtailment.enabled && curtailment.carChargingEntityId
-      ? "EV charging is not forecast; actual charging may differ and the evening target may not be reached. The live PV charging override remains active."
+      ? "EV charging is not forecast, so actual charging may differ from the plan. The live PV charging override remains active."
       : null;
   if (planningNote) report("ev-charging", planningNote);
   if (!solarSources.length)
