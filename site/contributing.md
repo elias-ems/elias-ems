@@ -59,7 +59,7 @@ three different things, each of which was a separate observed failure — the
 worst being a page that server-renders perfectly and is completely inert because
 every asset URL 404s. Loading the app directly on its port will not surface any
 of it. Read the ingress section of
-[CLAUDE.md](https://github.com/elias-ems/elias-ems/blob/main/CLAUDE.md) before
+[AGENTS.md](https://github.com/elias-ems/elias-ems/blob/main/AGENTS.md) before
 touching that file.
 
 **Colours go through a token, never a literal.** `addon/app/app.css` holds
@@ -137,7 +137,7 @@ dev-server-only would be a different matter; those are worth an issue.
 
 ## The rest
 
-[CLAUDE.md](https://github.com/elias-ems/elias-ems/blob/main/CLAUDE.md) in the
+[AGENTS.md](https://github.com/elias-ems/elias-ems/blob/main/AGENTS.md) in the
 repository root is the long-form version of all of this: the framework
 constraints, the ingress quirks in full, the theming traps, and how the add-on
 talks to Home Assistant. It is written as instructions for an AI agent working

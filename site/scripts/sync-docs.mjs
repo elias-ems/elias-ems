@@ -73,7 +73,7 @@ export function rewriteLinks(markdown, source) {
     // correct under the `/elias-ems/` base without VitePress rewriting it.
     if (page) return `](./${page}${hash})`;
 
-    // Everything else — source files, CLAUDE.md, the docs that don't ship — is
+    // Everything else — source files, AGENTS.md, the docs that don't ship — is
     // only readable on GitHub.
     return `](${BLOB}/${encodePath(resolved)}${hash})`;
   });
