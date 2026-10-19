@@ -105,9 +105,9 @@ try {
       console.error(await page.locator("body").innerText());
       throw error;
     });
-  await page
-    .getByText("Side-by-side interval controls and predictions (nominal)")
-    .click();
+  // One SoC chart per calculated strategy.
+  for (const name of ["Evening target", "HiGHS"])
+    await page.getByRole("img", { name: `${name}: end-of-interval` }).waitFor();
   assert.ok(
     (await page
       .getByRole("cell")
@@ -152,6 +152,8 @@ try {
   // equivalent comparison (the fast, provable one) completes.
   await page.getByRole("button", { name: "Marginal autumn surplus" }).click();
   await page.getByText("Marginal autumn surplus · 96 intervals").waitFor();
+  // Loading a preset starts the comparison without a click.
+  await page.getByText("Running both planners in a local worker").waitFor();
   assert.equal(
     await page
       .getByRole("button", { name: "Marginal autumn surplus" })

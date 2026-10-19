@@ -74,6 +74,7 @@ async function importFile(event: Event) {
     const parsed = parseDataset(JSON.parse(await file.text()));
     if (sequence !== importSequence) return;
     load(parsed, file.name);
+    run();
   } catch (e) {
     if (sequence === importSequence)
       error.value = e instanceof Error ? e.message : String(e);
@@ -89,6 +90,7 @@ function loadPreset(preset: PlannerPreset) {
     // Clone so edits in the form never reach the shared preset object.
     load(parseDataset(structuredClone(preset.dataset)), preset.name);
     presetKey.value = preset.key;
+    run();
   } catch (e) {
     dataset.value = undefined;
     filename.value = "";
@@ -96,7 +98,6 @@ function loadPreset(preset: PlannerPreset) {
     error.value = e instanceof Error ? e.message : String(e);
   }
 }
-// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function run() {
   invalidate();
   try {
@@ -170,24 +171,43 @@ function intervalTime(start: number, end: number) {
   const to = `${day.format(start) === day.format(end) ? "" : `${date.format(end)}, `}${clock.format(end)}${changesOffset ? ` ${zone(end)}` : ""}`;
   return `${from} – ${to}`;
 }
-// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-const curve = computed(() =>
-  plan.value?.points
+// Plot area of each SoC chart, in viewBox units: x 40–590, y 200 (0%) to 20 (100%).
+function polyline(socs: number[]) {
+  return socs
     .map(
-      (p, i, points) =>
-        `${40 + (i / Math.max(1, points.length - 1)) * 720},${220 - p.soc * 2}`,
+      (soc, i) =>
+        `${40 + (i / Math.max(1, socs.length - 1)) * 550},${200 - soc * 1.8}`,
     )
-    .join(" "),
-);
+    .join(" ");
+}
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const baseline = computed(() =>
-  plan.value?.points
-    .map(
-      (p, i, points) =>
-        `${40 + (i / Math.max(1, points.length - 1)) * 720},${220 - p.baselineSoc * 2}`,
-    )
-    .join(" "),
+  plan.value ? polyline(plan.value.points.map((p) => p.baselineSoc)) : "",
 );
+// One chart per calculated strategy, nominal solar, side by side.
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const strategies = computed(() => {
+  const c = comparison.value;
+  if (!c) return [];
+  const list = [{ name: "Evening target", scenario: c.legacyScenarios[0] }];
+  const engine = c.engine?.scenarios?.[0];
+  if (engine) list.push({ name: "HiGHS", scenario: engine });
+  return list.map(({ name, scenario }) => ({
+    name,
+    cost: scenario.cost,
+    finalSoc: scenario.finalSoc,
+    curve: polyline(scenario.points.map((p) => p.soc)),
+  }));
+});
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function axisTime(value: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: dataset.value?.timeZone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(value);
+}
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function download() {
   if (!dataset.value || !plan.value) return;
@@ -256,13 +276,29 @@ function download() {
         <button type="submit" :disabled="busy">{{ busy ? "Calculating…" : "Compare planners" }}</button>
         <button v-if="busy" type="button" @click="stop">Cancel</button>
       </form>
-      <p role="status" aria-live="polite">{{ busy ? "Running both planners in a local worker…" : plan ? "Plan calculated." : "Ready to calculate." }}</p>
+      <p role="status" aria-live="polite">{{ busy ? "Running both planners in a local worker…" : plan ? "Comparison calculated." : "Ready to calculate." }}</p>
     </template>
-    <template v-if="comparison">
+    <template v-if="comparison && plan">
       <h2>Evening target / HiGHS comparison</h2>
       <p>HiGHS: {{ comparison.engine?.status ?? comparison.engineError }}. {{ comparison.engine?.balancePreference }}</p>
       <p>Runtime: Evening target {{ comparison.legacyRuntimeMs.toFixed(0) }} ms; HiGHS {{ comparison.engine?.runtimeMs.toFixed(0) ?? '—' }} ms (including solver initialization). Solver statuses (cost, then balance preference when attempted): {{ comparison.engine?.statuses.join(' / ') }}.</p>
-      <p>HiGHS minimizes mean nominal/reduced-solar cost: import charges minus export revenue plus battery wear. At equal cost, it prefers more time in balance mode, within the selected power boundaries. It has no evening target or terminal-reserve penalty. Evening target retains its deadline, reserve, switching and spike-buffer preferences. Lower final SoC can explain lower cost. Neither forecast guarantees live savings.</p>
+      <div class="planner-charts">
+        <figure v-for="strategy in strategies" :key="strategy.name">
+          <h3>{{ strategy.name }}</h3>
+          <svg viewBox="0 0 600 230" role="img" :aria-label="`${strategy.name}: end-of-interval battery state of charge, solid planned, dashed unrestricted baseline`">
+            <g class="planner-grid"><line v-for="soc in [0, 50, 100]" :key="soc" x1="40" :y1="200 - soc * 1.8" x2="590" :y2="200 - soc * 1.8" /></g>
+            <text v-for="soc in [0, 50, 100]" :key="soc" x="34" :y="204 - soc * 1.8" text-anchor="end">{{ soc }}%</text>
+            <text x="40" y="222">{{ axisTime(dataset!.slots[0].start) }}</text>
+            <text x="590" y="222" text-anchor="end">{{ axisTime(dataset!.slots.at(-1)!.end) }}</text>
+            <polyline :points="baseline" fill="none" stroke="currentColor" stroke-dasharray="6 5" stroke-width="1.5" />
+            <polyline :points="strategy.curve" fill="none" stroke="var(--vp-c-brand-1)" stroke-width="2.5" />
+          </svg>
+          <figcaption>Cost incl. wear <strong>{{ strategy.cost.toFixed(3) }} {{ dataset!.currency }}</strong> · final SoC {{ strategy.finalSoc.toFixed(1) }}%</figcaption>
+        </figure>
+      </div>
+      <p>Battery SoC across the horizon at nominal solar: solid = planned; dashed = unrestricted baseline. Exact values per interval are in the schedule below.</p>
+      <p>Evening target: {{ plan.reason }} Requested target {{ plan.target.requestedSoc }}%; reachable at deadline (forecast / reduced solar): {{ plan.target.reachableSoc.map(s => s.toFixed(1) + "%").join(" / ") }}. Unrestricted baseline cost: {{ plan.baselineCost.toFixed(3) }} {{ dataset!.currency }}.</p>
+      <p>HiGHS minimizes mean nominal/reduced-solar cost: import charges minus export revenue plus battery wear. At equal cost, it prefers more time in balance mode, within the selected power boundaries. It has no evening target or terminal-reserve penalty. Evening target retains its deadline, reserve, switching and spike-buffer preferences. Lower final SoC can explain lower cost. These are forecast simulations, not measured savings, and costs exclude the planner’s switching and buffer penalties.</p>
       <div class="planner-table" tabindex="0">
         <table><thead><tr><th>Scenario / algorithm</th><th>Cost incl. wear</th><th>Final SoC</th><th>PV generated / curtailed kWh</th></tr></thead>
           <tbody><template v-for="(old, i) in comparison.legacyScenarios" :key="i">
@@ -271,82 +307,49 @@ function download() {
           </template></tbody>
         </table>
       </div>
-      <details v-if="comparison.engine?.scenarios"><summary>Side-by-side interval controls and predictions (nominal)</summary>
-        <p>Times are in {{ dataset!.timeZone }}. Prices are the snapshot’s configured consumption/import and production/export tariffs, including pricing formulas—not raw EPEX spot prices. Expected load and solar are the snapshot’s forecasts, before curtailment and the solar reduction. Positive battery power means charging; negative means discharging. “—” means balance has no requested setpoint. Balance only moves the battery within its limits: with a 0 W discharge limit it cannot discharge, so check predicted battery power rather than the mode alone.</p>
-        <div class="planner-table" tabindex="0" role="region" aria-label="Side-by-side interval comparison"><table>
-          <thead>
-            <tr>
-              <th scope="col" rowspan="2">Interval</th>
-              <th scope="col" rowspan="2">Consumption<br />{{ dataset!.currency }}/kWh</th>
-              <th scope="col" rowspan="2">Production<br />{{ dataset!.currency }}/kWh</th>
-              <th scope="col" rowspan="2">Expected<br />load W</th>
-              <th scope="col" rowspan="2">Expected<br />solar W</th>
-              <th scope="colgroup" colspan="6">Evening target</th>
-              <th scope="colgroup" colspan="6">HiGHS</th>
-            </tr>
-            <tr>
-              <template v-for="algorithm in ['Evening target', 'HiGHS']" :key="algorithm">
-                <th scope="col">Mode</th>
-                <th scope="col">Limits W<br />charge / discharge</th>
-                <th scope="col">Requested<br />setpoint W</th>
-                <th scope="col">Predicted<br />battery W</th>
-                <th scope="col">End SoC %</th>
-                <th scope="col">Cost {{ dataset!.currency }}</th>
-              </template>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(p, i) in comparison.engine.scenarios[0].points" :key="p.start">
-              <td :title="`${time(p.start)} – ${time(p.end)}`">{{ intervalTime(p.start, p.end) }}</td>
-              <td>{{ comparison.input.slots[i].buy.toFixed(4) }}{{ comparison.input.slots[i].estimatedPrice ? ' *' : '' }}</td>
-              <td>{{ comparison.input.slots[i].sell.toFixed(4) }}{{ comparison.input.slots[i].estimatedPrice ? ' *' : '' }}</td>
-              <td>{{ comparison.input.slots[i].loadW.toFixed(0) }}</td>
-              <td>{{ comparison.input.slots[i].solarW.toFixed(0) }}</td>
-              <template v-for="(q, j) in [comparison.legacyScenarios[0].points[i], p]" :key="j">
-                <td>{{ q.mode }}</td>
-                <td>{{ q.chargeLimitW }} / {{ q.dischargeLimitW }}</td>
-                <td>{{ q.setpointW ?? '—' }}</td>
-                <td>{{ q.batteryW.toFixed(0) }}</td>
-                <td>{{ q.soc.toFixed(1) }}</td>
-                <td>{{ q.cost.toFixed(3) }}</td>
-              </template>
-            </tr>
-          </tbody>
-        </table></div>
-        <p v-if="comparison.input.slots.some(slot => slot.estimatedPrice)">* Estimated price in the imported snapshot.</p>
-      </details>
-    </template>
-    <template v-if="plan">
-      <h2>Calculated plan</h2>
-      <p>{{ plan.reason }}</p>
-      <p>Forecast energy cost: <strong>{{ plan.cost.toFixed(3) }} {{ dataset!.currency }}</strong>. Unrestricted baseline: {{ plan.baselineCost.toFixed(3) }} {{ dataset!.currency }}. Difference: {{ (plan.baselineCost - plan.cost).toFixed(3) }} {{ dataset!.currency }}.</p>
-      <p>Requested target: {{ plan.target.requestedSoc }}%. Reachable at deadline (forecast / reduced solar): {{ plan.target.reachableSoc.map(s => s.toFixed(1) + "%").join(" / ") }}.</p>
-      <p>These are forecast simulations, not measured savings. Costs exclude the planner’s switching and buffer penalties.</p>
-      <svg viewBox="0 0 800 250" role="img" aria-label="End-of-interval battery state of charge: solid planned, dashed unrestricted baseline">
-        <text x="0" y="24">100%</text><text x="10" y="220">0%</text>
-        <line x1="40" y1="220" x2="760" y2="220" stroke="currentColor" />
-        <polyline :points="baseline" fill="none" stroke="currentColor" stroke-dasharray="6 5" stroke-width="2" />
-        <polyline :points="curve" fill="none" stroke="var(--vp-c-brand-1)" stroke-width="3" />
-      </svg>
-      <p>Battery SoC across the imported horizon: solid = planned; dashed = unrestricted. Exact timestamps and values are below.</p>
+      <h3>Interval controls and predictions (nominal)</h3>
+      <p>Times are in {{ dataset!.timeZone }}. Prices are the snapshot’s configured consumption/import and production/export tariffs, including pricing formulas—not raw EPEX spot prices. Expected load and solar are the snapshot’s forecasts, before curtailment and the solar reduction. Positive battery power means charging; negative means discharging. “—” means balance has no requested setpoint. Balance only moves the battery within its limits: with a 0 W discharge limit it cannot discharge, so check predicted battery power rather than the mode alone.</p>
       <button type="button" @click="download">Download inputs and calculated plan</button>
-      <div class="planner-table" tabindex="0" role="region" aria-label="Interval schedule">
-        <table><thead><tr>
-          <th scope="col" title="Interval start" aria-label="Interval start">Start</th>
-          <th scope="col" title="Solar power (W)" aria-label="Solar power (W)">Solar W</th>
-          <th scope="col" title="Household load (W)" aria-label="Household load (W)">Load W</th>
-          <th scope="col" title="Buy price per kWh" aria-label="Buy price per kWh">Buy/kWh</th>
-          <th scope="col" title="Sell price per kWh" aria-label="Sell price per kWh">Sell/kWh</th>
-          <th scope="col" title="Charge ceiling (W)" aria-label="Charge ceiling (W)">In cap W</th>
-          <th scope="col" title="Output ceiling (W)" aria-label="Output ceiling (W)">Out cap W</th>
-          <th scope="col" title="Charging power (W)" aria-label="Charging power (W)">In W</th>
-          <th scope="col" title="Discharging power (W)" aria-label="Discharging power (W)">Out W</th>
-          <th scope="col" title="Battery state of charge (%)" aria-label="Battery state of charge (%)">SoC %</th>
-          <th scope="col" title="Unrestricted baseline state of charge (%)" aria-label="Unrestricted baseline state of charge (%)">Base %</th>
-        </tr></thead>
-          <tbody><tr v-for="p in plan.points" :key="p.start"><td>{{ time(p.start) }}{{ p.estimatedPrice ? " (estimated price)" : "" }}</td><td>{{ (p.generatedSolarW ?? p.solarW).toFixed(0) }}</td><td>{{ p.loadW.toFixed(0) }}</td><td>{{ p.buy.toFixed(4) }}</td><td>{{ p.sell.toFixed(4) }}</td><td>{{ p.limitW }}</td><td>{{ p.dischargeLimitW ?? "Native" }}</td><td>{{ p.chargeW.toFixed(0) }}</td><td>{{ p.dischargeW.toFixed(0) }}</td><td>{{ p.soc.toFixed(1) }}</td><td>{{ p.baselineSoc.toFixed(1) }}</td></tr></tbody>
-        </table>
-      </div>
+      <div class="planner-table" tabindex="0" role="region" aria-label="Side-by-side interval comparison"><table>
+        <thead>
+          <tr>
+            <th scope="col" rowspan="2">Interval</th>
+            <th scope="col" rowspan="2">Consumption<br />{{ dataset!.currency }}/kWh</th>
+            <th scope="col" rowspan="2">Production<br />{{ dataset!.currency }}/kWh</th>
+            <th scope="col" rowspan="2">Expected<br />load W</th>
+            <th scope="col" rowspan="2">Expected<br />solar W</th>
+            <th v-for="strategy in strategies" :key="strategy.name" scope="colgroup" colspan="6">{{ strategy.name }}</th>
+          </tr>
+          <tr>
+            <template v-for="strategy in strategies" :key="strategy.name">
+              <th scope="col">Mode</th>
+              <th scope="col">Limits W<br />charge / discharge</th>
+              <th scope="col">Requested<br />setpoint W</th>
+              <th scope="col">Predicted<br />battery W</th>
+              <th scope="col">End SoC %</th>
+              <th scope="col">Cost {{ dataset!.currency }}</th>
+            </template>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(p, i) in comparison.legacyScenarios[0].points" :key="p.start">
+            <td :title="`${time(p.start)} – ${time(p.end)}`">{{ intervalTime(p.start, p.end) }}</td>
+            <td>{{ comparison.input.slots[i].buy.toFixed(4) }}{{ comparison.input.slots[i].estimatedPrice ? ' *' : '' }}</td>
+            <td>{{ comparison.input.slots[i].sell.toFixed(4) }}{{ comparison.input.slots[i].estimatedPrice ? ' *' : '' }}</td>
+            <td>{{ comparison.input.slots[i].loadW.toFixed(0) }}</td>
+            <td>{{ comparison.input.slots[i].solarW.toFixed(0) }}</td>
+            <template v-for="(q, j) in comparison.engine?.scenarios ? [p, comparison.engine.scenarios[0].points[i]] : [p]" :key="j">
+              <td>{{ q.mode }}</td>
+              <td>{{ q.chargeLimitW }} / {{ q.dischargeLimitW }}</td>
+              <td>{{ q.setpointW ?? '—' }}</td>
+              <td>{{ q.batteryW.toFixed(0) }}</td>
+              <td>{{ q.soc.toFixed(1) }}</td>
+              <td>{{ q.cost.toFixed(3) }}</td>
+            </template>
+          </tr>
+        </tbody>
+      </table></div>
+      <p v-if="comparison.input.slots.some(slot => slot.estimatedPrice)">* Estimated price in the imported snapshot.</p>
     </template>
   </section>
 </template>
@@ -366,6 +369,11 @@ function download() {
 .planner-table { overflow-x: auto; }
 .planner-table table { display: table; width: 100%; font-size: 0.85rem; white-space: nowrap; }
 .planner-table th, .planner-table td { padding: 6px 8px; }
+.planner-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 1rem 2rem; }
+.planner-charts figure { margin: 0; min-width: 0; }
+.planner-charts h3 { margin: 0 0 0.25rem; }
+.planner-charts figcaption { font-size: 0.9rem; color: var(--vp-c-text-2); }
+.planner-grid line { stroke: var(--vp-c-divider); }
 .planner svg { width: 100%; color: var(--vp-c-text-2); }
 .planner svg text { fill: currentColor; font-size: 12px; }
 .planner [role="alert"] { color: var(--vp-c-danger-1); }
