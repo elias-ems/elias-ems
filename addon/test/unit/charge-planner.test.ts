@@ -183,8 +183,6 @@ it("uses evening planning even for a retired cost-optimized selection", async ()
     enabled: false,
     strategy: "charge-limit",
     chargeAlgorithm: "cost-optimized",
-    eveningHour: 18,
-    solarMarginPercent: 20,
   });
   const { calculateChargePlan } = await import(
     "../../app/lib/charge-planner.server"
@@ -203,6 +201,37 @@ it("uses evening planning even for a retired cost-optimized selection", async ()
   expect(
     result.plan.points.every((p) => p.limitW >= 0 && p.limitW <= 2000),
   ).toBe(true);
+});
+
+it("ignores planning settings stored before they were hardcoded", async () => {
+  configMocks.control.mockResolvedValue({
+    enabled: false,
+    strategy: "charge-limit",
+    eveningHour: 7,
+    ceilingSwitchCost: 1,
+    spikeBufferKwh: 3,
+    solarMarginPercent: 60,
+    chargeWearPerKwh: 2,
+  });
+  const { calculateChargePlan } = await import(
+    "../../app/lib/charge-planner.server"
+  );
+  const report = vi.fn();
+  const result = await calculateChargePlan(
+    {
+      ...chargeBatteryFixture,
+      solarMarginPercent: 50,
+      chargeWearPerKwh: 1,
+    } as Battery,
+    Date.now(),
+    report,
+  );
+  expect(result.solarMarginPercent).toBe(20);
+  expect(result.model.wearPerKwh).toBe(0.05);
+  expect(report).toHaveBeenCalledWith(
+    "algorithm",
+    expect.stringContaining("18:00"),
+  );
 });
 
 it("keeps ordinary curtailment planning available with an unpredictable EV override", async () => {

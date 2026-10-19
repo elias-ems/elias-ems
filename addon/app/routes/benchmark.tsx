@@ -386,9 +386,7 @@ export default function Benchmark({ loaderData }: Route.ComponentProps) {
             )}
             {devices.control && (
               <div>
-                <strong>Control:</strong> Strategy: {devices.control.strategy} ·
-                Evening hour: {devices.control.eveningHour}:00 · Ceiling switch
-                cost: €{devices.control.ceilingSwitchCost}
+                <strong>Control:</strong> Strategy: {devices.control.strategy}
               </div>
             )}
             {devices.prices && (

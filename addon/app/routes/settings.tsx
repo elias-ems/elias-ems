@@ -213,10 +213,6 @@ async function settingsAction({ request }: Route.ActionArgs) {
 
       if (recordId) {
         const previous = (await listBatteries()).find((b) => b.id === recordId);
-        if (!formData.has("solarMarginPercent"))
-          parsed.fields.solarMarginPercent = previous?.solarMarginPercent ?? 20;
-        if (!formData.has("chargeWearPerKwh"))
-          parsed.fields.chargeWearPerKwh = previous?.chargeWearPerKwh ?? 0;
         // Let go under the old name before it changes, or before the battery
         // stops being steered: afterwards nothing would publish to the event
         // its automation is listening for.

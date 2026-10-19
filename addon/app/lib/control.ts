@@ -13,12 +13,29 @@ export type ControlConfig = {
   strategy: StrategyId;
   /** How often the loop reconsiders, in seconds. */
   intervalSeconds: number;
-  eveningHour?: number;
-  ceilingSwitchCost?: number;
-  spikeBufferKwh?: number;
-  solarMarginPercent?: number;
-  chargeWearPerKwh?: number;
 };
+
+/**
+ * What Optimize charge limits plans with. These were settings once, both on
+ * the battery and under Battery control; they are fixed now, and anything
+ * still stored under those names is ignored on read and dropped on the next
+ * save. Planner exports still carry them, in their `settings` block and in
+ * the model's `wearPerKwh`.
+ */
+export const CHARGE_LIMIT_PLANNING = {
+  /** Home Assistant local hour the evening target is aimed at. */
+  eveningHour: 18,
+  /** Price-currency penalty per change of the charge ceiling. */
+  ceilingSwitchCost: 0.002,
+  /** Energy the plan prefers to have back early, for daytime spikes, kWh. */
+  spikeBufferKwh: 0.54,
+  /** How far the solar forecast is reduced for the cautious case, %. */
+  solarMarginPercent: 20,
+  /** Price-currency wear cost per charged kWh. */
+  chargeWearPerKwh: 0.05,
+  /** Search passes over the ceiling schedule. */
+  passes: 4,
+} as const;
 
 /**
  * Stored as an id rather than a boolean so that the price-aware strategies on
@@ -34,7 +51,7 @@ export const STRATEGIES: Array<{
     id: "charge-limit",
     label: "Optimize charge limits",
     description:
-      "Plan automatically with solar forecasts and prices. When enabled, publish balance commands with maximum charging and optional AC output power limits, so the battery stays in native self-consumption.",
+      "Plan automatically with solar forecasts and prices. When enabled, publish balance commands with maximum charging and optional AC output power limits, so the battery stays in native self-consumption. Plans aim for the battery's maximum charge by 18:00, allowing for 20% less solar than forecast.",
   },
   {
     id: "net-zero-energy",
@@ -75,21 +92,6 @@ export function normalizeControlConfig(
   const intervalSeconds = Number(stored?.intervalSeconds);
 
   return {
-    ...(stored?.solarMarginPercent !== undefined
-      ? { solarMarginPercent: Number(stored.solarMarginPercent) }
-      : {}),
-    ...(stored?.chargeWearPerKwh !== undefined
-      ? { chargeWearPerKwh: Number(stored.chargeWearPerKwh) }
-      : {}),
-    ...(stored?.eveningHour !== undefined
-      ? { eveningHour: stored.eveningHour }
-      : {}),
-    ...(stored?.ceilingSwitchCost !== undefined
-      ? { ceilingSwitchCost: stored.ceilingSwitchCost }
-      : {}),
-    ...(stored?.spikeBufferKwh !== undefined
-      ? { spikeBufferKwh: Number(stored.spikeBufferKwh) }
-      : {}),
     enabled: stored?.enabled === true,
     strategy: isStrategyId(stored?.strategy)
       ? stored.strategy
@@ -105,7 +107,6 @@ export function normalizeControlConfig(
 export type ControlErrors = {
   intervalSeconds?: string;
   enabled?: string;
-  planning?: string;
 };
 
 /**
@@ -142,55 +143,10 @@ export function parseControlConfig(
   }
 
   const strategy = formData.get("strategy")?.toString();
-  const planning: Partial<ControlConfig> = {};
-  for (const key of [
-    "eveningHour",
-    "ceilingSwitchCost",
-    "spikeBufferKwh",
-  ] as const) {
-    const raw = formData.get(key)?.toString();
-    if (raw !== undefined) {
-      const value = Number(raw);
-      if (
-        !raw.trim() ||
-        !Number.isFinite(value) ||
-        value < 0 ||
-        (key === "eveningHour" && (!Number.isInteger(value) || value > 23))
-      )
-        return {
-          ok: false,
-          errors: {
-            planning:
-              "Deadline hour must be 0–23; switching cost and spike buffer must be non-negative.",
-          },
-        };
-      planning[key] = value;
-    }
-  }
-  for (const key of ["solarMarginPercent", "chargeWearPerKwh"] as const) {
-    const raw = formData.get(key)?.toString().trim();
-    if (raw) {
-      const value = Number(raw);
-      if (
-        !Number.isFinite(value) ||
-        value < 0 ||
-        (key === "solarMarginPercent" && value > 80)
-      )
-        return {
-          ok: false,
-          errors: {
-            planning:
-              "Solar margin must be 0–80%; wear cost must be non-negative.",
-          },
-        };
-      planning[key] = value;
-    }
-  }
 
   return {
     ok: true,
     config: {
-      ...planning,
       // An unchecked checkbox sends nothing at all, which is what makes the
       // absent case mean "off" here.
       enabled: formData.get("enabled") === "on",

@@ -50,8 +50,6 @@ beforeEach(async () => {
     enabled: true,
     strategy: "charge-limit",
     chargeAlgorithm: "evening-target",
-    eveningHour: 18,
-    ceilingSwitchCost: 0.002,
   });
   configMocks.curtailment.mockResolvedValue(DEFAULT_CURTAILMENT_CONFIG);
   configMocks.arrays.mockResolvedValue([]);
@@ -109,6 +107,14 @@ describe("planner export data generation and route", () => {
       chargeBatteryFixture.maxChargePercent,
     );
     expect(dataset.settings.deadline).toBeDefined();
+    // The hardcoded planning constants, still written for the Planner sandbox.
+    expect(dataset.settings).toMatchObject({
+      solarHaircut: 0.2,
+      switchCost: 0.002,
+      passes: 4,
+      spikeBufferKwh: 0.54,
+    });
+    expect(dataset.model.wearPerKwh).toBe(0.05);
 
     expect(dataset.devices.battery.id).toBe(chargeBatteryFixture.id);
     expect(dataset.devices.batteries).toHaveLength(1);

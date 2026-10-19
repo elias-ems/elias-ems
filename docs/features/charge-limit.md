@@ -39,12 +39,11 @@ In Settings → Batteries, edit the battery:
    off to retain native discharge.
 4. Tick **Plan charge limits** and save. Home automatically calculates a preview,
    even while Battery control is disabled or another strategy is selected.
-   Defaults are 95% efficiency in each direction, a 20% solar margin, and no
-   wear cost.
+   Efficiency defaults to 95% in each direction. The other planning inputs are
+   fixed; see [Fixed planning settings](#fixed-planning-settings).
 5. Write the automation for the battery's `elias_ems_<slug>_battery_command`
    event, then tick **Steer this battery**. Set self-consumption on the device.
-6. Under **Battery control**, set the solar margin and wear cost if needed.
-   Check the Home plan, then select **Optimize charge limits** and enable Battery
+6. Check the Home plan, then select **Optimize charge limits** and enable Battery
    control to publish commands. Plans refresh every five minutes and at each
    interval boundary.
 
@@ -125,8 +124,28 @@ Recorder hourly changes, requested in kWh, reconstruct household consumption:
 
 Complete observations form a mean profile by local hour in Home Assistant's
 timezone. The first version does not distinguish weekdays, predict individual
-appliances, or use Helios-specific confidence bands. A configurable solar margin
+appliances, or use Helios-specific confidence bands. A fixed 20% solar margin
 provides a conservative planning assumption, not a statistical confidence level.
+
+### Fixed planning settings
+
+These used to be editable, first per battery and later under **Battery
+control**. They are now constants (`CHARGE_LIMIT_PLANNING` in
+`addon/app/lib/control.ts`), set to what an install had by default:
+
+| Setting | Value |
+| --- | --- |
+| Evening deadline | 18:00, Home Assistant local time |
+| Solar forecast margin | 20% (`solarHaircut` 0.2 in exports) |
+| Wear cost per charged kWh | 0.05 in the price currency (`model.wearPerKwh`) |
+| Cost per ceiling change | 0.002 in the price currency |
+| Daytime spike buffer | 0.54 kWh |
+| Search passes | 4 |
+
+Values stored by an earlier version, on the battery or in the control config,
+are ignored when read and dropped on the next save. An install that had
+stored different ones plans with these instead. Planner exports still write
+them into `settings` and `model`, so the Planner sandbox reads them as before.
 
 The pure TypeScript Evening target planner is used for all live previews and
 control; the algorithm selector has been removed. Older selections are ignored.
@@ -157,7 +176,7 @@ Charging uses available solar surplus up to the selected ceiling and native
 battery room. Discharge serves deficits up to the planned AC output ceiling,
 hardware limit and energy above the native SoC floor. Without discharge limiting,
 it follows native limits. The
-objective is purchase cost minus export revenue plus the configured wear cost
+objective is purchase cost minus export revenue plus the fixed wear cost
 per charged kWh. Thus charging with solar carries the opportunity cost of the
 export revenue forgone. Negative prices do not create permission to charge from
 the grid; an output ceiling may hold discharge back when buying is cheaper.

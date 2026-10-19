@@ -53,8 +53,6 @@ const storedBattery = {
   chargeLimitPlanning: false,
   commandContract: 1,
   chargeEfficiencyPercent: 95,
-  solarMarginPercent: 20,
-  chargeWearPerKwh: 0,
   ...postedBattery,
   capacityKwh: 10,
   minChargePercent: 10,

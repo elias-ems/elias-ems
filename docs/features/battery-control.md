@@ -888,25 +888,27 @@ hours by limiting discharge, then allows more discharge during expensive demand,
 including the morning before solar recovery. The configured native minimum SoC
 (e.g. 5%) remains unchanged. Without discharge limiting, discharge stays native.
 
-Evening target uses the battery maximum SoC and the next configured hour in Home
-Assistant's timezone (18:00 by default). Missing coverage through that deadline
+Evening target uses the battery maximum SoC and the next 18:00 in Home
+Assistant's timezone. Missing coverage through that deadline
 leaves planning unavailable; it does not invent prices or switch algorithms.
-The solar margin defines a second reduced-solar scenario, applied once. The
+The fixed 20% solar margin defines a second reduced-solar scenario, applied once. The
 planner preserves the maximum reachable deadline energy in both scenarios when
 full is impossible, accounting for both available controls. Reaching the evening
 target takes priority over savings: scarce solar can mean retaining energy even
 during expensive demand. This is a bounded local search, not a guarantee of
 global optimality or morning availability under unexpected consumption.
 
-A daytime spike buffer defaults to 0.54 kWh above the native minimum, capped at
-usable capacity. Set 0 to disable. A soft penalty values missing buffer energy
+A daytime spike buffer of 0.54 kWh sits above the native minimum, capped at
+usable capacity. A soft penalty values missing buffer energy
 at the import price per hour during solar hours before the deadline. This is a
 preference for earlier charging, evaluated with unrestricted native discharge:
 withholding output cannot improve the buffer score. Energy below that buffer
 target remains available for high-priced demand and appliance spikes, down to
-the native minimum. On a 3.6 kWh battery with a 5% minimum, the default targets
+the native minimum. On a 3.6 kWh battery with a 5% minimum, the buffer targets
 20% SoC for replenishment; it is not a second discharge floor or a calibrated
 spike probability. Price-based withholding and evening feasibility still apply.
 
-See [charge-limit optimization](charge-limit.md) for setup, forecasting and
-the migration from direct limit writes.
+None of these are settings: see
+[fixed planning settings](charge-limit.md#fixed-planning-settings) for the full
+list. See [charge-limit optimization](charge-limit.md) for setup, forecasting
+and the migration from direct limit writes.

@@ -83,8 +83,6 @@ describe("charge-limit settings", () => {
     { controlModes: "boost" },
     { chargeEfficiencyPercent: "0" },
     { chargeEfficiencyPercent: "NaN" },
-    { solarMarginPercent: "81" },
-    { chargeWearPerKwh: "-1" },
   ])("rejects invalid control settings %o", (overrides) => {
     expect(parseBattery(form(overrides)).ok).toBe(false);
   });

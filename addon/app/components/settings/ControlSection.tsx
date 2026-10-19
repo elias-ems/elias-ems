@@ -134,72 +134,7 @@ export default function ControlSection({
           error={errors.intervalSeconds}
           hint={`How often the loop reconsiders. ${MIN_INTERVAL_SECONDS}–${MAX_INTERVAL_SECONDS}s.`}
         />
-        <fieldset
-          style={{ border: "1px solid var(--color-border)", padding: "1rem" }}
-        >
-          <legend>Automatic charge-limit preview</legend>
-          <p style={hintStyle}>
-            Calculated on Home whenever a battery has a charge limit entity.
-            Only the enabled Optimize charge limits strategy can apply it; the
-            battery must remain in native self-consumption. Plans and writes
-            update at most every five minutes.
-          </p>
-          {errors.enabled && <p style={errorStyle}>{errors.enabled}</p>}
-          {errors.planning && <p style={errorStyle}>{errors.planning}</p>}
-          <p style={hintStyle}>
-            Evening target aims for the configured maximum charge by the next
-            deadline, allowing for reduced solar. With an AC output limit
-            configured, it also saves energy during cheaper hours for
-            higher-priced demand.
-          </p>
-          <Field
-            name="eveningHour"
-            label="Evening deadline hour (Home Assistant local time)"
-            type="number"
-            min={0}
-            max={23}
-            step={1}
-            defaultValue={config.eveningHour ?? 18}
-            hint="Used by Evening target. Requires forecast and price coverage through the next deadline."
-          />
-          <Field
-            name="spikeBufferKwh"
-            label="Evening target: daytime spike buffer (kWh)"
-            type="number"
-            min={0}
-            step="any"
-            defaultValue={config.spikeBufferKwh ?? 0.54}
-            hint="Encourages earlier charging so energy is available for demand spikes. 0.54 kWh means a 20% target on a 3.6 kWh battery with a 5% minimum. This preference does not hold back discharge below the buffer target; the native minimum still applies. Set 0 to disable."
-          />
-          <Field
-            name="ceilingSwitchCost"
-            label="Evening target: cost per ceiling change"
-            type="number"
-            min={0}
-            step="any"
-            defaultValue={config.ceilingSwitchCost ?? 0.002}
-            hint="In the price currency; a small preference for steadier ceilings."
-          />
-          <Field
-            name="solarMarginPercent"
-            label="Solar forecast margin (%)"
-            type="number"
-            min={0}
-            max={80}
-            step="any"
-            defaultValue={config.solarMarginPercent ?? ""}
-            hint="Leave empty to retain the battery's previous margin (20% by default)."
-          />
-          <Field
-            name="chargeWearPerKwh"
-            label="Wear cost per charged kWh"
-            type="number"
-            min={0}
-            step="any"
-            defaultValue={config.chargeWearPerKwh ?? ""}
-            hint="In the price currency. Leave empty to retain the battery's previous value."
-          />
-        </fieldset>
+        {errors.enabled && <p style={errorStyle}>{errors.enabled}</p>}
 
         <div>
           <button type="submit" disabled={isSaving}>

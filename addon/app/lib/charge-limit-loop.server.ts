@@ -29,6 +29,7 @@ import {
   chargeLimitControl,
 } from "./charge-limit-status";
 import { calculateChargePlan } from "./charge-planner.server";
+import { CHARGE_LIMIT_PLANNING } from "./control";
 import { readControlConfig } from "./control-config.server";
 import { appendDiagnostic } from "./diagnostics.server";
 
@@ -118,7 +119,7 @@ function empty(b: Battery): ChargeLimitStatus {
     forecastEnd: null,
     sources: 0,
     historyHours: 0,
-    solarMarginPercent: b.solarMarginPercent ?? 20,
+    solarMarginPercent: CHARGE_LIMIT_PLANNING.solarMarginPercent,
     checks: {
       solar: "Waiting",
       history: "Waiting",

@@ -51,8 +51,6 @@ export type BatteryFields = {
    */
   commandContract?: number;
   chargeEfficiencyPercent?: number;
-  solarMarginPercent?: number;
-  chargeWearPerKwh?: number;
   title: string;
   /** Usable capacity in kWh. */
   capacityKwh: number;
@@ -113,6 +111,12 @@ type LegacyBatteryFields = {
   chargeLimitMode?: string;
   chargeLimitEntityId?: string;
   dischargeLimitEntityId?: string;
+  /**
+   * Per-battery planning settings, before Optimize charge limits hardcoded
+   * them (`CHARGE_LIMIT_PLANNING` in control.ts). Dropped on read.
+   */
+  solarMarginPercent?: number;
+  chargeWearPerKwh?: number;
 };
 
 /**
@@ -193,6 +197,8 @@ export function normalizeBattery(battery: StoredBattery): Battery {
     chargeLimitMode: _mode,
     chargeLimitEntityId,
     dischargeLimitEntityId,
+    solarMarginPercent: _margin,
+    chargeWearPerKwh: _wear,
     ...rest
   } = battery;
   // A record saved before the battery command event existed. Its strategy
@@ -234,8 +240,6 @@ export function normalizeBattery(battery: StoredBattery): Battery {
       battery.chargeEfficiencyPercent,
       95,
     ),
-    solarMarginPercent: toFiniteNumber(battery.solarMarginPercent, 20),
-    chargeWearPerKwh: toFiniteNumber(battery.chargeWearPerKwh, 0),
     maxChargePowerW: toOptionalPowerW(battery.maxChargePowerW),
     maxDischargePowerW: toOptionalPowerW(battery.maxDischargePowerW),
   };
@@ -377,12 +381,6 @@ export function parseBattery(
   const chargeEfficiencyPercent =
     readNumber(formData, "chargeEfficiencyPercent") ??
     (formData.get("chargeEfficiencyPercent") ? NaN : 95);
-  const solarMarginPercent =
-    readNumber(formData, "solarMarginPercent") ??
-    (formData.get("solarMarginPercent") ? NaN : 20);
-  const chargeWearPerKwh =
-    readNumber(formData, "chargeWearPerKwh") ??
-    (formData.get("chargeWearPerKwh") ? NaN : 0);
   if (requestedModes.some((mode) => !isBatteryMode(mode)))
     errors.controlModes = "Choose from balance, hold, charge and discharge.";
   if (!Number.isFinite(powerStepW) || powerStepW <= 0)
@@ -402,14 +400,6 @@ export function parseBattery(
   )
     errors.chargeEfficiencyPercent =
       "Efficiency must be above 0 and at most 100%.";
-  if (
-    !Number.isFinite(solarMarginPercent) ||
-    solarMarginPercent < 0 ||
-    solarMarginPercent > 80
-  )
-    errors.solarMarginPercent = "Solar margin must be between 0 and 80%.";
-  if (!Number.isFinite(chargeWearPerKwh) || chargeWearPerKwh < 0)
-    errors.chargeWearPerKwh = "Wear cost must be a non-negative number.";
   if (!title) {
     errors.title = "Give this battery a name.";
   } else if (slugifyTitle(title) === "") {
@@ -480,8 +470,6 @@ export function parseBattery(
       chargeLimitPlanning,
       commandContract: BATTERY_COMMAND_SCHEMA_VERSION,
       chargeEfficiencyPercent,
-      solarMarginPercent,
-      chargeWearPerKwh,
       // Both are known good here: an unparseable one is an error above.
       maxChargePowerW: maxChargePowerW.ok ? maxChargePowerW.value : null,
       maxDischargePowerW: maxDischargePowerW.ok

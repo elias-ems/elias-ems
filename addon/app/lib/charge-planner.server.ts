@@ -1,6 +1,7 @@
 import type { Battery } from "./batteries";
 import { evening } from "./charge-evening";
 import type { ChargeInterval, ChargeModel } from "./charge-plan";
+import { CHARGE_LIMIT_PLANNING } from "./control";
 import { readControlConfig } from "./control-config.server";
 import { readCurtailmentConfig } from "./curtailment-config.server";
 import { localHour } from "./energy-forecast";
@@ -52,7 +53,7 @@ export function chargeModel(battery: Battery, soc: number | null): ChargeModel {
       ? { dischargeMinW: 0, dischargeStepW: stepW }
       : {}),
     efficiency: (battery.chargeEfficiencyPercent ?? 95) / 100,
-    wearPerKwh: battery.chargeWearPerKwh ?? 0,
+    wearPerKwh: CHARGE_LIMIT_PLANNING.chargeWearPerKwh,
   };
 }
 
@@ -97,12 +98,6 @@ export async function preparePlannerInputs(
   report: (key: string, message: string) => void = () => {},
 ): Promise<PlannerInputs> {
   const control = await readControlConfig();
-  battery = {
-    ...battery,
-    solarMarginPercent:
-      control.solarMarginPercent ?? battery.solarMarginPercent,
-    chargeWearPerKwh: control.chargeWearPerKwh ?? battery.chargeWearPerKwh,
-  };
   const checked = async <T>(key: string, task: Promise<T>): Promise<T> => {
     try {
       const result = await task;
@@ -202,9 +197,7 @@ export async function preparePlannerInputs(
     throw new Error(
       prices.read.error || "Configure dynamic purchase and export prices.",
     );
-  const margin = battery.solarMarginPercent ?? 20;
-  if (!Number.isFinite(margin) || margin < 0 || margin > 80)
-    throw new Error("Invalid solar forecast margin.");
+  const margin = CHARGE_LIMIT_PLANNING.solarMarginPercent;
   const solar = new Map(energy.solar.map((s) => [s.start, s.wh]));
   const priced = prices.read.forecast.slots.map((s) => ({
     ...priceSlot(s, parsePriceFormulas(prices.config)),
@@ -371,10 +364,7 @@ export async function preparePlannerInputs(
   // terminal value rather than treating the end of the forecast as free energy.
   if (!reserveCovered)
     reserve = (model.capacityKwh * (model.maxSoc - model.minSoc)) / 100;
-  const hour = control.eveningHour ?? 18;
-  const switchCost = control.ceilingSwitchCost ?? 0.002;
-  if (!Number.isInteger(hour) || hour < 0 || hour > 23)
-    throw new Error("Invalid evening deadline hour.");
+  const hour = CHARGE_LIMIT_PLANNING.eveningHour;
   // Search real instants, rather than adding 24h, to respect HA timezone/DST.
   const deadlineSlot = slots.find(
     (s) =>
@@ -394,9 +384,9 @@ export async function preparePlannerInputs(
     deadline,
     targetSoc: model.maxSoc,
     solarHaircut: margin / 100,
-    switchCost,
-    passes: 4,
-    spikeBufferKwh: control.spikeBufferKwh ?? 0.54,
+    switchCost: CHARGE_LIMIT_PLANNING.ceilingSwitchCost,
+    passes: CHARGE_LIMIT_PLANNING.passes,
+    spikeBufferKwh: CHARGE_LIMIT_PLANNING.spikeBufferKwh,
     algorithm: "evening-target" as const,
     algorithms: ["cost-optimized", "evening-target"] as [
       "cost-optimized",
@@ -438,8 +428,7 @@ export async function calculateChargePlan(
 ) {
   const inputs = await preparePlannerInputs(battery, now, report);
   const { model, slots, reserve, settings, deadlineSlot } = inputs;
-  const control = inputs.raw.control;
-  const hour = control.eveningHour ?? 18;
+  const hour = CHARGE_LIMIT_PLANNING.eveningHour;
   if (!deadlineSlot)
     throw new Error(
       "Waiting for solar and price coverage through the next evening deadline.",

@@ -65,8 +65,6 @@ export const chargeBatteryFixture = {
   chargeLimitPlanning: true,
   commandContract: 1,
   chargeEfficiencyPercent: 95,
-  solarMarginPercent: 20,
-  chargeWearPerKwh: 0,
 };
 
 /**
