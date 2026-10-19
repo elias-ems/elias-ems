@@ -31,7 +31,6 @@ beforeAll(async () => {
     JSON.stringify({
       enabled: true,
       strategy: "net-zero-energy",
-      intervalSeconds: 5,
     }),
   );
   stack = await startStack({ dataDir });
@@ -216,7 +215,6 @@ describe("battery control", () => {
       intent: "control-save",
       enabled: "on",
       strategy: "highs",
-      intervalSeconds: "5",
     });
 
     const settings = await fetch(`${stack.baseUrl}settings`).then((r) =>

@@ -47,8 +47,9 @@ In Settings → Batteries, edit the battery:
 5. Write the automation for the battery's `elias_ems_<slug>_battery_command`
    event, then tick **Steer this battery**. Set self-consumption on the device.
 6. Check the Home plan, then select **Evening target** or **HiGHS cost
-   optimizer** and enable Battery control to publish commands. Plans refresh
-   every five minutes and at each interval boundary.
+   optimizer** and enable Battery control to publish commands. Each price
+   interval's command goes out as it starts, and the plan is refreshed right
+   after.
 
 Once battery control is enabled, the choice of strategy persists across
 restarts and updates. The plan card checks the saved control settings and
@@ -220,9 +221,10 @@ visible.
 
 ## Control lifecycle
 
-The background loop runs even when no browser is open. It ticks every 30 seconds
-and recalculates every five minutes or at the end of the current interval,
-whichever comes first. Settings mutations are serialized with publishing,
+The background loop runs even when no browser is open. At the end of each price
+interval it publishes the next interval from the plan in hand, then
+recalculates; a settings save recalculates at once, and a failed plan is
+retried after a minute. Settings mutations are serialized with publishing,
 preventing an old plan from going out after the battery is disabled or removed.
 
 The selected strategy is read on every plan, so switching between Evening

@@ -189,13 +189,10 @@ The two formulas are the substance of it, and they have a page of their own:
 | --- | --- | --- |
 | **Enabled** | off | Disabled until exactly one battery is steered and planned. |
 | **Strategy** | Evening target | Evening target or HiGHS cost optimizer — see [choosing a strategy](/guide/battery-control#choosing-a-strategy). |
-| **Loop interval (seconds)** | 5 | 1–3600. How often PV curtailment may reconsider. |
 
-The strategies replan every five minutes and at each interval boundary,
-whatever the loop interval says. That interval paces the loop
-[PV curtailment](/guide/pv-curtailment) runs on: a **rate limit, not a
-schedule** — at most one decision per interval, acted on as soon as Home
-Assistant reports a change.
+There is no interval to set. Each price interval's command goes out as the
+interval starts — every 15 or 60 minutes, depending on your price source — and
+the plan is refreshed right after.
 
 Saving this section takes effect immediately, including switching control off.
 

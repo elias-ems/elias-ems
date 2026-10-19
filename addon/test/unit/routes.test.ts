@@ -85,7 +85,6 @@ async function clearStoredSettings() {
   await control.saveControlConfig({
     enabled: false,
     strategy: "evening-target",
-    intervalSeconds: 5,
   });
 }
 
@@ -715,7 +714,6 @@ describe("POST /settings", () => {
     const result = await post({
       intent: "control-save",
       strategy: "evening-target",
-      intervalSeconds: "10",
     });
 
     expect(result).toEqual({ section: "control", ok: true });
@@ -725,7 +723,6 @@ describe("POST /settings", () => {
     expect(await readControlConfig()).toEqual({
       enabled: false,
       strategy: "evening-target",
-      intervalSeconds: 10,
     });
   });
 
@@ -739,7 +736,6 @@ describe("POST /settings", () => {
         intent: "control-save",
         enabled: "on",
         strategy,
-        intervalSeconds: "5",
       });
 
       expect(result).toEqual({ section: "control", ok: true });
@@ -766,7 +762,6 @@ describe("POST /settings", () => {
         intent: "control-save",
         enabled: "on",
         strategy: "highs",
-        intervalSeconds: "5",
       });
       const { readControlConfig } = await import(
         "../../app/lib/control-config.server"
@@ -796,7 +791,6 @@ describe("POST /settings", () => {
       intent: "control-save",
       enabled: "on",
       strategy: "evening-target",
-      intervalSeconds: "5",
     });
 
     const { payload, status } = failure(result);
@@ -821,7 +815,6 @@ describe("POST /settings", () => {
     const result = await post({
       intent: "control-save",
       strategy: "evening-target",
-      intervalSeconds: "5",
     });
 
     expect(result).toEqual({ section: "control", ok: true });
@@ -837,26 +830,9 @@ describe("POST /settings", () => {
       intent: "control-save",
       enabled: "on",
       strategy: "evening-target",
-      intervalSeconds: "5",
     });
 
     expect(failure(result).status).toBe(400);
-  });
-
-  it("rejects an interval outside the allowed range", async () => {
-    const result = await post({
-      intent: "control-save",
-      enabled: "on",
-      strategy: "evening-target",
-      intervalSeconds: "0",
-    });
-
-    const { payload, status } = failure(result);
-    expect(status).toBe(400);
-    expect(payload).toMatchObject({
-      section: "control",
-      errors: { intervalSeconds: expect.any(String) },
-    });
   });
 
   const postedPrices = {

@@ -10,7 +10,6 @@ describe("charge algorithm settings", () => {
     for (const algorithm of ["cost-optimized", "evening-target"]) {
       const form = new FormData();
       Object.entries({
-        intervalSeconds: "5",
         strategy: "charge-limit",
         chargeAlgorithm: algorithm,
         eveningHour: "25",
@@ -26,7 +25,6 @@ describe("charge algorithm settings", () => {
       if (result.ok)
         expect(Object.keys(result.config).sort()).toEqual([
           "enabled",
-          "intervalSeconds",
           "strategy",
         ]);
     }
@@ -45,6 +43,6 @@ describe("charge algorithm settings", () => {
       Object.keys(
         normalizeControlConfig(legacy as unknown as Partial<ControlConfig>),
       ).sort(),
-    ).toEqual(["enabled", "intervalSeconds", "strategy"]);
+    ).toEqual(["enabled", "strategy"]);
   });
 });

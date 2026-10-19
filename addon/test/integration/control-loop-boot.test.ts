@@ -59,12 +59,7 @@ beforeAll(async () => {
         stepLimitPercent: null,
       },
     ]),
-    // One second, so the assertions below don't have to wait on a real clock.
-    write("control.json", {
-      enabled: false,
-      strategy: "evening-target",
-      intervalSeconds: 1,
-    }),
+    write("control.json", { enabled: false, strategy: "evening-target" }),
     write("curtailment.json", { enabled: true, settleSeconds: 0 }),
   ]);
 

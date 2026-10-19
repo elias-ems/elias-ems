@@ -100,7 +100,7 @@ The HiGHS/WASM engine in [engine/](../../engine/README.md), described in
 exactly, then, with any solver budget left, prefers more time in balance at
 equal cost. It has no evening target, no shortfall penalty and **no terminal
 value**, so a plan can end at the minimum SoC; the planning loop replanning
-every five minutes moves that horizon along, but valuing the end state properly
+at every price interval moves that horizon along, but valuing the end state properly
 is open work.
 
 In production it runs with **equivalent capabilities**: balance plus the

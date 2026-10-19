@@ -66,9 +66,9 @@ your automation, so work outwards in this order:
 
 1. **Is the event being fired?** Developer Tools → **Events** → listen to the
    battery's event name, which the Settings page shows under its Title. Nothing
-   arriving means control is off, the battery is not steered, or every target
-   is inside the 50 W deadband — wait 30 seconds and one will be restated
-   anyway.
+   arriving means control is off or the battery is not steered. A command
+   goes out as each price interval starts and when settings are saved, so
+   saving Battery control again is the quickest way to provoke one.
 2. **Is the automation listening for the right name?** The event is named after
    the battery's title, so **renaming a battery renames its event** and any
    automation still on the old name hears nothing, with no error anywhere.

@@ -71,12 +71,21 @@ import { readingAge, readStates } from "./states.server";
  */
 const IDLE_TICK_MS = 60_000;
 
+/**
+ * The shortest gap between two ticks. Ticks follow Home Assistant's changes, so
+ * this is a rate limit rather than a schedule: fast enough to follow a kettle,
+ * slow enough not to hammer HA with a meter that reports every second. Not a
+ * setting, because `settleSeconds` is what paces how often curtailment actually
+ * moves; `CONTROL_MIN_TICK_MS` overrides it only so a test can reach it in
+ * milliseconds.
+ */
+const minTickMs = () => Number(process.env.CONTROL_MIN_TICK_MS) || 5_000;
+
 type LoopState = {
   /** The idle heartbeat. Its presence is also what "the loop is running" means. */
   timer: ReturnType<typeof setInterval> | null;
   /** Unsubscribes from Home Assistant's changes; null when the loop is stopped. */
   unsubscribe: (() => void) | null;
-  config: ControlConfig | null;
   curtailment: CurtailmentConfig | null;
   /** The tick currently awaiting Home Assistant, if any. Doubles as the overlap guard. */
   inFlight: Promise<void> | null;
@@ -104,7 +113,6 @@ type LoopState = {
 const state: LoopState = {
   timer: null,
   unsubscribe: null,
-  config: null,
   curtailment: null,
   inFlight: null,
   lastTickAt: null,
@@ -649,7 +657,7 @@ export async function releasePvArray(array: PvEntity): Promise<void> {
  */
 function startTick(): void {
   // A tick that is still waiting on Home Assistant must not have a second one
-  // pile up behind it: the interval can be as short as a second and an
+  // pile up behind it: ticks can be a few seconds apart and an
   // unreachable HA takes far longer than that to give up, which is exactly when
   // overlap would start.
   if (state.inFlight) {
@@ -696,13 +704,12 @@ async function refreshWatched(): Promise<void> {
  * looked at again.
  */
 function requestTick(): void {
-  const intervalMs = (state.config?.intervalSeconds ?? 5) * 1000;
   const since =
     state.lastTickStartedAt === null
       ? Number.POSITIVE_INFINITY
       : Date.now() - state.lastTickStartedAt;
 
-  if (since >= intervalMs) {
+  if (since >= minTickMs()) {
     startTick();
     return;
   }
@@ -711,7 +718,7 @@ function requestTick(): void {
   state.trailing = setTimeout(() => {
     state.trailing = null;
     startTick();
-  }, intervalMs - since);
+  }, minTickMs() - since);
   state.trailing.unref?.();
 }
 
@@ -775,7 +782,7 @@ function armShutdownRelease(): void {
 
 /**
  * Bring the loop in line with what settings say — start it, stop it, or restart
- * it under a new interval or strategy. Idempotent, so it is safe to call on
+ * it. Idempotent, so it is safe to call on
  * every save and at boot.
  *
  * The loop runs while **either** feature is enabled, and each tick decides for
@@ -789,13 +796,8 @@ export async function syncControlLoop(): Promise<
   // Armed whatever is enabled: a battery strategy holding a battery runs in
   // its own loop, and it still has to be let go when the process stops.
   armShutdownRelease();
-  const [config, curtailment] = await Promise.all([
-    readControlConfig(),
-    readCurtailmentConfig(),
-  ]);
-  const previous = state.config;
+  const curtailment = await readCurtailmentConfig();
   const previousCurtailment = state.curtailment;
-  state.config = config;
   state.curtailment = curtailment;
 
   const wanted = curtailment.enabled;
@@ -822,15 +824,9 @@ export async function syncControlLoop(): Promise<
     await releasePvArrays();
   }
 
-  // What the loop itself runs on. A feature being switched on or off does not
-  // change this — the tick gates its own halves — but it still has to restart
-  // the loop, because the watched set and the immediate first tick both depend
-  // on which features are live.
-  const cadenceChanged =
-    !previous || previous.intervalSeconds !== config.intervalSeconds;
-
-  const changed =
-    cadenceChanged || previousCurtailment?.enabled !== curtailment.enabled;
+  // Switching the feature on has to restart the loop, because the watched set
+  // and the immediate first tick both depend on it.
+  const changed = previousCurtailment?.enabled !== curtailment.enabled;
 
   if (state.timer && !changed) {
     // The watched set depends on which features are on, so a feature toggled
@@ -840,19 +836,13 @@ export async function syncControlLoop(): Promise<
   }
 
   stopControlLoop();
-  // One line per feature, under its own origin: the loop is shared but each box
-  // should say what *it* is now doing, and at what cadence. Only when that
-  // feature has just come on or the cadence moved — re-announcing battery
-  // control because curtailment was toggled would be noise about something
-  // that did not change.
-  if (
-    curtailment.enabled &&
-    (cadenceChanged || !previousCurtailment?.enabled)
-  ) {
+  // Only when the feature has just come on; a restart for any other reason
+  // would be noise about something that did not change.
+  if (curtailment.enabled && !previousCurtailment?.enabled) {
     log(
       "pv-curtailment",
       "info",
-      `PV curtailment enabled — on every change and at most every ${config.intervalSeconds}s, acting once the meter has been off target for ${curtailment.settleSeconds}s and at most that often thereafter.`,
+      `PV curtailment enabled — on every change and at most every ${minTickMs() / 1000}s, acting once the meter has been off target for ${curtailment.settleSeconds}s and at most that often thereafter.`,
     );
   }
 
@@ -860,7 +850,7 @@ export async function syncControlLoop(): Promise<
   armShutdownRelease();
 
   // Home Assistant decides when there is something new to decide about. The
-  // interval is now a ceiling on how often that can produce a tick rather than
+  // rate limit is a ceiling on how often that can produce a tick rather than
   // the thing that produces them, so a grid reading that moves is acted on in
   // the time it takes to arrive instead of up to a full interval later.
   state.unsubscribe = onHaChange((changed) => {
@@ -898,7 +888,6 @@ export function resetControlLoop(): void {
   // back by the deadband.
   forgetPublishedCommands();
   forgetPublishedLimits();
-  state.config = null;
   state.curtailment = null;
   state.inFlight = null;
   state.lastTickAt = null;
