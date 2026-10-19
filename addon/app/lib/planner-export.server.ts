@@ -12,6 +12,7 @@ import type { PriceConfig } from "./prices";
 import { readPriceConfig } from "./prices.server";
 import type { PvEntity } from "./pv-entities";
 import { listPvEntities } from "./pv-entities.server";
+import { strategyById } from "./strategies/index.ts";
 
 export type PlannerExportDataset = {
   schemaVersion: 1;
@@ -93,9 +94,12 @@ export async function exportPlannerData(
       ? `PV curtailment modeled with strategy "${curtailment.strategy}" across ${pvEntities.length} configured PV array(s).`
       : "PV curtailment unmodeled or disabled.",
     `Battery "${battery.title}": ${battery.capacityKwh} kWh capacity, ${inputs.model.minSoc}%–${inputs.model.maxSoc}% SoC window, initial SoC ${inputs.model.soc.toFixed(1)}%.`,
+    // `settings.algorithm` is the Benchmark's default and always reads
+    // "evening-target", so name the strategy actually steering here.
+    `Battery control strategy: ${strategyById(control.strategy).label}${control.enabled ? "" : " (battery control disabled)"}.`,
     inputs.reserveCovered
-      ? "Terminal reserve valued based on forecasted load deficit before the next solar recovery."
-      : "Full terminal reserve valued because next solar recovery is not covered in the horizon.",
+      ? "Terminal reserve sized from the forecast load deficit before the next solar recovery (valued by Evening target; HiGHS values none)."
+      : "Full terminal reserve, as the solar forecast shows no recovery within a day of the price horizon (valued by Evening target; HiGHS values none).",
   ];
 
   return {

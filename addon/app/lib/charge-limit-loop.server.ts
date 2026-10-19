@@ -430,9 +430,11 @@ export async function chargeLimitTick(now = Date.now()) {
           .filter(Boolean)
           .join(" "),
       });
-      if (!result.reserveCovered) {
+      // Only a plan that actually valued the end-of-horizon reserve may say
+      // so: HiGHS plans with none, whatever the forecast covers.
+      if (!result.reserveCovered && result.plan.terminalReserveKwh > 0) {
         status.message +=
-          " Beyond the price horizon, a full reserve is valued because the next solar recovery is not covered.";
+          " Beyond the price horizon, a full reserve is valued: the solar forecast shows no recovery within a day of it.";
       }
       const formatter = new Intl.DateTimeFormat("en-GB", {
         timeZone: result.timeZone,

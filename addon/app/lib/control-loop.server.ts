@@ -681,6 +681,24 @@ function startTick(): void {
 }
 
 /**
+ * The heartbeat's tick, for when the house has gone quiet — so it stands aside
+ * whenever the house has not. Readings that update on a fixed cadence keep
+ * landing on the same second as the heartbeat, and starting a tick there found
+ * the change-driven one still in flight and warned about it once a minute, on
+ * a loop that was perfectly healthy. A tick in flight or begun within the last
+ * half interval already proves the loop is alive.
+ */
+function idleTick(): void {
+  if (state.inFlight) return;
+  if (
+    state.lastTickStartedAt !== null &&
+    Date.now() - state.lastTickStartedAt < IDLE_TICK_MS / 2
+  )
+    return;
+  startTick();
+}
+
+/**
  * Keeps the watched set in step with the configuration. Cheap enough to redo
  * after each tick, and doing it there means saving settings takes effect on the
  * next one rather than needing the loop restarted.
@@ -857,7 +875,7 @@ export async function syncControlLoop(): Promise<
     if (changed === null || state.watched.has(changed)) requestTick();
   });
 
-  state.timer = setInterval(startTick, IDLE_TICK_MS);
+  state.timer = setInterval(idleTick, IDLE_TICK_MS);
   // Nothing here should be what keeps Node alive; the HTTP server is. Without
   // this a test that forgets to stop the loop hangs the whole run.
   state.timer.unref?.();
