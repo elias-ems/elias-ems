@@ -1,6 +1,6 @@
 import { type Battery, steerableBy } from "./batteries";
 import type { ChargePlan } from "./charge-plan";
-import type { ControlConfig } from "./control";
+import { type ControlConfig, STRATEGIES, type StrategyId } from "./control";
 
 export type ChargeLimitStatus = {
   batteryId: string;
@@ -15,6 +15,10 @@ export type ChargeLimitStatus = {
   /** Its discharge boundary; null when native or nothing is standing. */
   requestedDischargeW?: number | null;
   plan: ChargePlan | null;
+  /** Which registered strategy produced `plan`. */
+  strategy: StrategyId;
+  /** Its one-line outcome, e.g. HiGHS's solver status. */
+  strategyStatus?: string | null;
   currency: string;
   timeZone: string;
   times: Record<string, string>;
@@ -34,6 +38,9 @@ export type ChargeLimitControl = {
 export const CHARGE_LIMIT_BATTERY_ERROR =
   "Configure exactly one battery with Plan charge limits and Steer this battery enabled.";
 
+export const strategyLabel = (id: StrategyId) =>
+  STRATEGIES.find((strategy) => strategy.id === id)?.label ?? id;
+
 /** Saved authorization is independent of forecasts and plan execution. */
 export function chargeLimitControl(
   control: ControlConfig,
@@ -41,15 +48,14 @@ export function chargeLimitControl(
   batteryCount: number,
   legacyPending: boolean,
 ): ChargeLimitControl {
-  if (!control.enabled || control.strategy !== "charge-limit")
+  if (!control.enabled)
     return {
       state: "disabled",
-      message:
-        "Enable the Optimize charge limits strategy in Settings to apply plans automatically.",
+      message: `Enable battery control in Settings to apply ${strategyLabel(control.strategy)} plans automatically.`,
       settingsHref: "/settings#battery-control",
       action: "Configure battery control",
     };
-  if (batteryCount !== 1 || !steerableBy(battery, "charge-limit"))
+  if (batteryCount !== 1 || !steerableBy(battery, control.strategy))
     return {
       state: "blocked",
       message: CHARGE_LIMIT_BATTERY_ERROR,
@@ -66,8 +72,7 @@ export function chargeLimitControl(
     };
   return {
     state: "enabled",
-    message:
-      "Battery limit control is enabled. Commands are published once a valid plan is ready; no settings need to be saved.",
+    message: `${strategyLabel(control.strategy)} is enabled. Commands are published once a valid plan is ready; no settings need to be saved.`,
     settingsHref: null,
     action: null,
   };

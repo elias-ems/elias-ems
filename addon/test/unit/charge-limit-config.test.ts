@@ -37,7 +37,8 @@ describe("charge-limit settings", () => {
         expect(parsed.fields.steered).toBe(steered);
         expect(parsed.fields.chargeLimitPlanning).toBe(true);
         expect(parsed.fields.commandContract).toBe(1);
-        expect(steerableBy(parsed.fields, "charge-limit")).toBe(steered);
+        expect(steerableBy(parsed.fields, "evening-target")).toBe(steered);
+        expect(steerableBy(parsed.fields, "highs")).toBe(steered);
       }
     },
   );
@@ -50,9 +51,6 @@ describe("charge-limit settings", () => {
       "balance",
       "hold",
     ]);
-    expect(parsed.ok && steerableBy(parsed.fields, "net-zero-energy")).toBe(
-      false,
-    );
   });
 
   it("carries a pre-event battery's intent across the upgrade, unsteered", () => {

@@ -1,28 +1,18 @@
 /**
  * The control loop: one interval in the add-on's Node process that reads the
- * house out of Home Assistant, asks each enabled strategy what should be
- * happening, and writes the answers to diagnostics.
+ * house out of Home Assistant, asks PV curtailment what should be happening,
+ * and writes the answer to diagnostics.
  *
- * Two features ride on it — battery control and PV curtailment — and they share
- * **one snapshot per tick** rather than reading for themselves. That is the
- * whole reason there is not a second loop: both correct against the same grid
- * meter, and two independent reads would let the two decisions describe
- * different instants. It is the same argument that makes `readTickConfig` one
- * read of the stored configuration rather than one per concern.
+ * It used to carry a live battery strategy (net zero energy) too, sharing one
+ * snapshot per tick so both corrected against the same meter reading. Battery
+ * control is planned now — see `charge-limit-loop.server.ts` and the strategy
+ * registry in `strategies/` — so this loop is curtailment's, plus the one
+ * duty that stays process-wide: releasing every steered battery on shutdown.
  *
- * They are also ordered: the batteries decide first. Nothing depends on that
- * ordering for correctness — both halves read the same snapshot, so curtailment
- * sees what the batteries are *measured* to be doing rather than what they have
- * just been told to do — but it keeps the log readable, with the reason a
- * surplus was curtailed sitting under the line saying the battery could not
- * take it.
- *
- * Each tick publishes what it decided as an event per battery and per array and
- * records both halves. Deciding and acting stay separable — `net-zero.ts` and
- * `curtail.ts` work out what should happen, `battery-commands.server.ts` and
- * `pv-limits.server.ts` put it on Home Assistant's bus for an automation to
- * carry out — which is what lets both strategies stay pure functions with no
- * idea that Home Assistant exists.
+ * Deciding and acting stay separable: `curtail.ts` works out what should
+ * happen and `pv-limits.server.ts` puts it on Home Assistant's bus for an
+ * automation to carry out, which is what lets the strategy stay a pure
+ * function with no idea that Home Assistant exists.
  *
  * A stopped loop lets everything go; see `releaseBatteries` and
  * `releasePvArrays`, and note that the safe direction is the opposite for each.
@@ -32,28 +22,20 @@
  * statement. (Under Vite's dev server a hot reload can drop the module and with
  * it the log; `npm run start:ingress` is the stack to watch it on.)
  */
-import {
-  type Battery,
-  batterySlug,
-  isSteerable,
-  resolvePowerLimits,
-  steerableBy,
-} from "./batteries";
+import { type Battery, batterySlug, isSteerable } from "./batteries";
 import { listBatteries } from "./batteries.server";
-import { type ReleaseReason, setpointCommand } from "./battery-command";
+import type { ReleaseReason } from "./battery-command";
 import {
   type CommandPublish,
-  describePublishes,
   forgetPublishedCommands,
-  PUBLISH_DEADBAND_W,
-  publishCommands,
   releaseCommands,
 } from "./battery-commands.server";
-import type { ControlConfig, ControlLoopStatus } from "./control";
+import type { ControlConfig, StrategyId } from "./control";
 import { readControlConfig } from "./control-config.server";
 import {
   type CurtailInput,
   type PvArraySnapshot,
+  type PvBatterySnapshot,
   planCurtailment,
 } from "./curtail";
 import type { CurtailmentConfig } from "./curtailment";
@@ -63,7 +45,6 @@ import { appendDiagnostic } from "./diagnostics.server";
 import { type Grid, isGridConfigured } from "./grid";
 import { readGrid } from "./grid.server";
 import { onHaChange } from "./ha-live.server";
-import { type BatterySnapshot, planNetZero } from "./net-zero";
 import { priceEntityIds, readPricesFrom } from "./price-source.server";
 import type { PriceConfig } from "./prices";
 import { readPriceConfig } from "./prices.server";
@@ -89,27 +70,6 @@ import { readingAge, readStates } from "./states.server";
  * the diagnostics log honest. It reads memory and costs nothing.
  */
 const IDLE_TICK_MS = 60_000;
-
-/**
- * How long an unchanged setpoint may stand before it is said again.
- *
- * The deadband compares against what we last published rather than against
- * what the battery is doing, because an event has no read-back. This keeps that
- * assumption from becoming an indefinite one: an automation that was reloaded,
- * an inverter that was power-cycled, or a Home Assistant that restarted
- * mid-tick all converge again within a tick or two. Half the idle tick, so a
- * quiet house restates on the next idle tick rather than every other one.
- */
-export const REPUBLISH_MS = 30_000;
-
-/**
- * How long a net zero energy command is valid for. Comfortably more than the
- * longest a running loop goes between restatements (an idle tick plus
- * `REPUBLISH_MS`), so a healthy loop never lets one lapse, and short enough
- * that an adapter honouring `valid_until` stops forcing power within minutes
- * of the add-on dying.
- */
-export const NET_ZERO_VALIDITY_MS = 3 * 60_000;
 
 type LoopState = {
   /** The idle heartbeat. Its presence is also what "the loop is running" means. */
@@ -173,17 +133,9 @@ function log(
  * and no way to tell a dead loop from a quiet one.
  */
 function logLoop(level: DiagnosticsLevel, message: string): void {
-  const origins: DiagnosticsOrigin[] = [];
-  if (state.config?.enabled) origins.push("battery-control");
-  if (state.curtailment?.enabled) origins.push("pv-curtailment");
-
-  // Nothing enabled and yet a tick happened — a forced tick from the UI, or a
-  // race with a save. The line still has to land where a reader will find it,
-  // and one arbitrary-but-stable origin beats two copies of it: the home page's
-  // decision feed asks for both strategies, so either would have surfaced.
-  for (const origin of origins.length > 0 ? origins : ["battery-control"]) {
-    log(origin as DiagnosticsOrigin, level, message);
-  }
+  // Curtailment is the only feature left on this loop; battery strategies
+  // plan in `charge-limit-loop.server.ts` and log under their own origin.
+  log("pv-curtailment", level, message);
 }
 
 /** The stored configuration a tick's entity lists and its snapshots share. */
@@ -232,19 +184,17 @@ async function readTickConfig(): Promise<TickConfig> {
  * hardware must not become the reason for the next one.
  */
 function controlReadingIds(config: TickConfig): string[] {
-  const { grid, batteries, pvEntities, prices, control, curtailment } = config;
+  const { grid, batteries, pvEntities, prices, curtailment } = config;
 
   return [
     ...(isGridConfigured(grid) ? [grid.powerEntityId] : []),
-    // Battery power belongs to both features, and to curtailment for a reason
-    // that is not obvious: it does not command batteries, but a discharging one
-    // hides the shortfall its feedback law is looking for, so the law has to be
-    // able to see it. See `curtail.ts`. The state of charge is battery
-    // control's alone — nothing here decides on it.
-    ...(control.enabled || curtailment.enabled
+    // Battery power belongs to curtailment for a reason that is not obvious:
+    // it does not command batteries, but a discharging one hides the shortfall
+    // its feedback law is looking for, so the law has to be able to see it.
+    // See `curtail.ts`.
+    ...(curtailment.enabled
       ? batteries.map((battery) => battery.powerEntityId)
       : []),
-    ...(control.enabled ? batteries.map((battery) => battery.socEntityId) : []),
     ...(curtailment.enabled
       ? [
           ...pvEntities.map((entity) => entity.powerEntityId),
@@ -263,7 +213,7 @@ function controlReadingIds(config: TickConfig): string[] {
 
 type Snapshots = {
   gridPowerW: number | null;
-  batteries: BatterySnapshot[];
+  batteries: PvBatterySnapshot[];
   arrays: PvArraySnapshot[];
   gridConfigured: boolean;
   provenance: string;
@@ -275,10 +225,7 @@ type Snapshots = {
    */
   carCharging: boolean | null;
   currency: string;
-  /** Each steerable battery's slug and caps, by battery id, ready to publish. */
-  slugs: Map<string, string>;
-  limits: Map<string, ReturnType<typeof resolvePowerLimits>>;
-  /** The same for each curtailable array. */
+  /** Each curtailable array's slug, by array id, ready to publish. */
   pvSlugs: Map<string, string>;
 };
 
@@ -321,18 +268,8 @@ async function readSnapshots(config: TickConfig): Promise<Snapshots> {
     gridConfigured,
     gridPowerW: gridConfigured ? toNumber(stateOf(grid.powerEntityId)) : null,
     batteries: batteries.map((battery) => ({
-      id: battery.id,
       title: battery.title,
-      capacityKwh: battery.capacityKwh,
-      minChargePercent: battery.minChargePercent,
-      maxChargePercent: battery.maxChargePercent,
-      socPercent: toNumber(stateOf(battery.socEntityId)),
       powerW: toNumber(stateOf(battery.powerEntityId)),
-      // Net zero energy can only steer a battery whose automation follows a
-      // setpoint; one that can only balance is counted, like an unsteered
-      // one, as part of the house it is balancing.
-      steerable: steerableBy(battery, "net-zero-energy"),
-      ...resolvePowerLimits(battery),
     })),
     arrays: pvEntities.map((entity) => ({
       id: entity.id,
@@ -349,14 +286,6 @@ async function readSnapshots(config: TickConfig): Promise<Snapshots> {
       : null,
     currency: priceRead.forecast?.currency ?? "EUR",
     provenance: describeSource(readings),
-    slugs: new Map(
-      batteries
-        .filter((battery) => steerableBy(battery, "net-zero-energy"))
-        .map((battery) => [battery.id, batterySlug(battery)]),
-    ),
-    limits: new Map(
-      batteries.map((battery) => [battery.id, resolvePowerLimits(battery)]),
-    ),
     pvSlugs: new Map(
       pvEntities
         .filter(isCurtailable)
@@ -383,76 +312,6 @@ function describeSource(states: Parameters<typeof readingAge>[0]): string {
   return oldestSeconds === null
     ? `via ${via}`
     : `via ${via}, oldest reading ${oldestSeconds}s`;
-}
-
-/** Battery control's half of a tick. */
-async function tickBatteryControl(inputs: Snapshots): Promise<void> {
-  if (!inputs.gridConfigured) {
-    log(
-      "battery-control",
-      "warn",
-      "The grid sensor is not configured — nothing to balance against.",
-    );
-    return;
-  }
-
-  const plan = planNetZero(inputs);
-
-  // One entry for the whole tick, not one per line. A house that isn't doing
-  // anything produces the same summary and the same per-battery decision every
-  // few seconds; logged separately they interleave, so the log's
-  // repeated-line collapsing never gets two identical entries in a row and the
-  // buffer fills with near-duplicates instead of holding useful history.
-  // Published before the decision is logged, so that a line saying what was
-  // decided and a line saying what was done cannot end up in the other order.
-  const now = Date.now();
-  const publishes = await publishCommands(
-    plan.decisions.flatMap((decision) => {
-      const slug = inputs.slugs.get(decision.batteryId);
-      if (!slug) return [];
-      const limits = inputs.limits.get(decision.batteryId) ?? {
-        maxChargeW: null,
-        maxDischargeW: null,
-      };
-      return [
-        {
-          batteryId: decision.batteryId,
-          title: decision.title,
-          slug,
-          strategy: "net-zero-energy" as const,
-          // A null commandW is a deadband hold: say nothing, and let the
-          // standing command carry on.
-          command:
-            decision.commandW === null
-              ? null
-              : setpointCommand(
-                  decision.commandW,
-                  limits,
-                  now,
-                  now + NET_ZERO_VALIDITY_MS,
-                ),
-          restateAt: now + REPUBLISH_MS,
-          deadbandW: PUBLISH_DEADBAND_W,
-        },
-      ];
-    }),
-  );
-
-  const sent = describePublishes(publishes);
-
-  const lines = [
-    `${plan.summary} (${inputs.provenance})`,
-    ...plan.warnings.map((warning) => `! ${warning}`),
-    ...plan.decisions.map((decision) => decision.message),
-    ...(sent ? [sent] : []),
-  ];
-
-  const troubled = publishes.some((publish) => publish.status === "failed");
-  log(
-    "battery-control",
-    plan.warnings.length > 0 || troubled ? "warn" : "info",
-    lines.join("\n"),
-  );
 }
 
 /** PV curtailment's half of a tick. */
@@ -588,7 +447,7 @@ async function tickCurtailment(
 }
 
 /**
- * One pass of both strategies. Exported so tests can drive it directly instead
+ * One pass of PV curtailment. Exported so tests can drive it directly instead
  * of waiting on a clock, and so a tick can be forced from the UI.
  *
  * Each half is gated on what is stored rather than on what the loop was started
@@ -601,8 +460,6 @@ export async function runControlTick(): Promise<void> {
   const inputs = await readSnapshots(config);
   const nowMs = Date.now();
 
-  if (config.control.enabled && config.control.strategy === "net-zero-energy")
-    await tickBatteryControl(inputs);
   if (config.curtailment.enabled) {
     await tickCurtailment(inputs, config.curtailment, nowMs);
   }
@@ -614,8 +471,8 @@ export async function runControlTick(): Promise<void> {
  * Hands steered batteries back by publishing a `release` command for each, and
  * waits for it.
  *
- * Called when net zero energy is switched off or away (with that strategy, so
- * a battery Optimize charge limits has since taken over is left alone) and when
+ * Called when a battery strategy is switched off or away (with that strategy,
+ * so a battery another strategy has since taken over is left alone) and when
  * the process is asked to stop (with none, so every steered battery is let go).
  * A battery left forcing kilowatts because the thing that told it to is gone is
  * the worst failure this feature has: from the battery's side there is no
@@ -631,7 +488,7 @@ export async function runControlTick(): Promise<void> {
  * adapter that honours it lets go on its own.
  */
 export async function releaseBatteries(
-  strategy?: "net-zero-energy" | "charge-limit",
+  strategy?: StrategyId,
   reason: ReleaseReason = strategy ? "disabled" : "shutdown",
 ): Promise<void> {
   const batteries = (await listBatteries()).filter(isSteerable);
@@ -926,7 +783,12 @@ function armShutdownRelease(): void {
  * perfectly ordinary configuration — a house with panels and no battery — and
  * so is the reverse.
  */
-export async function syncControlLoop(): Promise<ControlLoopStatus> {
+export async function syncControlLoop(): Promise<
+  ReturnType<typeof curtailmentLoopStatus>
+> {
+  // Armed whatever is enabled: a battery strategy holding a battery runs in
+  // its own loop, and it still has to be let go when the process stops.
+  armShutdownRelease();
   const [config, curtailment] = await Promise.all([
     readControlConfig(),
     readCurtailmentConfig(),
@@ -936,42 +798,25 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   state.config = config;
   state.curtailment = curtailment;
 
-  const wanted = config.enabled || curtailment.enabled;
+  const wanted = curtailment.enabled;
 
   if (!wanted) {
     if (state.timer) {
       stopControlLoop();
-      // One line per feature that was actually running, under its own origin.
-      // A single "battery control disabled" would be a lie on a house that
-      // only ever had curtailment switched on.
-      if (previous?.enabled) {
-        log("battery-control", "info", "Battery control disabled.");
-      }
       if (previousCurtailment?.enabled) {
         log("pv-curtailment", "info", "PV curtailment disabled.");
       }
       // Waited for, not fired and forgotten: the settings form is still
       // sitting on this response, and "it is off" should not come back before
       // the hardware has actually been let go.
-      await Promise.all([
-        releaseBatteries("net-zero-energy"),
-        releasePvArrays(),
-      ]);
+      await releasePvArrays();
     }
-    return controlLoopStatus();
+    return curtailmentLoopStatus();
   }
 
   // A feature switched off while the other keeps the loop running still has to
   // let its own hardware go — the tick simply stops deciding for it, which on
   // its own would leave the last command standing forever.
-  if (
-    previous?.enabled &&
-    previous.strategy === "net-zero-energy" &&
-    (!config.enabled || config.strategy !== "net-zero-energy")
-  ) {
-    log("battery-control", "info", "Battery control disabled.");
-    await releaseBatteries("net-zero-energy");
-  }
   if (previousCurtailment?.enabled && !curtailment.enabled) {
     log("pv-curtailment", "info", "PV curtailment disabled.");
     await releasePvArrays();
@@ -982,20 +827,16 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   // the loop, because the watched set and the immediate first tick both depend
   // on which features are live.
   const cadenceChanged =
-    !previous ||
-    previous.intervalSeconds !== config.intervalSeconds ||
-    previous.strategy !== config.strategy;
+    !previous || previous.intervalSeconds !== config.intervalSeconds;
 
   const changed =
-    cadenceChanged ||
-    previous?.enabled !== config.enabled ||
-    previousCurtailment?.enabled !== curtailment.enabled;
+    cadenceChanged || previousCurtailment?.enabled !== curtailment.enabled;
 
   if (state.timer && !changed) {
     // The watched set depends on which features are on, so a feature toggled
     // while the loop keeps running still has to have its entities picked up.
     await refreshWatched();
-    return controlLoopStatus();
+    return curtailmentLoopStatus();
   }
 
   stopControlLoop();
@@ -1004,13 +845,6 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   // feature has just come on or the cadence moved — re-announcing battery
   // control because curtailment was toggled would be noise about something
   // that did not change.
-  if (config.enabled && (cadenceChanged || !previous?.enabled)) {
-    log(
-      "battery-control",
-      "info",
-      `Battery control enabled — ${config.strategy}, on every change and at most every ${config.intervalSeconds}s.`,
-    );
-  }
   if (
     curtailment.enabled &&
     (cadenceChanged || !previousCurtailment?.enabled)
@@ -1042,27 +876,10 @@ export async function syncControlLoop(): Promise<ControlLoopStatus> {
   // rather than after a silent interval.
   startTick();
 
-  return controlLoopStatus();
+  return curtailmentLoopStatus();
 }
 
-/**
- * Battery control's view of the loop.
- *
- * `running` is deliberately narrower than "the timer exists": the loop can be
- * running for curtailment alone, and a home page that said battery control was
- * running because *something* was would be reporting the wrong feature.
- */
-export function controlLoopStatus(): ControlLoopStatus {
-  const config = state.config;
-  return {
-    running: state.timer !== null && config?.enabled === true,
-    strategy: config?.strategy ?? "net-zero-energy",
-    intervalSeconds: config?.intervalSeconds ?? 5,
-    lastTickAt: state.lastTickAt,
-  };
-}
-
-/** The same for curtailment. */
+/** Whether the loop is running PV curtailment, and when it last ticked. */
 export function curtailmentLoopStatus(): {
   running: boolean;
   lastTickAt: string | null;

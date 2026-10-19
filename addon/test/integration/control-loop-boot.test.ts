@@ -47,12 +47,25 @@ beforeAll(async () => {
         commandContract: 1,
       },
     ]),
+    write("pv-entities.json", [
+      {
+        id: "a1",
+        title: "South roof",
+        powerEntityId: "sensor.inverter_power",
+        energyEntityId: "sensor.inverter_energy_total",
+        ratedPowerW: 5000,
+        curtailable: true,
+        controlMode: "modulating",
+        stepLimitPercent: null,
+      },
+    ]),
     // One second, so the assertions below don't have to wait on a real clock.
     write("control.json", {
-      enabled: true,
-      strategy: "net-zero-energy",
+      enabled: false,
+      strategy: "evening-target",
       intervalSeconds: 1,
     }),
+    write("curtailment.json", { enabled: true, settleSeconds: 0 }),
   ]);
 
   stack = await startStack({ dataDir });
@@ -64,29 +77,29 @@ afterAll(async () => {
   await rm(stack.dataDir, { recursive: true, force: true });
 });
 
-/** Battery control's own entries, as the home page's box asks for them. */
+/** Curtailment's own entries, as the home page's box asks for them. */
 async function messages(): Promise<string[]> {
   const response = await fetch(
-    `${stack.baseUrl}api/diagnostics?origin=battery-control`,
+    `${stack.baseUrl}api/diagnostics?origin=pv-curtailment`,
   );
   expect(response.status).toBe(200);
   const { entries } = (await response.json()) as DiagnosticsData;
   return entries.map((entry) => entry.message);
 }
 
-describe("a restart with battery control already enabled", () => {
+describe("a restart with PV curtailment already enabled", () => {
   it("has started the loop before anything asks it to", async () => {
     // The line `syncControlLoop()` writes when it starts an interval. Nothing
     // in this process has posted the settings form, so the only thing that can
     // have produced it is the boot-time call in `entry.server.tsx`.
     expect(await messages()).toContainEqual(
-      "Battery control enabled — net-zero-energy, on every change and at most every 1s.",
+      expect.stringContaining("PV curtailment enabled"),
     );
   });
 
   it("is already deciding, not just scheduled to", async () => {
     await expect
       .poll(messages, { timeout: 5_000 })
-      .toContainEqual(expect.stringContaining("Home battery: discharge at"));
+      .toContainEqual(expect.stringContaining("South roof: release"));
   });
 });

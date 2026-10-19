@@ -63,6 +63,8 @@ const battery: Battery = {
 };
 const saveBattery = (b: Battery) =>
   writeFile(path.join(directory, "batteries.json"), JSON.stringify([b]));
+// The id an earlier version stored for Evening target, which also covers the
+// rename on read.
 const saveControl = (enabled: boolean, strategy = "charge-limit") =>
   writeFile(
     path.join(directory, "control.json"),
@@ -96,6 +98,17 @@ beforeEach(async () => {
     controlBlocker: (await mocks.curtail()).enabled
       ? "Hypothetical curtailment preview; control blocked."
       : null,
+    strategy: "evening-target",
+    status: "Evening target plan",
+    commands: [
+      {
+        start: now,
+        end: now + 900_000,
+        mode: "balance",
+        chargeLimitW: 400,
+        dischargeLimitW: 100,
+      },
+    ],
     plan: {
       points: [
         {
@@ -175,7 +188,7 @@ describe("charge limit commands", () => {
     expect(commands()).toEqual([
       expect.objectContaining({
         action: "apply",
-        strategy: "charge-limit",
+        strategy: "evening-target",
         mode: "balance",
         setpoint_w: null,
         charge_limit_w: 400,
@@ -194,6 +207,36 @@ describe("charge limit commands", () => {
     expect(status.requestedDischargeW).toBeNull();
     // Nothing is written to an entity any more.
     expect(mocks.set).not.toHaveBeenCalled();
+  });
+
+  it("plans with the selected strategy and names it on the command", async () => {
+    await saveControl(true, "highs");
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+
+    expect(mocks.calculate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "one" }),
+      now,
+      expect.any(Function),
+      "highs",
+      expect.any(AbortSignal),
+    );
+    expect(commands()).toEqual([
+      expect.objectContaining({ strategy: "highs", mode: "balance" }),
+    ]);
+  });
+
+  it("hands over when the strategy changes, without a release in between", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    await saveControl(true, "highs");
+    loop.invalidateChargePlans();
+    await loop.chargeLimitTick(now + 30_000);
+
+    expect(commands().map((c) => [c.action, c.strategy])).toEqual([
+      ["apply", "evening-target"],
+      ["apply", "highs"],
+    ]);
   });
 
   it("carries the AC output boundary when the battery can limit discharge", async () => {
@@ -293,8 +336,8 @@ describe("charge limit commands", () => {
     expect(status.message).toContain("Disconnected");
   });
 
-  it("previews without publishing while the strategy is disabled or another is active", async () => {
-    await saveControl(false, "net-zero-energy");
+  it("previews without publishing while battery control is disabled", async () => {
+    await saveControl(false, "highs");
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
     expect(mocks.calculate).toHaveBeenCalledOnce();
@@ -331,7 +374,7 @@ describe("charge limit commands", () => {
     expect(commands().at(-1)).toMatchObject({
       action: "release",
       release_reason: "unsteered",
-      strategy: "charge-limit",
+      strategy: "evening-target",
     });
     expect((await loop.readChargeLimits()).batteries[0].control.state).toBe(
       "blocked",

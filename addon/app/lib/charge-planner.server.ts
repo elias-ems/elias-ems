@@ -1,17 +1,23 @@
 import type { Battery } from "./batteries";
-import { evening } from "./charge-evening";
 import type { ChargeInterval, ChargeModel } from "./charge-plan";
+import type { StrategyId } from "./control";
 import { CHARGE_LIMIT_PLANNING } from "./control";
 import { readControlConfig } from "./control-config.server";
 import { readCurtailmentConfig } from "./curtailment-config.server";
 import { localHour } from "./energy-forecast";
 import { readEnergyForecast } from "./energy-forecast.server";
 import type { HaState } from "./ha.server";
+import { solveHighs } from "./highs-runner.server";
 import { readPrices } from "./price-source.server";
 import { parsePriceFormulas, priceSlot } from "./prices";
 import { listPvEntities } from "./pv-entities.server";
 import { publishedLimitPercent } from "./pv-limits.server";
 import { readStates } from "./states.server";
+import {
+  type Capabilities,
+  type PlanningSnapshot,
+  strategyById,
+} from "./strategies/index.ts";
 
 export function numericState(state: HaState | null | undefined): number | null {
   if (!state?.state.trim()) return null;
@@ -421,31 +427,63 @@ export async function preparePlannerInputs(
   };
 }
 
+/**
+ * What a strategy may ask the battery for in production: its native balance
+ * mode with boundaries, never grid charging or battery export. The engine
+ * plans direct modes too, and the command contract carries them, but they stay
+ * in the Planner sandbox until a strategy is approved to issue them; this is
+ * the one place that would change.
+ */
+export const PRODUCTION_CAPABILITIES: Capabilities = {
+  modes: ["balance"],
+  gridCharging: false,
+  batteryExport: false,
+};
+
+/** Solver budget per plan; the loop replans every five minutes. */
+export const PRODUCTION_SOLVE_SECONDS = 20;
+
+/** The strategy-neutral snapshot a plan is made from. */
+export function planningSnapshot(inputs: PlannerInputs): PlanningSnapshot {
+  const { algorithm: _a, algorithms: _as, ...settings } = inputs.settings;
+  return {
+    model: inputs.model,
+    slots: inputs.slots,
+    terminalReserveKwh: inputs.reserve,
+    settings,
+  };
+}
+
 export async function calculateChargePlan(
   battery: Battery,
   now = Date.now(),
   report: (key: string, message: string) => void = () => {},
+  strategyId?: StrategyId,
+  signal?: AbortSignal,
 ) {
   const inputs = await preparePlannerInputs(battery, now, report);
-  const { model, slots, reserve, settings, deadlineSlot } = inputs;
-  const hour = CHARGE_LIMIT_PLANNING.eveningHour;
-  if (!deadlineSlot)
+  const strategy = strategyById(strategyId ?? inputs.raw.control.strategy);
+  if (strategy.needsDeadline && !inputs.deadlineSlot)
     throw new Error(
       "Waiting for solar and price coverage through the next evening deadline.",
     );
-  const plan = await evening(
-    { slots, model, terminalReserveKwh: reserve },
-    settings,
-  );
+  const result = await strategy.plan(planningSnapshot(inputs), {
+    capabilities: PRODUCTION_CAPABILITIES,
+    timeLimitSeconds: PRODUCTION_SOLVE_SECONDS,
+    solveHighs: (input) => solveHighs(input, signal),
+  });
   report(
     "algorithm",
-    `Evening target: ${model.maxSoc}% by ${hour}:00; reachable nominal/reduced-solar SoC ${plan.target.reachableSoc.map((s) => s.toFixed(1)).join(" / ")}%`,
+    `${strategy.label}${strategy.needsDeadline ? ` (${String(CHARGE_LIMIT_PLANNING.eveningHour).padStart(2, "0")}:00)` : ""}: ${result.status}`,
   );
   return {
     controlBlocker: inputs.controlBlocker,
     planningNote: inputs.planningNote,
     curtailmentModeled: inputs.curtailmentModeled,
-    plan,
+    strategy: strategy.id,
+    status: result.status,
+    commands: result.commands,
+    plan: result.plan,
     model: inputs.model,
     currency: inputs.currency,
     forecastEnd: inputs.forecastEnd,

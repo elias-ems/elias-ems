@@ -262,11 +262,12 @@ test("the curtailment form saves with the car fields left empty", async ({
 });
 
 /**
- * The whole feature end to end: configure it the way a user would, switch it on,
- * and check that the loop running inside server.js actually says something. Put
- * last, because it leaves a control loop running for the rest of the run.
+ * The whole feature end to end: configure it the way a user would, pick a
+ * strategy from the registry, switch it on, and check the planning loop
+ * inside server.js says something. Put late, because it leaves battery control
+ * enabled for the rest of the run.
  */
-test("battery control can be configured, enabled, and watched deciding", async ({
+test("battery control can be configured with a strategy and enabled", async ({
   page,
 }) => {
   await page.goto("./settings");
@@ -303,15 +304,24 @@ test("battery control can be configured, enabled, and watched deciding", async (
     page.getByText("elias_ems_home_battery_battery_command"),
   ).toBeVisible();
   await page.getByLabel("Steer this battery").check();
+  // Every strategy plans this battery, within its hardware limits.
+  await page.getByLabel("Plan charge limits").check();
+  await page.getByLabel(/^Maximum charge power/).fill("2000");
+  await page.getByLabel(/^Maximum discharge power/).fill("2000");
   await page.getByRole("button", { name: "Add", exact: true }).click();
 
   await expect(
     page.locator("li", { hasText: "sensor.battery_state_of_charge" }),
   ).toBeVisible();
 
-  // A one-second interval so the log fills while the test is watching.
+  // Both registered strategies are offered; net zero energy is gone.
+  const strategy = page.getByLabel("Strategy", { exact: true });
+  await expect(strategy.locator("option")).toHaveText([
+    "Evening target",
+    "HiGHS cost optimizer",
+  ]);
+  await strategy.selectOption("highs");
   await page.getByLabel("Enable battery control").check();
-  await page.getByLabel("Loop interval (seconds)").fill("1");
   await page.getByRole("button", { name: "Save battery control" }).click();
 
   await page
@@ -323,16 +333,11 @@ test("battery control can be configured, enabled, and watched deciding", async (
   await expect(onScreen(page, "10–90% of 10 kWh")).toBeVisible();
   await expect(onScreen(page, "76 %")).toBeVisible();
 
-  // The decision feed is open and polling on its own — there is no box to
-  // expand any more — and it carries the summary line of each tick. The fixture
-  // imports 842 W with the battery idle, so net zero means discharging exactly
-  // that much, and the loop inside server.js is what has to say so.
-  await expect(page.getByText(/Grid net \+842 W/).first()).toBeVisible({
-    timeout: 15_000,
-  });
+  // The rail names the strategy that is planning.
+  await expect(
+    page.getByText("HiGHS cost optimizer", { exact: true }).first(),
+  ).toBeVisible();
 
-  // The per-battery detail is the tick's second line, which the feed trims and
-  // the Tools page keeps — the next test is where that is checked.
   await expect(
     page.getByRole("link", { name: "Full diagnostics" }),
   ).toBeVisible();
@@ -351,10 +356,12 @@ test("the Tools page shows the log and downloads it", async ({ page }) => {
     .click();
 
   // Open by default here — this page is the log, not a detail tucked under a
-  // feature — and every entry says which feature it came from.
+  // feature — and every entry says which feature it came from. The planning
+  // loop ticks every 30 s; this mock has no forecast, so its first plan for
+  // the battery enabled above reports why it cannot plan.
   await expect(
-    page.getByText(/\[Battery control\] Grid net \+842 W/).first(),
-  ).toBeVisible({ timeout: 15_000 });
+    page.getByText(/\[Charge limit\] Home battery:/).first(),
+  ).toBeVisible({ timeout: 45_000 });
 
   const download = await Promise.all([
     page.waitForEvent("download"),
@@ -368,9 +375,7 @@ test("the Tools page shows the log and downloads it", async ({ page }) => {
   const stream = await download.createReadStream();
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(chunk as Buffer);
-  expect(Buffer.concat(chunks).toString("utf-8")).toContain(
-    "Home battery: discharge at 842 W",
-  );
+  expect(Buffer.concat(chunks).toString("utf-8")).toContain("Home battery:");
 });
 
 /**

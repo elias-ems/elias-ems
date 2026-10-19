@@ -18,6 +18,7 @@ on:
       - "engine/**"
       - "addon/app/lib/charge-evening.ts"
       - "addon/app/lib/charge-plan.ts"
+      - "addon/app/lib/strategies/**"
       - "docs/**"
       - ".github/workflows/docs.yml"
   pull_request:
@@ -26,6 +27,7 @@ on:
       - "engine/**"
       - "addon/app/lib/charge-evening.ts"
       - "addon/app/lib/charge-plan.ts"
+      - "addon/app/lib/strategies/**"
       - "docs/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:

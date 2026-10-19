@@ -89,10 +89,7 @@ import PvSection from "../components/settings/PvSection";
 import Section from "../components/settings/Section";
 import { commandEventType } from "../lib/battery-command";
 import type { PriceCurvePoint } from "../lib/dashboard";
-import {
-  batteryControlSummary,
-  curtailmentSummary,
-} from "../lib/dashboard-view";
+import { curtailmentSummary } from "../lib/dashboard-view";
 import { playgroundFixtures } from "../lib/playground-fixtures";
 import { pvLimitEventType } from "../lib/pv-entities";
 import type { Route } from "./+types/playground";
@@ -1129,14 +1126,19 @@ export default function Playground({
                 ),
               }}
               control={{
-                summary: batteryControlSummary(fixtures.batteries, {
-                  enabled: true,
-                  running: true,
-                }),
+                summary: {
+                  tone: "idle",
+                  state: "Evening target",
+                  value: null,
+                  unit: "",
+                  percent: null,
+                  caption:
+                    "see Battery plan for readiness and the published limits",
+                },
                 rule: (
                   <>
-                    Running the <strong>net-zero-energy</strong> strategy
-                    whenever a reading changes, at most every 5 s.
+                    <strong>Evening target</strong> plans every five minutes.
+                    Commands go out once a valid plan is ready.
                   </>
                 ),
               }}
@@ -1153,18 +1155,26 @@ export default function Playground({
                 rule: <>Switched off — no limit is published for any array.</>,
               }}
               control={{
-                summary: batteryControlSummary(fixtures.batteries, {
-                  enabled: false,
-                  running: false,
-                }),
+                summary: {
+                  tone: "off",
+                  state: "Preview only",
+                  value: null,
+                  unit: "",
+                  percent: null,
+                  caption:
+                    "see Battery plan for readiness and the published limits",
+                },
                 rule: (
-                  <>Switched off — no target is published for any battery.</>
+                  <>
+                    <strong>Evening target</strong> plans every five minutes.
+                    Control is disabled; previews remain available.
+                  </>
                 ),
               }}
               initialEntries={[]}
             />
           </Variant>
-          <Variant label="Enabled, but nothing is deciding" onCanvas>
+          <Variant label="HiGHS selected, curtailment stopped" onCanvas>
             <StrategyRail
               curtailment={{
                 summary: curtailmentSummary(fixtures.arrays, {
@@ -1174,11 +1184,21 @@ export default function Playground({
                 rule: <>Enabled, but the loop is not running.</>,
               }}
               control={{
-                summary: batteryControlSummary([], {
-                  enabled: true,
-                  running: true,
-                }),
-                rule: <>Enabled, with no battery to steer.</>,
+                summary: {
+                  tone: "idle",
+                  state: "HiGHS cost optimizer",
+                  value: null,
+                  unit: "",
+                  percent: null,
+                  caption:
+                    "see Battery plan for readiness and the published limits",
+                },
+                rule: (
+                  <>
+                    <strong>HiGHS cost optimizer</strong> plans every five
+                    minutes. Commands go out once a valid plan is ready.
+                  </>
+                ),
               }}
               initialEntries={[]}
             />
@@ -1349,24 +1369,24 @@ export default function Playground({
 
         <Specimen
           {...ENTRIES.controlSection}
-          note="Enabling is blocked until at least one battery is steered, because a loop that decides correctly and commands nothing looks exactly like a broken one from outside."
+          note="Enabling is blocked until exactly one battery is steered and planned, because a loop that decides correctly and commands nothing looks exactly like a broken one from outside."
         >
           <Variant label="Ready and enabled" onCanvas>
             <ControlSection
               config={settings.control}
-              ready={{ grid: true, batteries: true, steerable: true }}
+              ready={{ batteries: true, planned: true }}
             />
           </Variant>
           <Variant label="Nothing configured yet" onCanvas>
             <ControlSection
               config={{ ...settings.control, enabled: false }}
-              ready={{ grid: false, batteries: false, steerable: false }}
+              ready={{ batteries: false, planned: false }}
             />
           </Variant>
           <Variant label="Rejected interval" onCanvas>
             <ControlSection
               config={settings.control}
-              ready={{ grid: true, batteries: true, steerable: true }}
+              ready={{ batteries: true, planned: true }}
               actionData={failures.control}
             />
           </Variant>

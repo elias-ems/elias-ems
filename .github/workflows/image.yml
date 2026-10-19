@@ -20,7 +20,9 @@ on:
   pull_request:
     paths:
       - "addon/Dockerfile"
-      - "addon/.dockerignore"
+      - "addon/Dockerfile.dockerignore"
+      - "engine/package.json"
+      - "engine/package-lock.json"
       - ".github/workflows/image.yml"
   workflow_dispatch:
     inputs:
@@ -126,7 +128,10 @@ jobs:
         uses: home-assistant/builder/actions/build-image@2026.06.0
         with:
           arch: ${{ matrix.arch }}
-          context: "./addon"
+          # The repository root, because the image carries engine/ beside
+          # addon/; the add-on loads the HiGHS engine from ../engine.
+          context: "."
+          file: addon/Dockerfile
           image: ${{ matrix.image }}
           image-tags: |
             ${{ needs.init.outputs.version }}

@@ -8,9 +8,9 @@
  *
  * ## Why an event rather than a write
  *
- * Both strategies used to reach further than this. Net zero energy once called
- * `number.set_value` on a target entity; Optimize charge limits wrote its two
- * power-limit entities until this module replaced it. An entity write is a
+ * Battery control used to reach further than this. A setpoint strategy once
+ * called `number.set_value` on a target entity; the charge-limit planner wrote
+ * its two power-limit entities until this module replaced it. An entity write is a
  * state change — a logbook line, a recorder row, an activity-feed entry — and
  * it ties the add-on to whatever kind of entity a particular inverter happens
  * to expose. An event carries the same instruction with none of that, and an
@@ -19,10 +19,10 @@
  *
  * ## One battery, one owner at a time
  *
- * Both strategies publish on the same event type, so this module remembers
+ * Every strategy publishes on the same event type, so this module remembers
  * which strategy last applied a command to each battery. A strategy letting go
- * only releases batteries *it* holds: switching from net zero energy to
- * charge limits must not have the outgoing strategy's release land after the
+ * can release only batteries *it* holds: switching from one strategy to
+ * another must not have the outgoing strategy's release land after the
  * incoming one's first command and leave the battery released.
  *
  * The cost of events is that nothing reads back what was asked; see

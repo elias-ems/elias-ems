@@ -69,6 +69,8 @@ export default defineConfig({
           items: [
             { text: "Architecture", link: "/internals/architecture" },
             { text: "Battery control", link: "/internals/battery-control" },
+            { text: "Strategies", link: "/internals/strategies" },
+            { text: "Planning engine", link: "/internals/planning-engine" },
             { text: "Live readings", link: "/internals/live-readings" },
             { text: "Diagnostics", link: "/internals/diagnostics" },
             { text: "Dynamic prices", link: "/internals/dynamic-prices" },

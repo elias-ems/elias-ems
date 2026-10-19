@@ -167,12 +167,10 @@ for (const modeled of [false, true]) {
       await expect(page.locator('select[name="chargeLimitMode"]')).toHaveCount(
         0,
       );
-      await expect(
-        page.getByRole("option", {
-          name: "Optimize charge limits",
-          exact: true,
-        }),
-      ).toHaveCount(1);
+      for (const name of ["Evening target", "HiGHS cost optimizer"])
+        await expect(
+          page.getByRole("option", { name, exact: true }),
+        ).toHaveCount(1);
       await expect(page.locator('select[name="chargeAlgorithm"]')).toHaveCount(
         0,
       );

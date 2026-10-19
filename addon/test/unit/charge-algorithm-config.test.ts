@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type ControlConfig,
   normalizeControlConfig,
   parseControlConfig,
 } from "../../app/lib/control";
@@ -32,7 +33,7 @@ describe("charge algorithm settings", () => {
   });
   it("drops retired selectors and planning settings from saved configuration", () => {
     const legacy = {
-      strategy: "charge-limit" as const,
+      strategy: "charge-limit",
       chargeAlgorithm: "cost-optimized",
       eveningHour: 19,
       ceilingSwitchCost: 0.003,
@@ -40,10 +41,10 @@ describe("charge algorithm settings", () => {
       solarMarginPercent: 30,
       chargeWearPerKwh: 0.1,
     };
-    expect(Object.keys(normalizeControlConfig(legacy)).sort()).toEqual([
-      "enabled",
-      "intervalSeconds",
-      "strategy",
-    ]);
+    expect(
+      Object.keys(
+        normalizeControlConfig(legacy as unknown as Partial<ControlConfig>),
+      ).sort(),
+    ).toEqual(["enabled", "intervalSeconds", "strategy"]);
   });
 });

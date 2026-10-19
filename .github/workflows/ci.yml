@@ -1,6 +1,6 @@
 name: CI
 
-# Lint, typecheck and test both projects on every pull request.
+# Lint, typecheck and test every project on every pull request.
 #
 # Deliberately carries no `paths:` filter, unlike docs.yml. A filtered workflow
 # reports nothing at all on a PR that misses the filter, so a required status
@@ -38,7 +38,16 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-          cache-dependency-path: addon/package-lock.json
+          cache-dependency-path: |
+            addon/package-lock.json
+            engine/package-lock.json
+
+      # The add-on imports the planning engine's sources (typechecked with
+      # them) and runs its HiGHS solver from ../engine, so it needs the
+      # engine's one dependency installed too.
+      - name: Install planner engine
+        run: npm ci
+        working-directory: engine
 
       - name: Install dependencies
         id: install
@@ -83,7 +92,14 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-          cache-dependency-path: addon/package-lock.json
+          cache-dependency-path: |
+            addon/package-lock.json
+            engine/package-lock.json
+
+      # The suite runs HiGHS inside the real server, from ../engine.
+      - name: Install planner engine
+        run: npm ci
+        working-directory: engine
 
       - name: Install dependencies
         run: npm ci

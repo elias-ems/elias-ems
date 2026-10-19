@@ -8,7 +8,7 @@
  * time here is the right local time without asking anyone.
  *
  * The shapes themselves are locale-independent — `toFixed` and a sliced
- * `toTimeString`, the same choice `net-zero.ts` and `diagnostics.server.ts`
+ * `toTimeString`, the same choice `diagnostics.server.ts`
  * made — so what a person reads doesn't depend on which machine rendered it.
  */
 

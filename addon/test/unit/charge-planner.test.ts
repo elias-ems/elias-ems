@@ -43,7 +43,7 @@ beforeEach(async () => {
   vi.resetModules();
   configMocks.control.mockResolvedValue({
     enabled: false,
-    strategy: "net-zero-energy",
+    strategy: "evening-target",
   });
   configMocks.curtailment.mockResolvedValue(DEFAULT_CURTAILMENT_CONFIG);
   configMocks.arrays.mockResolvedValue([]);
@@ -181,7 +181,7 @@ describe("forecast planning through Home Assistant", () => {
 it("uses evening planning even for a retired cost-optimized selection", async () => {
   configMocks.control.mockResolvedValue({
     enabled: false,
-    strategy: "charge-limit",
+    strategy: "evening-target",
     chargeAlgorithm: "cost-optimized",
   });
   const { calculateChargePlan } = await import(
@@ -206,7 +206,7 @@ it("uses evening planning even for a retired cost-optimized selection", async ()
 it("ignores planning settings stored before they were hardcoded", async () => {
   configMocks.control.mockResolvedValue({
     enabled: false,
-    strategy: "charge-limit",
+    strategy: "evening-target",
     eveningHour: 7,
     ceilingSwitchCost: 1,
     spikeBufferKwh: 3,

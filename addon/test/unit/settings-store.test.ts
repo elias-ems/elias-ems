@@ -143,7 +143,7 @@ describe("control config", () => {
   it("round-trips what the form saved", async () => {
     const config = {
       enabled: true,
-      strategy: "net-zero-energy" as const,
+      strategy: "highs" as const,
       intervalSeconds: 15,
     };
 

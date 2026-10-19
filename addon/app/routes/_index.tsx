@@ -10,19 +10,14 @@ import { hintStyle } from "../components/form";
 import LiveHealthFacts from "../components/LiveHealthFacts";
 import LiveStatus from "../components/LiveStatus";
 import { readChargeLimits } from "../lib/charge-limit-loop.server";
+import { STRATEGIES } from "../lib/control";
 import { readControlConfig } from "../lib/control-config.server";
-import {
-  controlLoopStatus,
-  curtailmentLoopStatus,
-} from "../lib/control-loop.server";
+import { curtailmentLoopStatus } from "../lib/control-loop.server";
 import { CURTAILMENT_STRATEGIES } from "../lib/curtailment";
 import { readCurtailmentConfig } from "../lib/curtailment-config.server";
 import type { DashboardReadings } from "../lib/dashboard";
 import { readDashboard } from "../lib/dashboard.server";
-import {
-  batteryControlSummary,
-  curtailmentSummary,
-} from "../lib/dashboard-view";
+import { curtailmentSummary } from "../lib/dashboard-view";
 import { DECISION_ORIGINS } from "../lib/diagnostics";
 import { readDiagnostics } from "../lib/diagnostics.server";
 import { usePolledJson } from "../lib/json-fetch";
@@ -60,7 +55,9 @@ export async function loader() {
     chargeLimits,
     control: {
       enabled: config.enabled,
-      status: controlLoopStatus(),
+      strategyLabel:
+        STRATEGIES.find((strategy) => strategy.id === config.strategy)?.label ??
+        config.strategy,
     },
     curtailment: {
       enabled: curtailmentConfig.enabled,
@@ -275,40 +272,22 @@ export default function Index({ loaderData }: Route.ComponentProps) {
           ),
         }}
         control={{
-          summary:
-            control.status.strategy === "charge-limit"
-              ? {
-                  tone: control.enabled ? "idle" : "off",
-                  state: control.enabled
-                    ? "Charge limit selected"
-                    : "Preview only",
-                  value: null,
-                  unit: "",
-                  percent: null,
-                  caption:
-                    "see Battery plan for readiness, requested limits and readback",
-                }
-              : batteryControlSummary(batteries, {
-                  enabled: control.enabled,
-                  running: control.status.running,
-                }),
-          rule:
-            control.status.strategy === "charge-limit" ? (
-              <>
-                Automatic planning every five minutes.{" "}
-                {control.enabled
-                  ? "Charge-limit writes require a valid plan and native self-consumption."
-                  : "Control is disabled; previews remain available."}
-              </>
-            ) : control.enabled ? (
-              <>
-                Running the <strong>{control.status.strategy}</strong> strategy
-                whenever a reading changes, at most every{" "}
-                {control.status.intervalSeconds} s.
-              </>
-            ) : (
-              <>Switched off — no target is published for any battery.</>
-            ),
+          summary: {
+            tone: control.enabled ? "idle" : "off",
+            state: control.enabled ? control.strategyLabel : "Preview only",
+            value: null,
+            unit: "",
+            percent: null,
+            caption: "see Battery plan for readiness and the published limits",
+          },
+          rule: (
+            <>
+              <strong>{control.strategyLabel}</strong> plans every five minutes.{" "}
+              {control.enabled
+                ? "Commands go out once a valid plan is ready."
+                : "Control is disabled; previews remain available."}
+            </>
+          ),
         }}
         initialEntries={decisions}
       />
