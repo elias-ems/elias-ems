@@ -2,14 +2,13 @@
  * The one event every battery strategy speaks: a versioned **battery command**,
  * published per battery on `elias_ems_<slug>_battery_command`.
  *
- * Before this, the two strategies reached the hardware in two different ways.
- * Net zero energy published a bare signed target power; Optimize charge limits
- * wrote `number` entities itself, read them back and kept a restoration journal.
- * The second shape assumed the add-on knew which entities sat behind each
- * battery, which is exactly what stops it growing to several batteries of
- * different brands. Now both strategies — and the HiGHS planning engine once it
- * is wired in — describe *what the battery should be doing*, and an automation
- * (or a future adapter) per battery owns *how* that inverter is made to do it.
+ * Before this, battery control reached the hardware in two different ways: a
+ * bare signed target power, and `number` entities written directly, read back
+ * and journalled for restoration. The second shape assumed the add-on knew
+ * which entities sat behind each battery, which is exactly what stops it
+ * growing to several batteries of different brands. Now every registered
+ * strategy describes *what the battery should be doing*, and an automation (or
+ * a future adapter) per battery owns *how* that inverter is made to do it.
  *
  * A command is a **mode plus boundaries**, the shape the engine plans in:
  *
@@ -104,7 +103,8 @@ export function commandEventType(slug: string): string {
 
 /**
  * Turns a signed power target into a direct-control command: `charge`,
- * `discharge`, or `hold` at exactly zero. Net zero energy's shape.
+ * `discharge`, or `hold` at exactly zero. No strategy issues it in production
+ * yet; it is the shape a direct-mode HiGHS plan would publish.
  */
 export function setpointCommand(
   targetW: number,

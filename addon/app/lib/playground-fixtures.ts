@@ -461,7 +461,7 @@ export function playgroundFixtures(now: number) {
       ] satisfies Battery[],
       control: {
         enabled: true,
-        strategy: "net-zero-energy",
+        strategy: "evening-target",
         intervalSeconds: 5,
       } satisfies ControlConfig,
       curtailment: {

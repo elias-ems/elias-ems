@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useHref } from "react-router";
-import type { ChargeLimitsData } from "../../lib/charge-limit-status";
+import {
+  type ChargeLimitsData,
+  strategyLabel,
+} from "../../lib/charge-limit-status";
 import { usePolledJson } from "../../lib/json-fetch";
 import { hintStyle } from "../form";
 import { cardStyle, eyebrowStyle, monoStyle } from "./chrome";
@@ -75,7 +78,7 @@ function BatteryPlan({
       }}
     >
       <h2 style={eyebrowStyle}>
-        Battery plan · {status.title} ·{" "}
+        Battery plan · {status.title} · {strategyLabel(status.strategy)} ·{" "}
         {expired ? "Awaiting update" : status.state}
       </h2>
       <div
@@ -334,9 +337,9 @@ function BatteryPlan({
                       Forecast and schedule details ·{" "}
                       {status.plan.points.length} intervals. SoC is at the end
                       of each interval. Forecast solar is before curtailment;
-                      generated solar is what remains after PV limits. Evening
-                      plans show nominal solar and also test the configured
-                      reduced-solar scenario.
+                      generated solar is what remains after PV limits. Both
+                      strategies plan for nominal solar and the configured
+                      reduced-solar scenario; this table shows nominal.
                     </caption>
                     <thead>
                       <tr>

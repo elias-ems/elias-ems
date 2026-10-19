@@ -1,10 +1,10 @@
 import { useId, useState } from "react";
 import { Form, useNavigation } from "react-router";
+import { CHARGE_LIMIT_BATTERY_ERROR } from "../../lib/charge-limit-status";
 import type { ControlConfig } from "../../lib/control";
 import {
   MAX_INTERVAL_SECONDS,
   MIN_INTERVAL_SECONDS,
-  NO_STEERABLE_BATTERY_ERROR,
   STRATEGIES,
 } from "../../lib/control";
 import type { SettingsActionData } from "../../lib/settings-form";
@@ -22,19 +22,16 @@ import Section from "./Section";
 export default function ControlSection({
   config,
   /**
-   * Whether the grid, at least one battery, and at least one battery with a
-   * control key are configured. The last is the only one of the three that
-   * blocks enabling rather than merely warning.
+   * Whether a battery is configured, and whether exactly one is steered and
+   * planned. The second is what blocks enabling rather than merely warning.
    */
   ready,
   actionData,
 }: {
   config: ControlConfig;
   ready: {
-    grid: boolean;
     batteries: boolean;
-    steerable: boolean;
-    chargeLimit?: boolean;
+    planned: boolean;
   };
   actionData?: SettingsActionData;
 }) {
@@ -50,23 +47,17 @@ export default function ControlSection({
   const [strategy, setStrategy] = useState(config.strategy);
   const selected = STRATEGIES.find((option) => option.id === strategy);
 
-  const missing = [
-    !ready.grid && "the grid sensor",
-    !ready.batteries && "at least one battery",
-  ].filter((item): item is string => Boolean(item));
-
-  // Left interactive while control is already on, so that a control key
-  // cleared afterwards leaves a box that can still be unticked rather than a
-  // switch stuck in the on position.
-  const eligible =
-    strategy === "charge-limit" ? ready.chargeLimit : ready.steerable;
+  // Left interactive while control is already on, so that a battery
+  // un-steered afterwards leaves a box that can still be unticked rather than
+  // a switch stuck in the on position. Every strategy needs the same battery.
+  const eligible = ready.planned;
   const canEnable = eligible || config.enabled;
 
   return (
     <Section
       id="battery-control"
       title="Battery control"
-      description="When enabled, a loop reconsiders what the batteries should be doing at the interval below and writes its decision to the diagnostics on the home page."
+      description="When enabled, the selected strategy plans the battery every few minutes from solar forecasts, household history and prices, publishes the current interval as a battery command, and writes each decision to the diagnostics on the home page."
     >
       <Form method="post" style={{ ...formStyle, marginTop: "1rem" }}>
         <input type="hidden" name="intent" value="control-save" />
@@ -86,16 +77,13 @@ export default function ControlSection({
 
         {!eligible && (
           <p style={errors.enabled ? errorStyle : hintStyle}>
-            {strategy === "charge-limit"
-              ? "Configure one battery with a charge limit entity and enable Steer this battery."
-              : NO_STEERABLE_BATTERY_ERROR}
+            {CHARGE_LIMIT_BATTERY_ERROR}
           </p>
         )}
 
-        {missing.length > 0 && (
+        {!ready.batteries && (
           <p style={hintStyle}>
-            Control needs {missing.join(" and ")} before it can decide anything.
-            It will say so in the log until then.
+            Control needs a battery before it can plan anything.
           </p>
         )}
 
@@ -132,7 +120,7 @@ export default function ControlSection({
           step={1}
           defaultValue={config.intervalSeconds}
           error={errors.intervalSeconds}
-          hint={`How often the loop reconsiders. ${MIN_INTERVAL_SECONDS}–${MAX_INTERVAL_SECONDS}s.`}
+          hint={`At most how often the shared control loop reconsiders PV curtailment. Battery strategies replan every five minutes regardless. ${MIN_INTERVAL_SECONDS}–${MAX_INTERVAL_SECONDS}s.`}
         />
         {errors.enabled && <p style={errorStyle}>{errors.enabled}</p>}
 

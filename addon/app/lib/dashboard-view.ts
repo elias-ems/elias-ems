@@ -2,7 +2,7 @@
  * Turning the dashboard's readings into what the two strategy rows say.
  *
  * Pure, and separate from the components that render it, for the same reason
- * `net-zero.ts` is separate from the loop: deciding that a strategy is
+ * `curtail.ts` is separate from the loop: deciding that a strategy is
  * *curtailing* rather than merely *armed* is a rule with edge cases — nothing
  * published yet, an array released at 100%, several batteries disagreeing about
  * their direction — and a rule with edge cases wants tests rather than a
@@ -11,7 +11,7 @@
  * Nothing here touches a clock, a locale or a timezone. Both the server render
  * and the browser's hydration run these functions and they have to agree.
  */
-import type { DashboardArray, DashboardBattery } from "./dashboard";
+import type { DashboardArray } from "./dashboard";
 
 /**
  * How prominently a state is drawn: in the feature's own colour when it is
@@ -150,93 +150,5 @@ export function curtailmentSummary(
     ]
       .filter(Boolean)
       .join(" · "),
-  };
-}
-
-/** The mean state of charge across the batteries that report one. */
-function meanCharge(batteries: DashboardBattery[]): number | null {
-  const known = batteries
-    .map((battery) => battery.chargePercent)
-    .filter((value): value is number => value !== null);
-
-  return known.length === 0
-    ? null
-    : known.reduce((sum, value) => sum + value, 0) / known.length;
-}
-
-export function batteryControlSummary(
-  batteries: DashboardBattery[],
-  loop: { enabled: boolean; running: boolean },
-): StrategySummary {
-  // Before anything about the loop: with no batteries there is nothing for it
-  // to be enabled or disabled *about*, and every caption below would be
-  // describing a fleet of none.
-  if (batteries.length === 0) {
-    return {
-      tone: "idle",
-      state: "No batteries",
-      value: null,
-      unit: "",
-      percent: null,
-      caption: "nothing to steer yet",
-    };
-  }
-
-  const charge = meanCharge(batteries);
-  const chargeCaption =
-    batteries.length === 1
-      ? `${batteries[0].title} · state of charge`
-      : `mean state of charge across ${batteries.length} batteries`;
-
-  if (!loop.enabled) {
-    return {
-      tone: "off",
-      state: "Disabled",
-      value: null,
-      unit: "",
-      percent: charge,
-      caption: chargeCaption,
-    };
-  }
-
-  if (!loop.running) {
-    return {
-      tone: "warn",
-      state: "Loop stopped",
-      value: null,
-      unit: "",
-      percent: charge,
-      caption: "enabled, but nothing is deciding",
-    };
-  }
-
-  const targets = batteries
-    .map((battery) => battery.targetW)
-    .filter((value): value is number => value !== null);
-
-  if (targets.length === 0) {
-    return {
-      tone: "idle",
-      state: "Armed",
-      value: null,
-      unit: "",
-      percent: charge,
-      caption: `${chargeCaption} · no target published yet`,
-    };
-  }
-
-  // Summed rather than listed: with one battery this is that battery, and with
-  // several it is what the house as a whole has been asked to do, which is the
-  // number that pairs with the grid reading beside it.
-  const total = targets.reduce((sum, value) => sum + value, 0);
-  const rounded = Math.round(total);
-
-  return {
-    tone: "battery",
-    state: rounded > 0 ? "Charging" : rounded < 0 ? "Discharging" : "Holding",
-    value: signedWatts(total),
-    unit: "W",
-    percent: charge,
-    caption: chargeCaption,
   };
 }

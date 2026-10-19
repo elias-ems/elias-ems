@@ -52,14 +52,15 @@ test("Evening target plans every preset", async () => {
 
 test("HiGHS widens balance boundaries past a few watts of surplus", async () => {
   const preset = presets.find((p) => p.key === "marginal-surplus");
-  const { engine, engineError } = await compare(preset.dataset, {
+  const { runs } = await compare(preset.dataset, {
     expanded: false,
     setpointStepW: 100,
     timeLimitSeconds: 30,
   });
-  assert.equal(engineError, "");
-  assert.equal(engine.optimal, true);
-  const points = engine.scenarios[0].points.filter(
+  const highs = runs.find((run) => run.id === "highs");
+  assert.equal(highs.error, undefined);
+  assert.equal(highs.result.details.optimal, true);
+  const points = highs.scenarios[0].points.filter(
     (_, i) => preset.dataset.slots[i].solarW > preset.dataset.slots[i].loadW,
   );
   assert.ok(points.length > 0);

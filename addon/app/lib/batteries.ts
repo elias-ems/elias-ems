@@ -18,7 +18,6 @@ import {
   BATTERY_MODES,
   type BatteryMode,
   isBatteryMode,
-  SETPOINT_MODES,
 } from "./battery-command";
 import type { StrategyId } from "./control";
 import { slugifyTitle } from "./slug";
@@ -29,7 +28,8 @@ export type BatteryFields = {
    * receives a battery command. `balance` is always there: it is the battery's
    * own self-consumption, which needs nothing but boundaries. The direct modes
    * — `hold`, `charge`, `discharge` — need something that can force a power
-   * setpoint, and net zero energy commands nothing else.
+   * setpoint. No production strategy issues them yet; they are recorded so a
+   * direct-mode strategy can be enabled per battery.
    */
   controlModes: BatteryMode[];
   /**
@@ -253,30 +253,18 @@ export function isSteerable(battery: Pick<BatteryFields, "steered">): boolean {
   return battery.steered === true;
 }
 
-/** Whether the battery's automation can follow hold, charge and discharge. */
-export function supportsSetpoints(
-  battery: Pick<BatteryFields, "controlModes">,
-): boolean {
-  return SETPOINT_MODES.every((mode) => battery.controlModes.includes(mode));
-}
-
 /**
- * Whether this strategy may command this battery: steered, and able to carry
- * out the kind of command the strategy issues. Net zero energy issues
- * setpoints; Optimize charge limits issues `balance` with boundaries, which
- * every battery supports, but only plans batteries opted in to it.
+ * Whether this strategy may command this battery: steered, and opted in to
+ * planning. Both registered strategies publish `balance` with boundaries in
+ * production, which every battery supports. The strategy stays a parameter
+ * because one that issues direct modes would also need the battery's
+ * `controlModes` to include them.
  */
 export function steerableBy(
-  battery: Pick<
-    BatteryFields,
-    "steered" | "controlModes" | "chargeLimitPlanning"
-  >,
-  strategy: StrategyId,
+  battery: Pick<BatteryFields, "steered" | "chargeLimitPlanning">,
+  _strategy: StrategyId,
 ): boolean {
-  if (!isSteerable(battery)) return false;
-  return strategy === "net-zero-energy"
-    ? supportsSetpoints(battery)
-    : battery.chargeLimitPlanning;
+  return isSteerable(battery) && battery.chargeLimitPlanning;
 }
 
 /** The battery's slug, with a last-resort fallback so it is never empty. */

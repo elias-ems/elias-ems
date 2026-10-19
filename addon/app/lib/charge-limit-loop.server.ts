@@ -1,6 +1,9 @@
 /**
- * Optimize charge limits' loop: plan every few minutes, and publish the
- * current interval's boundaries as a `balance` battery command.
+ * Battery control's planning loop: every few minutes, ask the selected
+ * strategy from the registry (`strategies/`) for a plan, and publish the
+ * current interval's boundaries as a `balance` battery command. Every
+ * registered strategy runs here, which is what makes switching between them a
+ * hand-over between two plans rather than between two loops.
  *
  * It used to write the battery's charge and AC output limit entities itself,
  * read them back, and keep a journal to restore them. All of that now belongs
@@ -27,9 +30,10 @@ import {
   type ChargeLimitStatus,
   type ChargeLimitsData,
   chargeLimitControl,
+  strategyLabel,
 } from "./charge-limit-status";
 import { calculateChargePlan } from "./charge-planner.server";
-import { CHARGE_LIMIT_PLANNING } from "./control";
+import { CHARGE_LIMIT_PLANNING, type StrategyId } from "./control";
 import { readControlConfig } from "./control-config.server";
 import { appendDiagnostic } from "./diagnostics.server";
 
@@ -40,6 +44,8 @@ let started = false;
 let nextPlan = 0;
 /** Batteries whose pre-event power limits are still waiting to be restored. */
 let legacyPending = new Set<string>();
+/** Cancels a solve in progress, so a settings save never waits one out. */
+let planning: AbortController | null = null;
 const PLAN_MS = 300_000;
 const TICK_MS = 30_000;
 /**
@@ -56,6 +62,11 @@ export function withChargeLimitLock<T>(work: () => Promise<T>): Promise<T> {
   const result = queue.then(work);
   queue = result.catch(() => undefined);
   return result;
+}
+
+/** Abandon a plan being calculated; the next tick starts a fresh one. */
+export function interruptPlanning() {
+  planning?.abort();
 }
 
 export function invalidateChargePlans() {
@@ -83,12 +94,16 @@ const targetOf = (b: Battery): CommandTarget => ({
 const legacyBlocks = (batteryId: string) =>
   legacyPending.has(batteryId) || legacyPending.has("*");
 
+/**
+ * Let go of what any strategy holds. Every battery command now comes from this
+ * loop, so whichever registered strategy issued the standing one, it is ours
+ * to release — including the one a strategy switch left behind.
+ */
 async function releaseHeld(
   batteries: Battery[],
   reason: ReleaseReason,
 ): Promise<CommandPublish[]> {
   const publishes = await releaseCommands(batteries.map(targetOf), reason, {
-    strategy: "charge-limit",
     onlyIfHeld: true,
   });
   const line = describePublishes(publishes);
@@ -101,10 +116,12 @@ async function releaseHeld(
   return publishes;
 }
 
-function empty(b: Battery): ChargeLimitStatus {
+function empty(b: Battery, strategy: StrategyId): ChargeLimitStatus {
   return {
     batteryId: b.id,
     title: b.title,
+    strategy,
+    strategyStatus: null,
     mode: "preview",
     state: "waiting",
     message: "Waiting for the Energy dashboard forecast and household history.",
@@ -131,10 +148,7 @@ function empty(b: Battery): ChargeLimitStatus {
 
 /** What this strategy has standing for a battery, for the plan card. */
 function standing(status: ChargeLimitStatus, batteryId: string) {
-  const command =
-    commandOwner(batteryId) === "charge-limit"
-      ? publishedCommand(batteryId)
-      : null;
+  const command = commandOwner(batteryId) ? publishedCommand(batteryId) : null;
   status.requestedW = command?.chargeLimitW ?? null;
   status.requestedDischargeW = command?.dischargeLimitW ?? null;
 }
@@ -149,7 +163,7 @@ export async function readChargeLimits(): Promise<ChargeLimitsData> {
     batteries: batteries
       .filter((b) => b.chargeLimitPlanning)
       .map((b) => ({
-        ...(statuses.get(b.id) || empty(b)),
+        ...(statuses.get(b.id) || empty(b, control.strategy)),
         control: chargeLimitControl(
           control,
           b,
@@ -179,14 +193,12 @@ export async function chargeLimitTick(now = Date.now()) {
     );
 
   const control = await readControlConfig();
-  const active = control.enabled && control.strategy === "charge-limit";
+  const active = control.enabled;
   const batteries = await listBatteries();
 
-  // Let go of anything this strategy holds but may no longer command. Only
-  // what it is known to hold: a battery net zero energy has since taken over
-  // is not ours to release.
+  // Let go of anything held that may no longer be commanded.
   await releaseHeld(
-    batteries.filter((b) => !active || !steerableBy(b, "charge-limit")),
+    batteries.filter((b) => !active || !steerableBy(b, control.strategy)),
     active ? "unsteered" : "disabled",
   );
 
@@ -195,7 +207,7 @@ export async function chargeLimitTick(now = Date.now()) {
   nextPlan = now + PLAN_MS;
 
   for (const b of planned) {
-    const status = empty(b);
+    const status = empty(b, control.strategy);
     statuses.set(b.id, status);
     try {
       // Independent single-battery plans would allocate the same solar twice.
@@ -204,9 +216,6 @@ export async function chargeLimitTick(now = Date.now()) {
           "Charge-limit planning currently supports one configured household battery.",
         );
       let blocked = [
-        control.enabled &&
-          control.strategy !== "charge-limit" &&
-          "Hypothetical preview: assumes native self-consumption while another battery strategy is active.",
         !b.steered &&
           "Enable Steer this battery to apply charge-limit control.",
         legacyBlocks(b.id) &&
@@ -214,16 +223,25 @@ export async function chargeLimitTick(now = Date.now()) {
       ]
         .filter(Boolean)
         .join(" ");
-      const result = await calculateChargePlan(b, now, (key, message) => {
-        status.checks = { ...status.checks, [key]: message };
-      });
+      planning = new AbortController();
+      const result = await calculateChargePlan(
+        b,
+        now,
+        (key, message) => {
+          status.checks = { ...status.checks, [key]: message };
+        },
+        control.strategy,
+        planning.signal,
+      );
       blocked = [blocked, result.controlBlocker].filter(Boolean).join(" ");
       const mayPublish = active && !blocked;
       const current = result.plan.points[0];
+      const command = result.commands[0];
       nextPlan = Math.min(nextPlan, current.end);
       Object.assign(status, {
         mode: mayPublish ? "active" : "preview",
         plan: result.plan,
+        strategyStatus: result.status,
         calculatedAt: now,
         validUntil: Math.min(now + PLAN_MS, current.end),
         currency: result.currency,
@@ -269,14 +287,14 @@ export async function chargeLimitTick(now = Date.now()) {
         const [publish] = await publishCommands([
           {
             ...targetOf(b),
-            strategy: "charge-limit",
+            strategy: control.strategy,
             command: balanceCommand(
               {
-                chargeLimitW: current.limitW,
+                chargeLimitW: command.chargeLimitW,
                 // Without discharge limiting the plan holds native output, and
                 // the command says so by leaving the boundary out.
                 dischargeLimitW: b.dischargeLimitSupported
-                  ? (current.dischargeLimitW ?? null)
+                  ? command.dischargeLimitW
                   : null,
               },
               current.start,
@@ -300,13 +318,18 @@ export async function chargeLimitTick(now = Date.now()) {
         "charge-limit",
         "info",
         [
-          `${b.title}: ${status.mode}, maximum charge ${current.limitW} W${current.dischargeLimitW === undefined || !b.dischargeLimitSupported ? "" : `, maximum AC output ${current.dischargeLimitW} W`}. ${status.message}`,
+          `${b.title}: ${strategyLabel(control.strategy)} ${status.mode}, maximum charge ${command.chargeLimitW} W${b.dischargeLimitSupported ? `, maximum AC output ${command.dischargeLimitW} W` : ""}. ${status.message}`,
           sent,
         ]
           .filter(Boolean)
           .join("\n"),
       );
     } catch (error) {
+      if (planning?.signal.aborted) {
+        // Settings changed mid-solve; the next tick plans under the new ones.
+        status.message = "Settings changed; calculating a new plan.";
+        continue;
+      }
       status.state = "error";
       status.message = messageOf(error);
       status.validUntil = null;

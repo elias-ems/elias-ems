@@ -1,65 +1,94 @@
-import { evaluate } from "../../engine/src/physics.ts";
+import {
+  type Capabilities,
+  engineInput,
+  type PlanningSnapshot,
+  STRATEGY_REGISTRY,
+  type StrategyResult,
+  scoreCommands,
+} from "../../addon/app/lib/strategies/index.ts";
 import { solve } from "../../engine/src/solve.ts";
 import type { Input } from "../../engine/src/types.ts";
-import { parseDataset, runPlanner } from "./planner.ts";
+import { parseDataset } from "./planner.ts";
+
 export type ComparisonOptions = {
   expanded: boolean;
   setpointStepW: number;
   timeLimitSeconds: number;
 };
-/** Worker-only orchestration; snapshot v1 stays untouched. */
+
+/** One registered strategy's outcome on the imported snapshot. */
+export type StrategyRun = {
+  id: string;
+  label: string;
+  runtimeMs: number;
+  result?: StrategyResult;
+  /** The shared physical replay: nominal, then reduced solar. */
+  scenarios?: ReturnType<typeof scoreCommands>["scenarios"];
+  meanCost?: number;
+  error?: string;
+};
+
+export function sandboxCapabilities(options: ComparisonOptions): Capabilities {
+  return options.expanded
+    ? {
+        modes: ["balance", "hold", "charge", "discharge"],
+        gridCharging: true,
+        batteryExport: true,
+        setpointStepW: options.setpointStepW,
+      }
+    : { modes: ["balance"], gridCharging: false, batteryExport: false };
+}
+
+/**
+ * Worker-only orchestration: every strategy in the registry, on the same
+ * snapshot and capabilities, scored by the same replay. A strategy that fails
+ * on this snapshot is reported beside the others rather than hiding them.
+ * Snapshot v1 stays untouched.
+ */
 export async function compare(
   value: unknown,
   options: ComparisonOptions,
   wasmUrl?: string,
 ) {
   const dataset = parseDataset(value);
-  const input: Input = {
+  const snapshot: PlanningSnapshot = {
     model: dataset.model,
     slots: dataset.slots,
-    solarHaircut: dataset.settings.solarHaircut,
-    capabilities: {
-      modes: options.expanded
-        ? ["balance", "hold", "charge", "discharge"]
-        : ["balance"],
-      gridCharging: options.expanded,
-      batteryExport: options.expanded,
-      ...(options.expanded ? { setpointStepW: options.setpointStepW } : {}),
-    },
-    timeLimitSeconds: options.timeLimitSeconds,
+    terminalReserveKwh: dataset.terminalReserveKwh,
+    settings: dataset.settings,
   };
-  const started = performance.now();
-  const legacy = await runPlanner(dataset);
-  const legacyRuntimeMs = performance.now() - started;
-  const commands = legacy.points.map((p) => ({
-    start: p.start,
-    end: p.end,
-    mode: "balance" as const,
-    chargeLimitW: p.limitW,
-    dischargeLimitW: p.dischargeLimitW ?? dataset.model.dischargeW,
-  }));
-  const legacyScenarios = [0, input.solarHaircut].map((h) =>
-    evaluate(input, commands, h),
+  const capabilities = sandboxCapabilities(options);
+  const input: Input = engineInput(
+    snapshot,
+    capabilities,
+    options.timeLimitSeconds,
   );
-  // Return the original planner even if this snapshot is unsupported by HiGHS.
-  try {
-    const engine = await solve(input, wasmUrl);
-    return {
-      legacy,
-      legacyRuntimeMs,
-      legacyScenarios,
-      input,
-      engine,
-      engineError: "",
-    };
-  } catch (error) {
-    return {
-      legacy,
-      legacyRuntimeMs,
-      legacyScenarios,
-      input,
-      engine: undefined,
-      engineError: error instanceof Error ? error.message : String(error),
-    };
+  const runs: StrategyRun[] = [];
+  for (const strategy of STRATEGY_REGISTRY) {
+    const started = performance.now();
+    try {
+      const result = await strategy.plan(snapshot, {
+        capabilities,
+        timeLimitSeconds: options.timeLimitSeconds,
+        solveHighs: (engine) => solve(engine, wasmUrl),
+      });
+      const score = scoreCommands(snapshot, result.commands, capabilities);
+      runs.push({
+        id: strategy.id,
+        label: strategy.label,
+        runtimeMs: performance.now() - started,
+        result,
+        scenarios: score.scenarios,
+        meanCost: score.meanCost,
+      });
+    } catch (error) {
+      runs.push({
+        id: strategy.id,
+        label: strategy.label,
+        runtimeMs: performance.now() - started,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
+  return { input, runs };
 }

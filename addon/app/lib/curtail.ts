@@ -28,7 +28,7 @@
  * from where we want it, plus whatever a battery is delivering that the sun
  * could deliver instead". **The load and the uncurtailable arrays cancel out.**
  * We never measure the load — it is already inside `G` — and it is the same
- * feedback form as `S = C - net` in `net-zero.ts`, with the same property: a
+ * feedback form a battery chasing the meter uses, with the same property: a
  * wrong answer this tick is corrected on the next one instead of accumulating.
  *
  * `N` cancelling is the part that is easy to get wrong. An array nobody can
@@ -58,7 +58,8 @@
  * nothing.
  *
  * The two halves of this add-on will hold each other there indefinitely.
- * Net-zero discharges to cover the import that curtailment created, the meter
+ * A battery in self-consumption discharges to cover the import curtailment
+ * created, the meter
  * comes back to zero, and curtailment reads its own suppression as balance. Once
  * something else is holding the meter, *every* level of PV is an equilibrium,
  * which is what makes this a fixed point rather than a slow drift — the same
@@ -76,8 +77,8 @@
  * being held down, and a limit is a ceiling: raising one an array cannot reach
  * does nothing at all, which is why a dark array on a winter evening is left
  * undisturbed by the battery carrying the house. The battery yields on its own
- * — net-zero sees the surplus the arrays now make and stops discharging, and so
- * does an inverter running its own self-consumption logic. The exception is a
+ * — an inverter running its own self-consumption logic sees the surplus the
+ * arrays now make and stops discharging. The exception is a
  * battery being *forced* to discharge into a negative price: it exports what it
  * discharges rather than yielding, and `warnings` says so rather than the arrays
  * being cut back to hide it.
@@ -191,7 +192,7 @@ export type PvArraySnapshot = {
  *
  * Only the power, because only the power is in the arithmetic. What the battery
  * *may* do — its window, its limits, whether it is steered — belongs to
- * `net-zero.ts`, and nothing is commanded from here.
+ * the battery strategies, and nothing is commanded from here.
  */
 export type PvBatterySnapshot = {
   title: string;
@@ -239,8 +240,8 @@ export type PvArrayDecision = {
    * What to command, or **null to say nothing and leave the last limit
    * standing**.
    *
-   * Not the same as `limitPercent`, for the reason `net-zero.ts` separates
-   * `targetW` from `commandW`: a hold inside the deadband reports where the
+   * Not the same as `limitPercent`, for the reason a command is kept apart
+   * from a measurement: a hold inside the deadband reports where the
    * array is, which is the right thing to display and the wrong thing to
    * command.
    */
@@ -348,7 +349,7 @@ function magnitude(watts: number): string {
 
 /**
  * Formatted with a fixed number of decimals rather than `toLocaleString`, for
- * the reason `net-zero.ts` formats kWh that way: these strings go into the
+ * the usual reason in this add-on: these strings go into the
  * diagnostics log, which is compared against in tests and read by whoever is
  * diagnosing an installation, and neither wants the separators to depend on the
  * server's locale.
@@ -496,7 +497,7 @@ export const CAR_STEPPED_REASON =
  * Whether an array can take part in *this* tick's plan.
  *
  * A missing power reading takes the array out rather than being assumed to be
- * zero, and that is a departure from what `net-zero.ts` does with a battery.
+ * zero, and that is a departure from what curtailment does with a battery.
  * The reason is that the error would not self-correct. Assuming zero
  * understates `C`, so `C_allowed = C + (G - G_target)` comes out low, so the
  * array is cut; the cut shows up on the meter as import, which raises

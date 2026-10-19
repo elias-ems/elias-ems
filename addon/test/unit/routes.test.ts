@@ -84,7 +84,7 @@ async function clearStoredSettings() {
   await grid.saveGrid({ powerEntityId: "" });
   await control.saveControlConfig({
     enabled: false,
-    strategy: "net-zero-energy",
+    strategy: "evening-target",
     intervalSeconds: 5,
   });
 }
@@ -264,12 +264,7 @@ describe("GET / (dashboard)", () => {
       },
       control: {
         enabled: false,
-        status: {
-          running: false,
-          strategy: "net-zero-energy",
-          intervalSeconds: 5,
-          lastTickAt: null,
-        },
+        strategyLabel: "Evening target",
       },
       curtailment: {
         enabled: false,
@@ -719,7 +714,7 @@ describe("POST /settings", () => {
   it("saves the control settings without starting a loop while it is off", async () => {
     const result = await post({
       intent: "control-save",
-      strategy: "net-zero-energy",
+      strategy: "evening-target",
       intervalSeconds: "10",
     });
 
@@ -729,40 +724,34 @@ describe("POST /settings", () => {
     );
     expect(await readControlConfig()).toEqual({
       enabled: false,
-      strategy: "net-zero-energy",
+      strategy: "evening-target",
       intervalSeconds: 10,
     });
-
-    const { loop } = await loadSettings();
-    expect(loop.controlLoopStatus().running).toBe(false);
   });
 
-  it("starts the loop as soon as the box is ticked", async () => {
-    // Waiting for a restart would be indistinguishable from the feature not
-    // working, which is the whole reason the action re-syncs the loop.
-    const { addBattery } = await import("../../app/lib/batteries.server");
-    await addBattery(storedBattery);
+  it.each(["evening-target", "highs"])(
+    "enables the %s strategy for a steered, planned battery",
+    async (strategy) => {
+      const { addBattery } = await import("../../app/lib/batteries.server");
+      await addBattery({ ...storedBattery, chargeLimitPlanning: true });
 
-    const { loop } = await loadSettings();
-    try {
-      await post({
+      const result = await post({
         intent: "control-save",
         enabled: "on",
-        strategy: "net-zero-energy",
+        strategy,
         intervalSeconds: "5",
       });
 
-      expect(loop.controlLoopStatus()).toMatchObject({
-        running: true,
-        intervalSeconds: 5,
+      expect(result).toEqual({ section: "control", ok: true });
+      const { readControlConfig } = await import(
+        "../../app/lib/control-config.server"
+      );
+      expect(await readControlConfig()).toMatchObject({
+        enabled: true,
+        strategy,
       });
-    } finally {
-      // The interval is real here; leaving it running would tick against a
-      // torn-down mock for the rest of the file.
-      await loop.pendingControlTick();
-      loop.resetControlLoop();
-    }
-  });
+    },
+  );
 
   it.each([false, true])(
     "requires battery steering to enable charge-limit control: %s",
@@ -776,7 +765,7 @@ describe("POST /settings", () => {
       const result = await post({
         intent: "control-save",
         enabled: "on",
-        strategy: "charge-limit",
+        strategy: "highs",
         intervalSeconds: "5",
       });
       const { readControlConfig } = await import(
@@ -797,12 +786,16 @@ describe("POST /settings", () => {
     // A loop that decides correctly and commands nothing is indistinguishable
     // from a broken one, so this is a rejection rather than a warning.
     const { addBattery } = await import("../../app/lib/batteries.server");
-    await addBattery({ ...storedBattery, steered: false });
+    await addBattery({
+      ...storedBattery,
+      steered: false,
+      chargeLimitPlanning: true,
+    });
 
     const result = await post({
       intent: "control-save",
       enabled: "on",
-      strategy: "net-zero-energy",
+      strategy: "evening-target",
       intervalSeconds: "5",
     });
 
@@ -810,7 +803,7 @@ describe("POST /settings", () => {
     expect(status).toBe(400);
     expect(payload).toMatchObject({
       section: "control",
-      errors: { enabled: expect.stringContaining("steered") },
+      errors: { enabled: expect.stringContaining("Steer this battery") },
     });
 
     const { readControlConfig } = await import(
@@ -827,39 +820,34 @@ describe("POST /settings", () => {
 
     const result = await post({
       intent: "control-save",
-      strategy: "net-zero-energy",
+      strategy: "evening-target",
       intervalSeconds: "5",
     });
 
     expect(result).toEqual({ section: "control", ok: true });
   });
 
-  it("enables control when only one of several batteries is steerable", async () => {
+  it("refuses to enable control with more than one battery", async () => {
+    // Two independent single-battery plans would spend the same solar twice.
     const { addBattery } = await import("../../app/lib/batteries.server");
     await addBattery({ ...storedBattery, steered: false });
-    await addBattery(storedBattery);
+    await addBattery({ ...storedBattery, chargeLimitPlanning: true });
 
-    const { loop } = await loadSettings();
-    try {
-      const result = await post({
-        intent: "control-save",
-        enabled: "on",
-        strategy: "net-zero-energy",
-        intervalSeconds: "5",
-      });
+    const result = await post({
+      intent: "control-save",
+      enabled: "on",
+      strategy: "evening-target",
+      intervalSeconds: "5",
+    });
 
-      expect(result).toEqual({ section: "control", ok: true });
-    } finally {
-      await loop.pendingControlTick();
-      loop.resetControlLoop();
-    }
+    expect(failure(result).status).toBe(400);
   });
 
   it("rejects an interval outside the allowed range", async () => {
     const result = await post({
       intent: "control-save",
       enabled: "on",
-      strategy: "net-zero-energy",
+      strategy: "evening-target",
       intervalSeconds: "0",
     });
 

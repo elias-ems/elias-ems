@@ -7,7 +7,7 @@
  * These are HTTP-level assertions. Whether the page then hydrates is checked in
  * test/e2e, which needs a real browser to tell "inert" from "working".
  */
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -15,15 +15,6 @@ import { startStack } from "../stack.js";
 
 let stack: Awaited<ReturnType<typeof startStack>>;
 let html: string;
-
-/** Every battery command the add-on has published, as an automation would see it. */
-function targetEvents(): Array<Record<string, unknown>> {
-  return stack.ha.events
-    .filter(
-      (event) => event.eventType === "elias_ems_home_battery_battery_command",
-    )
-    .map((event) => event.data as Record<string, unknown>);
-}
 
 /** Every URL the browser would go on to request from the served HTML. */
 function assetUrls(document: string): string[] {
@@ -34,6 +25,15 @@ function assetUrls(document: string): string[] {
 
 beforeAll(async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "elias-ems-ingress-"));
+  // An install upgrading from a version with net zero energy switched on.
+  await writeFile(
+    path.join(dataDir, "control.json"),
+    JSON.stringify({
+      enabled: true,
+      strategy: "net-zero-energy",
+      intervalSeconds: 5,
+    }),
+  );
   stack = await startStack({ dataDir });
 
   const response = await fetch(stack.baseUrl);
@@ -183,26 +183,21 @@ describe("battery control", () => {
     expect(response.status).toBeLessThan(400);
   }
 
-  async function messages(): Promise<string[]> {
-    const response = await fetch(
-      `${stack.baseUrl}api/diagnostics?origin=battery-control`,
+  it("comes back switched off after net zero energy was removed", async () => {
+    // Its automations expect setpoints, so it is not silently replaced by a
+    // strategy that publishes something else.
+    const settings = await fetch(`${stack.baseUrl}settings`).then((r) =>
+      r.text(),
     );
-    expect(response.status).toBe(200);
-    const { entries } = (await response.json()) as {
-      entries: Array<{ message: string }>;
-    };
-    return entries.map((entry) => entry.message);
-  }
+    expect(settings).not.toContain("Net zero energy");
+    expect(settings).toContain("Evening target");
+    expect(settings).toContain("HiGHS cost optimizer");
+    expect(
+      stack.ha.events.filter((e) => e.eventType.endsWith("_battery_command")),
+    ).toEqual([]);
+  });
 
-  it("runs in the real server process once it is switched on", async () => {
-    // The loop lives in module state inside server.js, which the unit tests
-    // reach by importing it directly. This is the one place it is exercised
-    // where "the add-on" and "the process holding the interval" are the same
-    // thing, reached over HTTP through the ingress proxy.
-    await post({
-      intent: "grid-save",
-      powerEntityId: "sensor.grid_power",
-    });
+  it("saves a registered strategy through the ingress proxy", async () => {
     await post({
       intent: "battery-add",
       title: "Home battery",
@@ -212,65 +207,22 @@ describe("battery control", () => {
       energyEntityId: "sensor.battery_energy_total",
       powerEntityId: "sensor.battery_power",
       socEntityId: "sensor.battery_state_of_charge",
-      // Control refuses to switch on without one, and the title is what the
-      // command event is named after.
       steered: "on",
-      // Net zero energy only steers a battery that can follow a setpoint.
-      controlModes: ["hold", "charge", "discharge"],
+      chargeLimitPlanning: "on",
+      maxChargePowerW: "2000",
+      maxDischargePowerW: "2000",
     });
-
-    expect(await messages()).toEqual([]);
-
     await post({
       intent: "control-save",
       enabled: "on",
-      strategy: "net-zero-energy",
-      intervalSeconds: "1",
+      strategy: "highs",
+      intervalSeconds: "5",
     });
 
-    // Enabling ticks once straight away, but that tick is fire-and-forget and
-    // has its own round trip to Home Assistant to make first.
-    await expect
-      .poll(messages, { timeout: 5_000 })
-      .toContainEqual(expect.stringContaining("Home battery: discharge at"));
-  });
-
-  it("publishes the target from inside the real server process", async () => {
-    // The unit tests import the loop and call it. This is the one place the
-    // target leaves the process that actually serves the add-on, over the
-    // same Supervisor proxy it would use inside Home Assistant.
-    await expect
-      .poll(() => targetEvents().length, { timeout: 5_000 })
-      .toBeGreaterThan(0);
-
-    expect(targetEvents()[0]).toMatchObject({
-      schema_version: 1,
-      slug: "home_battery",
-      title: "Home battery",
-      action: "apply",
-      strategy: "net-zero-energy",
-      mode: "discharge",
-      setpoint_w: -842,
-      discharge_w: 842,
-      released: false,
-    });
-  });
-
-  it("releases the battery when control is switched off", async () => {
-    await post({
-      intent: "control-save",
-      strategy: "net-zero-energy",
-      intervalSeconds: "1",
-    });
-
-    // Whatever it asked for along the way, the last thing it said has to be
-    // a release — a stopped loop must not leave a battery being driven — and
-    // a release rather than a hold, which would still be driving it at 0 W.
-    expect(targetEvents().at(-1)).toMatchObject({
-      action: "release",
-      mode: null,
-      released: true,
-    });
+    const settings = await fetch(`${stack.baseUrl}settings`).then((r) =>
+      r.text(),
+    );
+    expect(settings).toMatch(/<option value="highs" selected="">/);
   });
 
   it("hands the whole log over as a text file", async () => {
@@ -284,7 +236,9 @@ describe("battery control", () => {
     expect(response.headers.get("Content-Type")).toBe(
       "text/plain; charset=utf-8",
     );
-    expect(await response.text()).toContain("battery-control");
+    expect(await response.text()).toContain(
+      "The net-zero-energy strategy has been removed",
+    );
   });
 });
 

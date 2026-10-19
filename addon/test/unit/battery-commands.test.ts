@@ -53,7 +53,7 @@ function request(
     batteryId: "b1",
     title: "Home battery",
     slug: "home_battery",
-    strategy: "net-zero-energy",
+    strategy: "highs",
     command:
       targetW === null
         ? null
@@ -125,7 +125,7 @@ describe("commands", () => {
         },
         {
           action: "apply",
-          strategy: "charge-limit",
+          strategy: "evening-target",
           command: balanceCommand(
             { chargeLimitW: 1500.4, dischargeLimitW: null },
             NOW,
@@ -163,7 +163,7 @@ describe("publishCommands", () => {
         owner_epoch: ownerEpoch(),
         issued_at: expect.any(String),
         action: "apply",
-        strategy: "net-zero-energy",
+        strategy: "highs",
         released: false,
         mode: "discharge",
         setpoint_w: -800,
@@ -229,7 +229,7 @@ describe("publishCommands", () => {
   it("publishes any change to a boundary", async () => {
     const limits = (chargeLimitW: number) =>
       request(null, {
-        strategy: "charge-limit",
+        strategy: "evening-target",
         command: balanceCommand(
           { chargeLimitW, dischargeLimitW: null },
           NOW,
@@ -311,7 +311,7 @@ describe("releaseCommands", () => {
   it("lets go past the deadband, and says it is a release rather than a hold", async () => {
     await publishCommands([request(0)]);
     const [release] = await releaseCommands([target], "disabled", {
-      strategy: "net-zero-energy",
+      strategy: "highs",
     });
 
     expect(release.status).toBe("published");
@@ -321,7 +321,7 @@ describe("releaseCommands", () => {
       mode: null,
       setpoint_w: null,
       release_reason: "disabled",
-      strategy: "net-zero-energy",
+      strategy: "highs",
     });
     expect(commandOwner("b1")).toBeNull();
     expect(publishedSetpointW("b1")).toBeNull();
@@ -330,7 +330,7 @@ describe("releaseCommands", () => {
   it("does not release a battery another strategy has taken over", async () => {
     await publishCommands([
       request(null, {
-        strategy: "charge-limit",
+        strategy: "evening-target",
         command: balanceCommand(
           { chargeLimitW: 1000, dischargeLimitW: null },
           NOW,
@@ -339,17 +339,17 @@ describe("releaseCommands", () => {
       }),
     ]);
     const publishes = await releaseCommands([target], "disabled", {
-      strategy: "net-zero-energy",
+      strategy: "highs",
     });
 
     expect(publishes).toEqual([]);
-    expect(commandOwner("b1")).toBe("charge-limit");
+    expect(commandOwner("b1")).toBe("evening-target");
   });
 
   it("releases a battery nothing in this process has told anything", async () => {
     // What an earlier process said is exactly what is in doubt.
     const [release] = await releaseCommands([target], "disabled", {
-      strategy: "net-zero-energy",
+      strategy: "highs",
     });
 
     expect(release.status).toBe("published");
@@ -358,7 +358,7 @@ describe("releaseCommands", () => {
   it("only releases what is known to be held when asked to", async () => {
     expect(
       await releaseCommands([target], "disabled", {
-        strategy: "charge-limit",
+        strategy: "evening-target",
         onlyIfHeld: true,
       }),
     ).toEqual([]);

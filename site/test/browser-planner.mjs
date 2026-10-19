@@ -86,7 +86,7 @@ try {
   await page
     .getByLabel("Comparison capabilities", { exact: true })
     .selectOption({ label: "Equivalent: balance + existing boundaries" });
-  await page.getByRole("button", { name: "Compare planners" }).click();
+  await page.getByRole("button", { name: "Compare strategies" }).click();
   await page
     .getByText("Optimal for modeled objective", { exact: false })
     .waitFor({ timeout: 15000 })
@@ -97,7 +97,7 @@ try {
   await page
     .getByLabel("Comparison capabilities", { exact: true })
     .selectOption({ label: "Expanded: assume all four modes" });
-  await page.getByRole("button", { name: "Compare planners" }).click();
+  await page.getByRole("button", { name: "Compare strategies" }).click();
   await page
     .getByText("Optimal for modeled objective", { exact: false })
     .waitFor({ timeout: 15000 })
@@ -106,7 +106,7 @@ try {
       throw error;
     });
   // One SoC chart per calculated strategy.
-  for (const name of ["Evening target", "HiGHS"])
+  for (const name of ["Evening target", "HiGHS cost optimizer"])
     await page.getByRole("img", { name: `${name}: end-of-interval` }).waitFor();
   assert.ok(
     (await page
@@ -119,7 +119,9 @@ try {
   const [download] = await Promise.all([
     page.waitForEvent("download"),
     page
-      .getByRole("button", { name: "Download inputs and calculated plan" })
+      .getByRole("button", {
+        name: "Download inputs and every strategy’s result",
+      })
       .click(),
   ]);
   const stream = await download.createReadStream();
@@ -127,23 +129,25 @@ try {
   for await (const chunk of stream) content += chunk.toString();
   const exported = JSON.parse(content);
   assert.equal(exported.dataset.schemaVersion, 1);
-  assert.equal(exported.algorithm, "evening-target");
-  assert.equal(exported.plan.points.length, data.slots.length);
+  assert.deepEqual(exported.strategies, ["evening-target", "highs"]);
+  const run = (id) => exported.comparison.runs.find((r) => r.id === id);
+  assert.equal(
+    run("evening-target").result.plan.points.length,
+    data.slots.length,
+  );
   assert.equal(exported.comparison.input.capabilities.gridCharging, true);
   assert.equal(exported.comparison.input.capabilities.batteryExport, true);
-  assert.equal(exported.comparison.engine.commands.length, data.slots.length);
+  const highs = run("highs").result;
+  assert.equal(highs.commands.length, data.slots.length);
   for (const field of ["deadline", "objective", "terminalReserveKwh"]) {
     assert.equal(field in exported.comparison.input, false);
   }
-  assert.equal(exported.comparison.engine.statuses.length, 2);
+  assert.equal(highs.details.statuses.length, 2);
   assert.equal(
-    exported.comparison.engine.balancePreference,
+    highs.details.balancePreference,
     "Maximum balance time at optimal cost",
   );
-  assert.equal(
-    "shortfallKwh" in exported.comparison.engine.scenarios[0],
-    false,
-  );
+  assert.equal("shortfallKwh" in run("highs").scenarios[0], false);
   assert.equal(await page.getByLabel("Objective", { exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   assert.ok(responses.length >= 1);
@@ -153,7 +157,9 @@ try {
   await page.getByRole("button", { name: "Marginal autumn surplus" }).click();
   await page.getByText("Marginal autumn surplus · 96 intervals").waitFor();
   // Loading a preset starts the comparison without a click.
-  await page.getByText("Running both planners in a local worker").waitFor();
+  await page
+    .getByText("Running every registered strategy in a local worker")
+    .waitFor();
   assert.equal(
     await page
       .getByRole("button", { name: "Marginal autumn surplus" })
@@ -163,7 +169,7 @@ try {
   await page
     .getByLabel("Comparison capabilities", { exact: true })
     .selectOption({ label: "Equivalent: balance + existing boundaries" });
-  await page.getByRole("button", { name: "Compare planners" }).click();
+  await page.getByRole("button", { name: "Compare strategies" }).click();
   await page
     .getByText("Optimal for modeled objective", { exact: false })
     .waitFor({ timeout: 30000 })

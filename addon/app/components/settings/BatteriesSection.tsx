@@ -4,7 +4,6 @@ import {
   BATTERY_DEFAULTS,
   batterySlug,
   isSteerable,
-  supportsSetpoints,
 } from "../../lib/batteries";
 import { commandEventType, SETPOINT_MODES } from "../../lib/battery-command";
 import type { SettingsActionData } from "../../lib/settings-form";
@@ -80,10 +79,11 @@ export default function BatteriesSection({
               {battery.dischargeLimitSupported
                 ? "; discharge limit in balance"
                 : ""}
-              {supportsSetpoints(battery) ? "" : " — not usable by net zero"}
             </div>
             {battery.chargeLimitPlanning && (
-              <div style={{ fontSize: "0.875rem" }}>Charge-limit planning</div>
+              <div style={{ fontSize: "0.875rem" }}>
+                Planned by the battery strategy
+              </div>
             )}
           </>
         )}
@@ -186,8 +186,9 @@ export default function BatteriesSection({
                   />
                 ))}
                 <p style={hintStyle}>
-                  Net zero energy commands hold, charge and discharge setpoints
-                  and needs all three. Optimize charge limits commands balance.
+                  Both battery control strategies command balance today. Hold,
+                  charge and discharge are recorded for strategies that will
+                  issue direct setpoints.
                 </p>
               </fieldset>
               <CheckboxField
@@ -212,7 +213,7 @@ export default function BatteriesSection({
                 name="chargeLimitPlanning"
                 label="Plan charge limits"
                 defaultChecked={battery?.chargeLimitPlanning ?? false}
-                hint="Shows a charge-limit plan on Home, even while another strategy is selected. Enable Optimize charge limits under Battery control to publish it."
+                hint="Shows the selected strategy's plan on Home. Enable battery control to publish it."
               />
               <Field
                 name="chargeEfficiencyPercent"
@@ -234,7 +235,7 @@ export default function BatteriesSection({
                 placeholder="e.g. 5000"
                 defaultValue={battery?.maxChargePowerW ?? ""}
                 error={errors.maxChargePowerW}
-                hint="Required for charge-limit planning. Otherwise, leave empty to leave commands uncapped in this direction."
+                hint="Required for planning. Otherwise, leave empty to leave commands uncapped in this direction."
               />
               <Field
                 name="maxDischargePowerW"
@@ -245,7 +246,7 @@ export default function BatteriesSection({
                 placeholder="e.g. 5000"
                 defaultValue={battery?.maxDischargePowerW ?? ""}
                 error={errors.maxDischargePowerW}
-                hint="Required for charge-limit planning. Otherwise, leave empty to leave commands uncapped in this direction."
+                hint="Required for planning. Otherwise, leave empty to leave commands uncapped in this direction."
               />
             </>
           );

@@ -7,9 +7,8 @@
  * enabled but not running would otherwise claim to be armed.
  */
 import { describe, expect, it } from "vitest";
-import type { DashboardArray, DashboardBattery } from "../../app/lib/dashboard";
+import type { DashboardArray } from "../../app/lib/dashboard";
 import {
-  batteryControlSummary,
   curtailmentSummary,
   groupThousands,
   signedWatts,
@@ -27,20 +26,6 @@ function array(over: Partial<DashboardArray> = {}): DashboardArray {
     ratedPowerW: 5000,
     curtailable: true,
     limitPercent: null,
-    ...over,
-  };
-}
-
-function battery(over: Partial<DashboardBattery> = {}): DashboardBattery {
-  return {
-    id: "b1",
-    title: "Home battery",
-    window: "10–95% of 12 kWh",
-    charge: null,
-    power: null,
-    energy: null,
-    chargePercent: 78,
-    targetW: null,
     ...over,
   };
 }
@@ -140,64 +125,5 @@ describe("curtailmentSummary", () => {
     );
     expect(summary.state).toBe("Nothing to steer");
     expect(summary.tone).toBe("idle");
-  });
-});
-
-describe("batteryControlSummary", () => {
-  it("says so when the feature is switched off", () => {
-    const summary = batteryControlSummary([battery()], {
-      enabled: false,
-      running: false,
-    });
-    expect(summary.state).toBe("Disabled");
-    // The charge is still worth drawing: the battery has one whether or not
-    // anything is steering it.
-    expect(summary.percent).toBe(78);
-  });
-
-  it("is armed until a target has actually gone out", () => {
-    const summary = batteryControlSummary(
-      [battery({ targetW: null })],
-      RUNNING,
-    );
-    expect(summary.state).toBe("Armed");
-    expect(summary.value).toBeNull();
-    expect(summary.caption).toContain("no target published");
-  });
-
-  it("reads the direction off the sign of the target", () => {
-    expect(
-      batteryControlSummary([battery({ targetW: 2100 })], RUNNING).state,
-    ).toBe("Charging");
-    expect(
-      batteryControlSummary([battery({ targetW: -900 })], RUNNING).state,
-    ).toBe("Discharging");
-    expect(
-      batteryControlSummary([battery({ targetW: 0 })], RUNNING).state,
-    ).toBe("Holding");
-  });
-
-  it("sums several batteries and means their charge", () => {
-    const summary = batteryControlSummary(
-      [
-        battery({ id: "b1", targetW: 1500, chargePercent: 80 }),
-        battery({ id: "b2", targetW: 600, chargePercent: 60 }),
-      ],
-      RUNNING,
-    );
-    expect(summary.value).toBe("+2,100");
-    expect(summary.percent).toBe(70);
-    expect(summary.caption).toContain("2 batteries");
-  });
-
-  it("has nothing to say with no batteries configured", () => {
-    for (const loop of [RUNNING, { enabled: false, running: false }]) {
-      const summary = batteryControlSummary([], loop);
-      expect(summary.state).toBe("No batteries");
-      expect(summary.percent).toBeNull();
-      // Not "mean state of charge across 0 batteries", which is what a check
-      // ordered after the enabled/disabled branches produced.
-      expect(summary.caption).not.toContain("0 batteries");
-    }
   });
 });

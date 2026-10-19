@@ -1,6 +1,6 @@
 /**
  * The loop, against the mock Home Assistant. What matters here is not the
- * arithmetic — net-zero.test.ts owns that — but the scheduling: that it runs
+ * arithmetic — curtail.test.ts owns that — but the scheduling: that it runs
  * when a reading it cares about moves, no more often than it was told to, and
  * that it survives the things that will actually go wrong in a house.
  *
@@ -174,7 +174,7 @@ function pvLimitEvents(): Array<[string, unknown, unknown]> {
  */
 function decisionTicks(): number {
   return readDiagnostics()
-    .filter((entry) => entry.message.startsWith("Grid net"))
+    .filter((entry) => entry.message.includes("Grid net"))
     .reduce((total, entry) => total + entry.repeat, 0);
 }
 
@@ -215,13 +215,11 @@ beforeEach(async () => {
   for (const entity of await listPvEntities()) await removePvEntity(entity.id);
   await saveGrid(GRID);
   await savePriceConfig(DEFAULT_PRICE_CONFIG);
-  // Each tick now gates its halves on what is stored, so that switching a
-  // feature on or off takes effect without restarting the loop. These cases are
-  // battery control's, so that is what is on; the `syncControlLoop` cases below
-  // save their own config over this one.
+  // Battery control plans in its own loop; this one only carries PV
+  // curtailment, which each case switches on for itself.
   await saveControlConfig({
-    enabled: true,
-    strategy: "net-zero-energy",
+    enabled: false,
+    strategy: "evening-target",
     intervalSeconds: 5,
   });
   await saveCurtailmentConfig({
@@ -240,126 +238,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("runControlTick", () => {
-  it("logs the decision for the configured battery", async () => {
-    await addBattery(BATTERY);
-
-    await runControlTick();
-
-    // The fixture imports 842 W with the battery idle, so it should discharge.
-    expect(logged("Grid net +842 W (importing)")).toBe(true);
-    expect(logged("Home battery: discharge at 842 W")).toBe(true);
-  });
-
-  it("says the grid is not configured rather than deciding blind", async () => {
-    await saveGrid({ powerEntityId: "" });
-    await addBattery(BATTERY);
-
-    await runControlTick();
-
-    expect(logged("The grid sensor is not configured")).toBe(true);
-  });
-
-  it("reports an unavailable battery sensor instead of guessing at it", async () => {
-    await addBattery({ ...BATTERY, socEntityId: "sensor.shed_inverter_power" });
-
-    await runControlTick();
-
-    expect(logged("state of charge unknown")).toBe(true);
-  });
-
-  it("publishes the target it decided on, under the battery's own event", async () => {
-    await addBattery(BATTERY);
-
-    await runControlTick();
-
-    // The fixture imports 842 W with the battery idle, so the decision is to
-    // discharge 842 W.
-    expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_battery_command", -842],
-    ]);
-    expect(logged("Published: Home battery → discharge 842 W")).toBe(true);
-    expect(ha.events.at(-1)?.data).toMatchObject({
-      action: "apply",
-      strategy: "net-zero-energy",
-      mode: "discharge",
-      charge_w: 0,
-      discharge_w: 842,
-    });
-  });
-
-  it("does not command a battery whose automation cannot follow a setpoint", async () => {
-    // Net zero energy only ever asks for hold, charge or discharge. A battery
-    // that can only balance is part of the house, not something it steers.
-    await addBattery({ ...BATTERY, controlModes: ["balance"] });
-
-    await runControlTick();
-
-    expect(targetEvents()).toEqual([]);
-  });
-
-  it("does not publish again while the target has not moved", async () => {
-    await addBattery(BATTERY);
-
-    await runControlTick();
-    await runControlTick();
-
-    // The second tick decides the same thing and finds nothing worth saying.
-    // Without this the loop would fire an event every tick, and on the other
-    // end of each one is an automation writing to real hardware.
-    expect(targetEvents()).toHaveLength(1);
-  });
-
-  it("says nothing at all when the grid is inside the deadband", async () => {
-    // A hold reports the battery's *measured* power as its target, which is
-    // the right thing to show and the wrong thing to command: publishing a
-    // measurement back would let sensor noise walk the commanded value around.
-    ha.setState("sensor.grid_power", "4", { unit_of_measurement: "W" });
-    await addBattery(BATTERY);
-
-    await runControlTick();
-
-    expect(logged("deadband")).toBe(true);
-    expect(targetEvents()).toEqual([]);
-  });
-
-  it("cancels a standing command when the grid sensor cannot be read", async () => {
-    // The blind case. A battery left forcing kilowatts because the meter it
-    // was following went unreadable is the one hold that must not persist.
-    await addBattery(BATTERY);
-    await runControlTick();
-    ha.setState("sensor.grid_power", "unavailable", {});
-    ha.events.length = 0;
-
-    await runControlTick();
-
-    expect(logged("grid power sensor is not readable")).toBe(true);
-    expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_battery_command", 0],
-    ]);
-  });
-
-  it("caps the target at the configured discharge limit", async () => {
-    // Settings are the only source of a limit now that nothing is written to
-    // an entity, so a cap that never reached the strategy would be visible
-    // here: the meter is asking for 842 W and the inverter can do 500 W.
-    await addBattery({ ...BATTERY, maxDischargePowerW: 500 });
-
-    await runControlTick();
-
-    expect(logged("discharge at 500 W, capped from 842 W")).toBe(true);
-  });
-
-  it("leaves a battery with no limits uncapped", async () => {
-    await addBattery(BATTERY);
-
-    await runControlTick();
-
-    expect(logged("discharge at 842 W")).toBe(true);
-    expect(logged("capped from")).toBe(false);
-  });
-});
-
 describe("runControlTick, curtailment half", () => {
   /** Curtailment on and battery control off — the two are independent. */
   async function onlyCurtailment(
@@ -370,7 +248,7 @@ describe("runControlTick, curtailment half", () => {
     await savePriceConfig(prices);
     await saveControlConfig({
       enabled: false,
-      strategy: "net-zero-energy",
+      strategy: "evening-target",
       intervalSeconds: 5,
     });
     await saveCurtailmentConfig(config);
@@ -668,16 +546,24 @@ describe("runControlTick, curtailment half", () => {
   });
 });
 
+/**
+ * Curtailment switched on against a negative injection price, which is what
+ * keeps the loop running in these cases: battery control plans elsewhere.
+ */
+async function curtailing(intervalSeconds = 5): Promise<void> {
+  await addPvEntity(PV_ARRAY);
+  await savePriceConfig(NEGATIVE_INJECTION);
+  await saveControlConfig({
+    enabled: false,
+    strategy: "evening-target",
+    intervalSeconds,
+  });
+  await saveCurtailmentConfig(CURTAILMENT);
+}
+
 describe("syncControlLoop, with curtailment", () => {
   it("releases the arrays when curtailment is switched off", async () => {
-    await addPvEntity(PV_ARRAY);
-    await savePriceConfig(NEGATIVE_INJECTION);
-    await saveControlConfig({
-      enabled: false,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
-    await saveCurtailmentConfig(CURTAILMENT);
+    await curtailing();
     await syncControlLoop();
     await pendingControlTick();
     ha.events.length = 0;
@@ -693,33 +579,39 @@ describe("syncControlLoop, with curtailment", () => {
     expect(logged("Released the array to 100%.")).toBe(true);
   });
 
-  it("runs the loop for curtailment alone, and says so in its own log", async () => {
-    await addPvEntity(PV_ARRAY);
-    await savePriceConfig(NEGATIVE_INJECTION);
-    await saveControlConfig({
-      enabled: false,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
-    await saveCurtailmentConfig(CURTAILMENT);
+  it("runs for curtailment, and says so in its own log", async () => {
+    await curtailing();
 
     const status = await syncControlLoop();
     await pendingControlTick();
 
-    // `running` is battery control's view, and it is deliberately narrower than
-    // "a timer exists" — the home page would otherwise report the wrong feature
-    // as running.
-    expect(status.running).toBe(false);
+    expect(status.running).toBe(true);
     expect(logged("PV curtailment enabled")).toBe(true);
     expect(logged("Battery control enabled")).toBe(false);
+  });
+
+  it("never publishes battery commands, even with battery control on", async () => {
+    await addBattery(BATTERY);
+    await curtailing();
+    await saveControlConfig({
+      enabled: true,
+      strategy: "evening-target",
+      intervalSeconds: 5,
+    });
+
+    await syncControlLoop();
+    await pendingControlTick();
+
+    expect(pvLimitEvents()).toHaveLength(1);
+    expect(targetEvents()).toEqual([]);
   });
 });
 
 describe("syncControlLoop", () => {
-  it("does not start a loop while control is disabled", async () => {
+  it("does not start a loop while curtailment is disabled", async () => {
     await saveControlConfig({
-      enabled: false,
-      strategy: "net-zero-energy",
+      enabled: true,
+      strategy: "evening-target",
       intervalSeconds: 5,
     });
 
@@ -731,18 +623,12 @@ describe("syncControlLoop", () => {
 
   it("ticks at once when it is switched on", async () => {
     vi.useFakeTimers();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
+    await curtailing();
 
     const status = await syncControlLoop();
     expect(status.running).toBe(true);
-    expect(status.intervalSeconds).toBe(5);
 
-    // Someone who has just enabled the strategy should not have to wait for the
+    // Someone who has just enabled the feature should not have to wait for the
     // house to do something before finding out whether it works.
     await pendingControlTick();
     expect(decisionTicks()).toBe(1);
@@ -750,12 +636,7 @@ describe("syncControlLoop", () => {
 
   it("ticks when a reading it watches moves, without waiting for a clock", async () => {
     await subscribe();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 1,
-    });
+    await curtailing(1);
 
     await syncControlLoop();
     await pendingControlTick();
@@ -773,12 +654,7 @@ describe("syncControlLoop", () => {
 
   it("ignores changes to entities it doesn't use", async () => {
     await subscribe();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 1,
-    });
+    await curtailing(1);
     await syncControlLoop();
     await pendingControlTick();
 
@@ -792,25 +668,17 @@ describe("syncControlLoop", () => {
   });
 
   it("does not tick on an entity an automation moved on our behalf", async () => {
-    // Whatever the automation does with a target on the way to the hardware
-    // is an output, not a reading. Watching it would mean every target came
-    // back as a change, provoked another tick and was published again — a
-    // feedback loop with nothing damping it.
+    // Whatever the automation does with a limit on the way to the hardware is
+    // an output, not a reading. Watching it would mean every limit came back
+    // as a change, provoked another tick and was published again — a feedback
+    // loop with nothing damping it.
     await subscribe();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 1,
-    });
+    await curtailing(1);
     await syncControlLoop();
     await pendingControlTick();
 
     const before = decisionTicks();
-    ha.setState("input_number.battery_target", "-1200", {
-      min: -5000,
-      max: 5000,
-    });
+    ha.setState("number.inverter_limit", "40", { min: 0, max: 100 });
 
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     expect(decisionTicks()).toBe(before);
@@ -818,12 +686,7 @@ describe("syncControlLoop", () => {
 
   it("holds to its interval under a burst, and still acts on the last change", async () => {
     await subscribe();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 2,
-    });
+    await curtailing(2);
     await syncControlLoop();
     await pendingControlTick();
 
@@ -850,12 +713,7 @@ describe("syncControlLoop", () => {
 
   it("keeps ticking when nothing in the house is moving", async () => {
     vi.useFakeTimers();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
+    await curtailing();
     await syncControlLoop();
     await pendingControlTick();
 
@@ -868,30 +726,17 @@ describe("syncControlLoop", () => {
     expect(decisionTicks()).toBe(before + 1);
   });
 
-  it("stops the loop when control is switched off", async () => {
+  it("stops the loop when curtailment is switched off", async () => {
     vi.useFakeTimers();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
+    await curtailing();
     await syncControlLoop();
     await pendingControlTick();
 
-    await saveControlConfig({
-      enabled: false,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
+    await saveCurtailmentConfig({ ...CURTAILMENT, enabled: false });
     const status = await syncControlLoop();
 
     expect(status.running).toBe(false);
-    // Named per feature rather than as one line about the loop: the loop is
-    // shared with curtailment now, and "the loop stopped" would be the wrong
-    // thing to say in battery control's box when the other feature is what was
-    // switched off.
-    expect(logged("Battery control disabled.")).toBe(true);
+    expect(logged("PV curtailment disabled.")).toBe(true);
 
     // And it really is stopped, not merely reported as such.
     const before = decisionTicks();
@@ -899,90 +744,16 @@ describe("syncControlLoop", () => {
     expect(decisionTicks()).toBe(before);
   });
 
-  it("releases the batteries when control is switched off", async () => {
-    // Switching control off has to leave the battery under its own control
-    // again. Stopping the loop while a forced target stands would leave it
-    // discharging at whatever it was last told, with nothing left running that
-    // would ever change its mind.
-    vi.useFakeTimers();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
-    await syncControlLoop();
-    await pendingControlTick();
-
-    expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_battery_command", -842],
-    ]);
-
-    await saveControlConfig({
-      enabled: false,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
-    await syncControlLoop();
-
-    expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_battery_command", -842],
-      ["elias_ems_home_battery_battery_command", null],
-    ]);
-    expect(ha.events.at(-1)?.data).toMatchObject({
-      action: "release",
-      release_reason: "disabled",
-    });
-    expect(logged("Released the battery.")).toBe(true);
-  });
-
-  it("releases unconditionally, and says it is letting go rather than stopping", async () => {
-    // The deadband is a tick-rate optimisation, not something the release
-    // should inherit: letting go is worth one event even when it looks
-    // redundant, because what we think the battery is doing is the very thing
-    // in doubt when something has gone wrong enough to be switching control
-    // off. A release is not a hold, and `action` is what tells an automation so.
-    vi.useFakeTimers();
-    ha.setState("sensor.grid_power", "4", { unit_of_measurement: "W" });
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
-    await syncControlLoop();
-    await pendingControlTick();
-    // A balanced house, so the tick above published nothing at all.
-    expect(targetEvents()).toEqual([]);
-
-    await saveControlConfig({
-      enabled: false,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
-    await syncControlLoop();
-
-    expect(targetEvents()).toEqual([
-      ["elias_ems_home_battery_battery_command", null],
-    ]);
-    expect(ha.events.at(-1)?.data).toMatchObject({ released: true });
-  });
-
   it("picks up a changed interval", async () => {
     await subscribe();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 60,
-    });
+    await curtailing(60);
     await syncControlLoop();
     await pendingControlTick();
 
     // Under the old sixty-second limit this change would wait a minute.
     await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
+      enabled: false,
+      strategy: "evening-target",
       intervalSeconds: 1,
     });
     await syncControlLoop();
@@ -998,13 +769,7 @@ describe("syncControlLoop", () => {
 
   it("leaves a running loop alone when nothing about it changed", async () => {
     vi.useFakeTimers();
-    await addBattery(BATTERY);
-    const config = {
-      enabled: true,
-      strategy: "net-zero-energy" as const,
-      intervalSeconds: 5,
-    };
-    await saveControlConfig(config);
+    await curtailing();
     await syncControlLoop();
     await pendingControlTick();
 
@@ -1019,12 +784,7 @@ describe("syncControlLoop", () => {
 
   it("keeps its schedule when Home Assistant is unreachable", async () => {
     vi.useFakeTimers();
-    await addBattery(BATTERY);
-    await saveControlConfig({
-      enabled: true,
-      strategy: "net-zero-energy",
-      intervalSeconds: 5,
-    });
+    await curtailing();
     process.env.SUPERVISOR_API = UNREACHABLE_API;
 
     await syncControlLoop();
@@ -1042,7 +802,7 @@ describe("syncControlLoop", () => {
 
 describe("where a tick's numbers came from", () => {
   it("says REST, and how old the readings were, when there is no subscription", async () => {
-    await addBattery(BATTERY);
+    await curtailing();
 
     await runControlTick();
 
@@ -1052,9 +812,9 @@ describe("where a tick's numbers came from", () => {
 
   it("reads the cache without asking Home Assistant again", async () => {
     await subscribe();
-    await addBattery(BATTERY);
+    await curtailing();
 
-    // Reads only. The tick also *publishes* a target, which is a round trip
+    // Reads only. The tick also *publishes* a limit, which is a round trip
     // by definition and the one this exercise was never about avoiding.
     const stateReads = () =>
       ha.requests.filter((request) =>
@@ -1072,6 +832,7 @@ describe("where a tick's numbers came from", () => {
 
 describe("what it writes to diagnostics", () => {
   it("collapses a repeated line instead of filling the buffer with it", async () => {
+    await curtailing();
     await saveGrid({ powerEntityId: "" });
 
     await runControlTick();
@@ -1083,15 +844,15 @@ describe("what it writes to diagnostics", () => {
     expect(entries[0]).toMatchObject({ repeat: 3, level: "warn" });
   });
 
-  it("files everything under the battery-control origin", async () => {
+  it("files everything under the pv-curtailment origin", async () => {
     // The Tools page shows every feature's entries in one list, so an entry
     // that did not say where it came from would be unattributable there.
-    await addBattery(BATTERY);
+    await curtailing();
 
     await runControlTick();
 
-    expect(readDiagnostics().map((entry) => entry.origin)).toEqual([
-      "battery-control",
-    ]);
+    expect(new Set(readDiagnostics().map((entry) => entry.origin))).toEqual(
+      new Set(["pv-curtailment"]),
+    );
   });
 });

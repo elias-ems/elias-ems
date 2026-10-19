@@ -1,0 +1,19 @@
+# BuildKit reads this file for addon/Dockerfile in place of a .dockerignore at
+# the build context, which is the repository root: the image needs engine/ as
+# well as addon/, and nothing else.
+*
+!addon
+!engine
+**/node_modules
+addon/build
+addon/.react-router
+addon/data
+
+# Playwright's output, rewritten by every `npm run test:e2e` run and roughly
+# 70% of the add-on's tree. The build stage does `COPY addon/ ./`, so leaving
+# these in means running the tests invalidates the layer cache and forces a
+# full reinstall and rebuild on the next image build, with nothing in the
+# source having changed. Both are gitignored, so they never show up in
+# `git status` to remind you they are here.
+addon/playwright-report
+addon/test-results

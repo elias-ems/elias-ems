@@ -6,7 +6,9 @@
  * `diagnostics.ts`'s shape, not a type of its own.
  */
 
-export type StrategyId = "net-zero-energy" | "charge-limit";
+import { STRATEGY_REGISTRY, type StrategyId } from "./strategies/index.ts";
+
+export type { StrategyId };
 
 export type ControlConfig = {
   enabled: boolean;
@@ -38,33 +40,41 @@ export const CHARGE_LIMIT_PLANNING = {
 } as const;
 
 /**
- * Stored as an id rather than a boolean so that the price-aware strategies on
- * the roadmap are additive: one more entry here and one more branch in the loop,
- * with nothing already on disk needing to change.
+ * Settings' view of the strategy registry. Stored as an id so a new strategy
+ * is additive: register it in `strategies/index.ts` and it appears here, in
+ * the planning loop, in the Planner sandbox and in the gym, with nothing
+ * already on disk needing to change.
  */
 export const STRATEGIES: Array<{
   id: StrategyId;
   label: string;
   description: string;
-}> = [
-  {
-    id: "charge-limit",
-    label: "Optimize charge limits",
-    description:
-      "Plan automatically with solar forecasts and prices. When enabled, publish balance commands with maximum charging and optional AC output power limits, so the battery stays in native self-consumption. Plans aim for the battery's maximum charge by 18:00, allowing for 20% less solar than forecast.",
-  },
-  {
-    id: "net-zero-energy",
-    label: "Net zero energy",
-    description:
-      "Charge with what would otherwise be exported and discharge to cover what would otherwise be imported, so the meter sits at zero. Publishes hold, charge and discharge setpoint commands.",
-  },
-];
+}> = STRATEGY_REGISTRY.map(({ id, label, description }) => ({
+  id,
+  label,
+  description,
+}));
 
-/** Five seconds: fast enough to follow a kettle, slow enough not to hammer HA. */
+/**
+ * Ids earlier versions stored. `charge-limit` was Evening target under its
+ * feature's name and carries straight over. `net-zero-energy` was a live
+ * setpoint strategy that no longer exists: its battery automations expect
+ * setpoints, so it is not silently swapped for a planner that publishes
+ * something else — control comes back switched off, on Evening target.
+ */
+const RENAMED_STRATEGIES: Record<string, StrategyId> = {
+  "charge-limit": "evening-target",
+};
+export const REMOVED_STRATEGIES = new Set(["net-zero-energy"]);
+
+/**
+ * The interval paces the shared control loop, which PV curtailment runs on;
+ * the planning strategies keep their own cadence. Five seconds: fast enough to
+ * follow a kettle, slow enough not to hammer HA.
+ */
 export const DEFAULT_CONTROL_CONFIG: ControlConfig = {
   enabled: false,
-  strategy: "net-zero-energy",
+  strategy: "evening-target",
   intervalSeconds: 5,
 };
 
@@ -90,12 +100,18 @@ export function normalizeControlConfig(
   stored: Partial<ControlConfig> | null,
 ): ControlConfig {
   const intervalSeconds = Number(stored?.intervalSeconds);
+  const storedStrategy: unknown = stored?.strategy;
+  const renamed =
+    typeof storedStrategy === "string"
+      ? (RENAMED_STRATEGIES[storedStrategy] ?? storedStrategy)
+      : storedStrategy;
+  const removed =
+    typeof storedStrategy === "string" &&
+    REMOVED_STRATEGIES.has(storedStrategy);
 
   return {
-    enabled: stored?.enabled === true,
-    strategy: isStrategyId(stored?.strategy)
-      ? stored.strategy
-      : DEFAULT_CONTROL_CONFIG.strategy,
+    enabled: stored?.enabled === true && !removed,
+    strategy: isStrategyId(renamed) ? renamed : DEFAULT_CONTROL_CONFIG.strategy,
     intervalSeconds: clampInterval(
       Number.isFinite(intervalSeconds)
         ? intervalSeconds
@@ -108,19 +124,6 @@ export type ControlErrors = {
   intervalSeconds?: string;
   enabled?: string;
 };
-
-/**
- * Why control cannot be switched on yet.
- *
- * Enabling it with nothing to command would produce a loop that decides
- * correctly and changes nothing — which looks identical, from the outside, to
- * a loop that is broken. The check lives in the settings action rather than in
- * `parseControlConfig` because it needs the battery list, and this module is
- * pure; the constant is here so the form's warning and the server's rejection
- * cannot drift apart.
- */
-export const NO_STEERABLE_BATTERY_ERROR =
-  "At least one battery needs to be steered, with hold, charge and discharge enabled, before net zero energy can be enabled — without one there is nothing to steer.";
 
 export function parseControlConfig(
   formData: FormData,
@@ -157,11 +160,3 @@ export function parseControlConfig(
     },
   };
 }
-
-export type ControlLoopStatus = {
-  running: boolean;
-  strategy: StrategyId;
-  intervalSeconds: number;
-  /** ISO timestamp of the last completed tick, or null if none has finished. */
-  lastTickAt: string | null;
-};

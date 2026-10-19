@@ -19,11 +19,12 @@ import {
   updateBattery,
 } from "../lib/batteries.server";
 import {
+  interruptPlanning,
   invalidateChargePlans,
   withChargeLimitLock,
 } from "../lib/charge-limit-loop.server";
 import { CHARGE_LIMIT_BATTERY_ERROR } from "../lib/charge-limit-status";
-import { NO_STEERABLE_BATTERY_ERROR, parseControlConfig } from "../lib/control";
+import { parseControlConfig } from "../lib/control";
 import {
   readControlConfig,
   saveControlConfig,
@@ -98,6 +99,8 @@ function editedId(formData: FormData): string | null {
 }
 
 export function action(args: Route.ActionArgs) {
+  // A HiGHS solve can take tens of seconds; a save should not wait it out.
+  interruptPlanning();
   return withChargeLimitLock(async () => {
     const result = await settingsAction(args);
     if (result && "ok" in result && result.ok) invalidateChargePlans();
@@ -254,20 +257,13 @@ async function settingsAction({ request }: Route.ActionArgs) {
       if (parsed.config.enabled) {
         const batteries = await listBatteries();
         if (
-          parsed.config.strategy === "charge-limit"
-            ? batteries.length !== 1 ||
-              !steerableBy(batteries[0], "charge-limit")
-            : !batteries.some((b) => steerableBy(b, "net-zero-energy"))
+          batteries.length !== 1 ||
+          !steerableBy(batteries[0], parsed.config.strategy)
         ) {
           return failed({
             section: "control",
             recordId: null,
-            errors: {
-              enabled:
-                parsed.config.strategy === "charge-limit"
-                  ? CHARGE_LIMIT_BATTERY_ERROR
-                  : NO_STEERABLE_BATTERY_ERROR,
-            },
+            errors: { enabled: CHARGE_LIMIT_BATTERY_ERROR },
           });
         }
       }
@@ -404,12 +400,10 @@ export default function Settings({
         <ControlSection
           config={control}
           ready={{
-            grid: isGridConfigured(grid),
             batteries: batteries.length > 0,
-            steerable: batteries.some((b) => steerableBy(b, "net-zero-energy")),
-            chargeLimit:
+            planned:
               batteries.length === 1 &&
-              steerableBy(batteries[0], "charge-limit"),
+              steerableBy(batteries[0], control.strategy),
           }}
           actionData={actionData}
         />
