@@ -99,8 +99,12 @@ to unexpected demand. Feasible time-limited incumbents are labeled unproven; no 
 incumbent, infeasibility, invalid input or replay mismatch yields no schedule.
 The solver time budget is shared by initialization, construction and both solves;
 Node also has an outer termination deadline. Browser users can cancel the worker.
-The current input limit is 384 contiguous intervals. Initial SoC outside the configured window is explicitly unsupported rather
-than clamped, since clamping would invent energy. No forecast resampling occurs.
+The current input limit is 384 contiguous intervals. Initial SoC may be outside
+the configured operating window but must remain within 0–100%. It is preserved
+rather than clamped: discharge is blocked below the minimum and charging above
+the maximum until energy returns inside the window naturally. The physical
+model enforces these limits throughout both solar scenarios. No forecast
+resampling occurs.
 
 ## Event contract
 
