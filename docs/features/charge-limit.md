@@ -216,6 +216,11 @@ section shows forecast versus generated solar after PV limits and totals the
 modeled generation and curtailment over the plan. A prominent view switch
 exchanges those charts for the full schedule table and remembers the last choice
 in the browser. Battery charts show the AC output ceiling and expected discharge when the battery can limit discharge.
+The Charts view opens with a selectable power-flow diagram and a shared timeline
+for forecast household demand, generated solar and expected battery charging.
+Selecting an interval or playing the timeline updates the diagram's solar,
+battery, home and calculated grid power. The grid balance includes expected
+battery discharge; it is a modeled value, not a live meter reading.
 The schedule includes both ceilings, expected discharge, household demand and separates forecast
 solar, generated solar and curtailed power. Cost difference is modeled over published prices, not
 measured savings; plans may end with different stored energy. Forecast source

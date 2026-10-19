@@ -8,6 +8,7 @@ import { usePolledJson } from "../../lib/json-fetch";
 import { hintStyle } from "../form";
 import { cardStyle, eyebrowStyle, monoStyle } from "./chrome";
 import { AlertIcon } from "./Icons";
+import PlanPowerFlow from "./PlanPowerFlow";
 import PlanTimeline from "./PlanTimeline";
 
 type PlanView = "charts" | "table";
@@ -264,6 +265,10 @@ function BatteryPlan({
             <>
               {view === "charts" && (
                 <>
+                  <PlanPowerFlow
+                    points={status.plan.points}
+                    times={status.times}
+                  />
                   <h3 style={sectionHeadingStyle}>Battery</h3>
                   {(
                     [
