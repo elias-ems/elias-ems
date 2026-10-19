@@ -2,8 +2,11 @@
 
 Uses [highs-js](https://github.com/lovasoa/highs-js), pinned as `highs@1.15.4`.
 
-Experimental planning only. No Home Assistant imports, service calls, event
-publishing, persistence or production-control changes.
+Planning only. No Home Assistant imports, service calls, event publishing or
+persistence. The add-on runs it as the **HiGHS cost optimizer** battery control
+strategy ([strategies.md](../docs/features/strategies.md)), through `node.mjs`
+on a worker thread, with balance-only capabilities; the add-on's planning loop
+publishes the result.
 
 Install with `npm ci --prefix engine`. The site build now requires this install
 as well as `npm ci --prefix site`. Engine lint/types borrow the add-on toolchain:
@@ -101,8 +104,8 @@ than clamped, since clamping would invent energy. No forecast resampling occurs.
 
 ## Event contract
 
-`BatteryControlEvent` version 1 is now published by the add-on for both
-production strategies, as `elias_ems_<slug>_battery_command` — see
+`BatteryControlEvent` version 1 is now published by the add-on for every
+battery control strategy, including this engine's plans, as `elias_ems_<slug>_battery_command` — see
 [`battery-command.ts`](../addon/app/lib/battery-command.ts) and [Publishing
 commands](../docs/features/battery-control.md#publishing-commands). It carries
 battery identity, unique command identity, owner epoch, issue time, and either a

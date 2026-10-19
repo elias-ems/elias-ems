@@ -166,3 +166,20 @@ You can replay and evaluate these exports in two ways:
    node gym/benchmark.mjs path/to/export.json gym/results/live-benchmark
    ```
 
+
+## Battery control strategies
+
+```sh
+node gym/strategies.mjs addon/app/lib/benchmark-data/input.json
+node gym/strategies.mjs export.json highs --expanded
+node --test gym/test/strategies.test.mjs
+```
+
+`strategies.mjs` runs the registered battery control strategies — the same
+registry the add-on's Settings, its planning loop and the Planner sandbox read
+(`addon/app/lib/strategies/`) — on a planner export or a gym dataset, and scores
+each with the engine's shared physical replay. It prints status, runtime,
+`meanCost` and both scenario totals as JSON; `runStrategies` and `snapshotOf` are
+exported for a training loop. HiGHS solves on a worker thread through
+`engine/node.mjs`, so `npm ci` in `engine/` is needed. See
+[docs/features/strategies.md](../docs/features/strategies.md).

@@ -1,12 +1,19 @@
 # Battery control
 
-The first EMS feature: a loop that watches the grid meter and works out what the
-house battery should be doing to keep it at zero.
+The first EMS feature: a planning loop that works out, from solar forecasts,
+household history and prices, what the house battery should be doing over the
+next day or two — using whichever registered **strategy** is selected — and
+says so for the current interval.
 
-**It decides, publishes, and logs.** Each strategy works out what every battery
+There are two strategies, **Evening target** and **HiGHS cost optimizer**. They
+share one contract and one registry, which Settings, the planning loop, the
+documentation site's Planner sandbox and the offline gym all read, so adding a
+third is one module — see [Battery control strategies](strategies.md).
+
+**It decides, publishes, and logs.** The strategy works out what the battery
 should be doing, publishes that as a versioned **battery command** event — a
 mode plus power boundaries — and records both the decision and what went out.
-Neither strategy touches the hardware itself: an automation you write per
+No strategy touches the hardware itself: an automation you write per
 battery listens for its event and turns it into whatever that inverter wants —
 see [Connecting the event to a battery](#connecting-the-event-to-a-battery).
 That split is what lets several batteries, of different brands, be steered by
@@ -58,7 +65,7 @@ and on the dashboard, and it is what the command event type is derived from.
 | `controlModes` | list | which modes its automation can carry out — see [What the automation can do](#what-the-automation-can-do) |
 | `dischargeLimitSupported` | boolean | whether its automation can cap AC output in `balance` |
 | `powerStepW` | number | resolution of planned boundaries, W; default 100 |
-| `chargeLimitPlanning` | boolean | whether Optimize charge limits plans this battery |
+| `chargeLimitPlanning` | boolean | whether the selected strategy plans this battery ("Plan charge limits") |
 | `maxChargePowerW` | number | **optional** — cap on charge power, W |
 | `maxDischargePowerW` | number | **optional** — cap on discharge power, W, as a positive number |
 | `commandContract` | number | the command schema version the record was saved against; set by the form |
@@ -86,28 +93,29 @@ be implied by whether a target entity had been filled in; with the event name
 now derived from the title there is no such field left to overload, and
 overloading one was never the clearer half of that design anyway.
 
-Steered is necessary, not sufficient: each strategy also needs the battery to
-be able to carry out what it asks for (`steerableBy`). Net zero energy needs the
-setpoint modes; Optimize charge limits needs `chargeLimitPlanning`.
+Steered is necessary, not sufficient: the strategy also needs the battery to
+be able to carry out what it asks for (`steerableBy`). Both registered
+strategies publish `balance` with boundaries, so both need
+`chargeLimitPlanning`; a strategy that issued direct modes would also need them
+in `controlModes`.
 
-**Battery control cannot be enabled until a battery can be steered by the
-selected strategy** — at least one for net zero energy, exactly one for
-Optimize charge limits. The
+**Battery control cannot be enabled until exactly one battery can be steered by
+the selected strategy** — independent plans for two batteries would spend the
+same solar twice. The
 checkbox on the Settings page is disabled until then, and the action rejects the
 save even if the form is posted directly — a battery can stop being steered
 after control was switched on, so the server cannot trust the form to have been
 rendered in the current state. Switching control *off* is always allowed, which
 is the way out of that state.
 
-The rule is "at least one", not "all": a house can reasonably have one steerable
-battery and one that only reports. What it cannot have is control enabled with
-nothing to command, because a loop that decides correctly and changes nothing
-looks exactly like a loop that is broken.
+What a house cannot have is control enabled with nothing to command, because a
+loop that decides correctly and changes nothing looks exactly like a loop that
+is broken.
 
 **Upgrades arrive unsteered.** A record without `commandContract` predates the
 battery command event, and reads as unsteered whatever it said before —
 including records that published `_target_power` events, and those whose
-limit entities Optimize charge limits wrote directly. That is the honest
+limit entities the charge-limit planner wrote directly. That is the honest
 reading: nothing is listening for the new event until an automation exists, so
 carrying a battery across as steered would be claiming to command hardware that
 has stopped hearing us. Its *intent* is kept — a battery that had limit entities
@@ -153,11 +161,9 @@ ugly event type beats publishing to `elias_ems__battery_command`.
 
 #### Power limits
 
-`maxChargePowerW` and `maxDischargePowerW` cap what the strategy may ask a
-battery for, so the proportional split cannot request more than the inverter can
-deliver. Net zero energy also sends them as the command's `charge_limit_w` and
-`discharge_limit_w`; Optimize charge limits uses them as the top of the range it
-plans boundaries in, and requires both. Both are **positive magnitudes** — "5000", not "-5000" for discharge —
+`maxChargePowerW` and `maxDischargePowerW` cap what a strategy may ask a
+battery for. Both strategies use them as the top of the range they plan
+boundaries in, and require both. Both are **positive magnitudes** — "5000", not "-5000" for discharge —
 and the sign is applied where it is used.
 
 Settings are the **only** source of a limit. While targets and limits were
@@ -179,120 +185,52 @@ what the meter asked for.
 | Field | Default | Notes |
 | --- | --- | --- |
 | `enabled` | `false` | |
-| `strategy` | `"net-zero-energy"` | Net zero energy or `"charge-limit"` (Optimize charge limits) |
-| `intervalSeconds` | `5` | 1–3600. A floor between ticks, not a schedule — see [The loop](#the-loop). |
+| `strategy` | `"evening-target"` | `"evening-target"` or `"highs"`: an id from the [strategy registry](strategies.md) |
+| `intervalSeconds` | `5` | 1–3600. Paces the shared control loop that [PV curtailment](pv-curtailment.md) runs on; the strategies replan every five minutes regardless. |
 
-The strategy is stored as an id rather than a boolean so that the price-aware
-strategies on the [roadmap](../roadmap.md) are additive: one more entry in
-`STRATEGIES` and one more branch in the loop, with nothing already on disk
-needing to change.
+The strategy is stored as an id so a new one is additive: register it and it is
+offered here, with nothing already on disk needing to change.
 
-## The net-zero-energy strategy
+**Stored ids from earlier versions.** `"charge-limit"` was Evening target under
+its feature's name and is read as `"evening-target"`. `"net-zero-energy"` was a
+live setpoint strategy that has been **removed**: an install that had it comes
+back with control **switched off** on Evening target, and the first read writes
+that back and leaves one `battery-control` warning in the log saying why. It is
+not silently swapped for a planner, because its automations were written for
+setpoints and a planner publishes `balance` with boundaries — a different
+instruction. Choosing a strategy and enabling control again is one deliberate
+step, after the automation handles `balance`
+([Boundaries in balance](#boundaries-in-balance)).
 
-In [addon/app/lib/net-zero.ts](../../addon/app/lib/net-zero.ts) — a pure function,
-no Home Assistant, no clock, no disk, which is what makes the decisions directly
-testable in [test/unit/net-zero.test.ts](../../addon/test/unit/net-zero.test.ts).
+## Strategies
 
-### Why the batteries' own power is an input
+What a strategy is, the contract every one implements, how both are scored and
+how to add one: [strategies.md](strategies.md). In short:
 
-The obvious rule — "importing 800 W, so discharge 800 W" — is wrong as soon as
-the battery is already doing something, because the grid reading *already
-includes* the battery:
+| Strategy | Plans for | Publishes in production |
+| --- | --- | --- |
+| **Evening target** (`evening-target`) | the battery's maximum charge by 18:00, even with 20% less solar, then savings — see [below](#evening-target) | `balance` with a charge ceiling, and an AC output ceiling when the battery can limit discharge |
+| **HiGHS cost optimizer** (`highs`) | the lowest mean cost over the forecast and reduced-solar scenarios, solved exactly; no evening target | the same |
 
-```
-net = load - pv + batteryPower
-```
-
-so the target that drives `net` to zero is:
-
-```
-targetBatteryPower = currentBatteryPower - net
-```
-
-A battery discharging at 800 W while the meter reads zero is *already* doing
-exactly the right thing. The naive rule would tell it to stop and create an
-800 W import in the process. This form tells it to carry on — a different answer
-to the same reading, and the correct one.
-
-### Batteries that cannot be steered
-
-A battery that is not steered is left out of the plan: it keeps doing
-whatever it was doing, and gets a decision line saying so rather than a
-target. The less obvious half is that it must also be left out of
-`currentBatteryPower`. Writing `C` for the steerable batteries' combined power
-and `U` for the unsteerable ones':
-
-```
-net = load - pv + C + U
-```
-
-The unsteerable ones stay at `U`, so the target that zeroes the meter comes
-from `load - pv + S + U = 0`, which reduces to:
-
-```
-S = C - net
-```
-
-`U` cancels out entirely. Counting it into `currentBatteryPower` would ask the
-steerable batteries to cover what the unsteerable ones are *already* covering,
-and the meter would overshoot by exactly `U` — a house importing 200 W with an
-unsteered battery already discharging 800 W would end up exporting 800 W.
-
-A corollary: an unreadable power sensor on an unsteered battery costs the answer
-nothing, so unlike a steerable battery's missing reading it produces no warning.
-
-### The rules
-
-1. `net` is the grid power sensor, read as-is.
-2. If `|net| < 25 W` the meter counts as balanced: hold everything where it is.
-   Chasing meter noise would only cycle the battery.
-3. Otherwise `target = currentBatteryPower - net`, over the **steerable**
-   batteries only; positive means charge, negative means discharge.
-4. A battery drops out of the plan when it cannot help in that direction:
-   - it is not steered, so nothing can be said to it. Unlike the cases
-     below it holds at its *current* power rather than at 0 — those are a
-     decision to stop, this is the absence of any decision at all;
-   - at or above `maxChargePercent` and the target is to charge;
-   - at or below `minChargePercent` and the target is to discharge;
-   - its power limit in that direction is 0 — see
-     [Power limits](#power-limits);
-   - its state of charge is unreadable — guessing there would mean guessing
-     about the one limit that protects the hardware.
-5. The remaining batteries share the target **in proportion to their
-   `capacityKwh`**. Splitting it evenly would ask a 5 kWh battery for as much as
-   the 20 kWh one standing next to it.
-6. Each share is then capped at that battery's charge or discharge power limit.
-   The cap comes last, after the split: it is a fact about the inverter, not
-   about how the target should be divided.
-
-Each decision reports the energy headroom next to the target —
-`capacityKwh × (max - soc) / 100` charging, `× (soc - min) / 100` discharging —
-because "charge at 3 kW" is much easier to sanity-check beside "0.4 kWh of room
-left". A capped decision also says what it was capped from, since a plan quietly
-delivering less than the meter needs otherwise reads exactly like one that is on
-target.
-
-**What a cap holds back is not redistributed to the other batteries in the same
-tick.** It doesn't need to be: whatever goes undelivered keeps the meter off
-zero, so the next tick's `currentBatteryPower - net` asks for it again, and the
-batteries with headroom take it up over a few ticks. The feedback term is what
-makes the simpler per-battery cap correct rather than merely cheaper.
+Both run in the same planning loop
+([charge-limit.md](charge-limit.md#control-lifecycle)): replan every five
+minutes or at the current interval's end, publish that interval, release the
+battery when a plan fails. HiGHS solves on a worker thread with a 20-second
+budget, so it never blocks the server.
 
 ## Publishing commands
 
 In [addon/app/lib/battery-commands.server.ts](../../addon/app/lib/battery-commands.server.ts),
 with the pure contract in [battery-command.ts](../../addon/app/lib/battery-command.ts).
 Kept apart from the strategies (which stay pure) and from the loops (which are
-about *when* to decide). **Both strategies publish through it**, and so will the
-HiGHS [planning engine](planning-engine.md) once it controls anything: what
-arrives is a `BatteryCommand`, what leaves is one Home Assistant event per
-battery.
+about *when* to decide). **Every strategy publishes through it**: what arrives
+is a `BatteryCommand`, what leaves is one Home Assistant event per battery.
 
-### Why a command event, and why one for both strategies
+### Why a command event, and why one for every strategy
 
-Net zero energy once called `number.set_value` on a target entity; Optimize
-charge limits wrote a battery's charge and AC output limit entities itself until
-this module replaced that. An entity write is a state change — a logbook line, a
+An earlier setpoint strategy called `number.set_value` on a target entity; the
+charge-limit planner wrote a battery's charge and AC output limit entities
+itself until this module replaced that. An entity write is a state change — a logbook line, a
 recorder row and an activity-feed entry, thousands a day from a loop that
 reconsiders every few seconds — and, worse for where this is going, it ties the
 add-on to whichever entities one particular inverter happens to expose. Two
@@ -313,8 +251,8 @@ same split [PV curtailment](pv-curtailment.md) already uses for its arrays:
 ### Modes and boundaries
 
 A command is a **mode plus boundaries** — the shape the HiGHS engine plans in,
-so the contract does not have to change when that engine starts controlling
-batteries:
+so the contract does not have to change when a strategy starts issuing direct
+modes:
 
 | Mode | What the battery should do | `setpoint_w` |
 | --- | --- | --- |
@@ -332,12 +270,17 @@ What each strategy issues today:
 
 | Strategy | Mode | Setpoint | Boundaries |
 | --- | --- | --- | --- |
-| Net zero energy | `charge` / `discharge`, `hold` at exactly 0 W | the target | the battery's power caps, or null |
-| Optimize charge limits | `balance` | none | the plan's charge ceiling, and its AC output ceiling when the battery can limit discharge |
+| Evening target | `balance` | none | the plan's charge ceiling, and its AC output ceiling when the battery can limit discharge |
+| HiGHS cost optimizer | `balance` | none | the same |
 
-`grid_charging` and `battery_export` are in the contract from the first version
-and both strategies send `false`: neither asks a battery to charge from the grid
-or to discharge into it. They are there so an adapter can enforce them against
+The direct modes are in the contract and in the HiGHS engine's model — the
+Planner sandbox compares plans that use them — but no production strategy issues
+them yet: the add-on plans with **balance-only capabilities**
+(`PRODUCTION_CAPABILITIES` in
+[charge-planner.server.ts](../../addon/app/lib/charge-planner.server.ts)), the one
+place that would change. `grid_charging` and `battery_export` are in the
+contract from the first version and every strategy sends `false`: none asks a
+battery to charge from the grid or to discharge into it. They are there so an adapter can enforce them against
 live power before a strategy exists that wants either.
 
 Which modes a battery's automation can carry out is configured per battery —
@@ -390,34 +333,11 @@ every automation in the house.
 
 **Validity.** `valid_until` is the one safeguard that still works when the
 add-on is not running at all — nothing it publishes survives `kill -9`, a power
-cut or a container destroyed without warning. Net zero energy's commands are
-valid for three minutes (`NET_ZERO_VALIDITY_MS`), comfortably more than a
-healthy loop ever goes between restatements. Optimize charge limits' are valid
-for the planned interval plus a minute's grace (`COMMAND_GRACE_MS`), since the
-loop ticks every 30 seconds and would otherwise leave a gap at every interval
+cut or a container destroyed without warning. A strategy's command is valid for
+the planned interval plus a minute's grace (`COMMAND_GRACE_MS`), since the loop
+ticks every 30 seconds and would otherwise leave a gap at every interval
 boundary. An automation that honours it needs a time trigger of its own; see
 [Honouring `valid_until`](#honouring-valid_until).
-
-### What gets published, which is not the target
-
-Net zero energy's decisions carry a `commandW` alongside their `targetW`, and
-they are deliberately different things:
-
-| Decision | `targetW` | `commandW` → command |
-| --- | --- | --- |
-| charge / discharge | the share, capped | the same → `charge`/`discharge` |
-| at an SoC or power limit | 0 | **0** → `hold`, an active stop |
-| inside the grid deadband | the battery's *measured* power | **null** — publish nothing |
-| grid sensor unreadable | measured power | **0** → `hold` for steerable batteries |
-| not steered | measured power | null |
-
-A deadband hold reports the battery's measured power, which is the right thing
-to *display* and the wrong thing to *command*: publishing a measurement back as
-a setpoint would let sensor noise walk it around on a house that is already
-balanced. So it says nothing and the previous command stands. The
-unreadable-grid row goes the other way: a battery left forcing kilowatts
-because the meter it was following broke is the one standing command that must
-not persist.
 
 ### When a command goes out
 
@@ -425,18 +345,16 @@ A command goes out when it **differs from the last one published** for that
 battery, when it is **due a restatement**, or when **another strategy** held
 the battery before.
 
-- **Differs** means another mode, another boundary, another permission, or a
-  setpoint that moved by at least `PUBLISH_DEADBAND_W` (50 W) — net zero
-  energy's only; the planner's boundaries are compared exactly. The loop can
-  tick every second and a house is never still, and on the other end of every
-  event is an automation doing real work against hardware that on some brands
-  commits every change to flash.
+- **Differs** means another mode, another boundary or another permission;
+  boundaries are compared exactly. A setpoint, when a strategy issues one, may
+  pass a `PUBLISH_DEADBAND_W` (50 W) to the publisher, because on the other end
+  of every event is an automation doing real work against hardware that on some
+  brands commits every change to flash.
 - **Restatement** replaces the read-back an entity write used to give. An event
   has none — a 200 from Home Assistant means the event reached the bus, not that
   anything obeyed it — so the memory being compared against is an assumption,
-  and each strategy sets when it is restated anyway: net zero energy every
-  `REPUBLISH_MS` (30 s, half its idle tick), Optimize charge limits at the end of
-  the planned interval, which is also when its next plan is due. An automation
+  and a planned command is restated at the end of its interval anyway, which is
+  also when the next plan is due. An automation
   that was reloaded, an inverter that was power-cycled or a Home Assistant that
   restarted mid-tick all converge again on their own.
 
@@ -449,11 +367,12 @@ go out, and it never ends the loop.
 
 ### Ownership, and letting go
 
-Both strategies publish on the same event type, so the publisher remembers
-which strategy last applied a command to each battery, and **a strategy only
-releases what it holds**. Switching from net zero energy to Optimize charge
-limits must not have the outgoing strategy's release land after the incoming
-one's first command and leave the battery released until the next interval.
+Every strategy publishes on the same event type, so the publisher remembers
+which strategy last applied a command to each battery, and a release can be
+narrowed to what one strategy holds. Switching from Evening target to HiGHS is
+a hand-over rather than a release: the incoming strategy's first command
+replaces the outgoing one's, and the command's `strategy` field says which
+issued it.
 What nothing in this process has commanded yet *is* released on request,
 because what an earlier process said is exactly what is in doubt.
 
@@ -467,7 +386,7 @@ brands. Releases go out:
 | --- | --- | --- |
 | a strategy is switched off or away | `disabled` | those it holds |
 | a battery is un-steered, renamed or removed | `unsteered` | that battery, under the name it had |
-| a charge-limit plan fails | `failure` | that battery, if the strategy holds it |
+| a plan fails (no forecast, a HiGHS solve with no schedule or past its deadline) | `failure` | that battery, if a strategy holds it |
 | `SIGTERM`/`SIGINT` | `shutdown` | every steered battery |
 
 The rename row matters as much as the others: the automation listening for the
@@ -494,14 +413,15 @@ the add-on has no way to find out:
 
 | Field | Meaning |
 | --- | --- |
-| `controlModes` | `balance` always; `hold`, `charge`, `discharge` when the automation can force a setpoint. **Net zero energy needs all three** and leaves a battery without them out of its plan, counted like an unsteered one |
-| `dischargeLimitSupported` | the automation can cap AC output in `balance`. Without it Optimize charge limits plans native discharge and sends `discharge_limit_w: null` |
+| `controlModes` | `balance` always; `hold`, `charge`, `discharge` when the automation can force a setpoint. No production strategy issues the direct modes yet; recorded so one can be enabled per battery |
+| `dischargeLimitSupported` | the automation can cap AC output in `balance`. Without it the strategies plan native discharge and send `discharge_limit_w: null` |
 | `powerStepW` | the resolution boundaries are planned in — what a `number` entity's `step` used to supply. Default 100 W |
-| `chargeLimitPlanning` | Optimize charge limits plans (and previews) this battery |
+| `chargeLimitPlanning` | the selected strategy plans (and previews) this battery |
 
 ### A setpoint over Modbus
 
-Net zero energy's commands, written to a signed register:
+Direct-mode commands, written to a signed register. No production strategy
+sends these yet; this is the shape an automation takes once one does:
 
 ```yaml
 alias: Battery command → inverter
@@ -547,7 +467,7 @@ template arithmetic to get the sign wrong in.
 
 ### Boundaries in balance
 
-Optimize charge limits' commands, written to an integration's own limit
+Both strategies' commands, written to an integration's own limit
 entities — the exact writes the add-on used to make itself:
 
 ```yaml
@@ -643,8 +563,8 @@ actions:
           # …then hand the battery back, exactly as the release branch does.
 ```
 
-The helper is a state change per command, which for net zero energy means one
-every 30 seconds or so — the noise events exist to avoid. Exclude it from
+The helper is a state change per command — at most one per planned interval,
+but still the kind of noise events exist to avoid. Exclude it from
 `recorder:` and `logbook:`, or prefer the device's own timeout.
 
 ### Several batteries
@@ -665,117 +585,61 @@ command, but it is not nothing. `logbook:`/`recorder:` exclusions take an
 
 ## The loop
 
-In [addon/app/lib/control-loop.server.ts](../../addon/app/lib/control-loop.server.ts).
+Battery control runs in the **planning loop**,
+[charge-limit-loop.server.ts](../../addon/app/lib/charge-limit-loop.server.ts),
+for every registered strategy: a 30-second tick that replans every five minutes
+or at the current interval's end, publishes the current interval, and releases
+the battery when a plan fails. Its lifecycle — including what happens while a
+plan is being calculated and how a settings save interrupts a HiGHS solve in
+progress — is in [charge-limit.md](charge-limit.md#control-lifecycle).
 
-- Module-level state, for the same reason as the subscription it reads from: the
-  server build is loaded once per process, so "one loop per add-on" and "one
-  module instance" are the same statement.
-- **Home Assistant decides when there is something to decide about.** The loop
-  subscribes to the live cache
-  ([live-readings.md](live-readings.md)) and ticks when one of
-  *its* entities changes — the grid sensor, or a battery's SoC or power. A meter
-  that swings is acted on in the time it takes the event to arrive, rather than
-  up to a full interval later.
-- `intervalSeconds` is now a **rate limit**, not a schedule: at most one tick per
-  interval, leading edge. Changes arriving inside that window schedule one tick
-  for when it closes, so the last change before a lull is never the one that gets
-  swallowed — a decision standing on a reading nobody looked at again is exactly
-  the failure worth avoiding.
-- A **60s idle tick** runs regardless. A quiet house produces no events and would
-  otherwise produce no ticks, which from outside is indistinguishable from a loop
-  that has died. It reads memory and costs nothing.
 - **Started at boot** from
-  [addon/app/entry.server.tsx](../../addon/app/entry.server.tsx), which is the only
-  module the framework loads exactly once when the server starts. Deliberately
-  *not* started from a loader: an EMS that only runs while somebody has the Home
-  Assistant panel open is not managing anything.
-- Saving the control form calls `syncControlLoop()` again, so ticking the box
-  takes effect immediately rather than at the next restart — waiting for one
-  would be indistinguishable from the feature not working.
-- Each tick reads its entities through
-  [states.server.ts](../../addon/app/lib/states.server.ts) — from the live cache,
-  with no round trip at all, or over REST when the subscription isn't up — runs
-  the strategy, and appends **one** entry to the log.
-- **Ages are advisory.** The log line names its source and the age of the oldest
-  reading it used, and then decides anyway. Nothing refuses to act on an old
-  number, because a sensor holding a steady value emits no events and would look
-  identical to a broken one; `unavailable` and `unknown` remain the only states
-  that stop a decision. That makes the log, and the health chip on the home page,
-  the things a stuck sensor actually shows up in.
-- A Home Assistant that cannot be reached at all is different, and still raises:
-  one `Tick failed` line rather than a stream of ticks that read like an idle
-  house when the truth is that nobody asked it anything.
-- A tick that is still waiting on Home Assistant blocks the next one from
-  starting rather than letting them pile up. The interval can be as short as a
-  second and an unreachable HA takes far longer than that to give up.
-- A tick that throws logs an `error` entry and the loop keeps its schedule. A
-  loop that dies on the first outage is worse than no loop, because from the
-  outside it still looks like it is working.
+  [addon/app/entry.server.tsx](../../addon/app/entry.server.tsx), which is the
+  only module the framework loads exactly once when the server starts.
+  Deliberately *not* started from a loader: an EMS that only runs while somebody
+  has the Home Assistant panel open is not managing anything.
+- **HiGHS runs off the server thread.**
+  [highs-runner.server.ts](../../addon/app/lib/highs-runner.server.ts) imports
+  `engine/node.mjs` at runtime from `../engine` (or `ENGINE_DIR`), which starts
+  a worker thread per solve with its own wall-clock deadline. Vite never bundles
+  the engine: it would inline `node.mjs` and lose the worker file and the WASM
+  solver beside it. The image keeps the repository's layout for the same reason
+  — `/app/addon` beside `/app/engine`.
+
+The other loop in the add-on,
+[control-loop.server.ts](../../addon/app/lib/control-loop.server.ts), used to
+carry a live battery strategy too. It is [PV curtailment's](pv-curtailment.md)
+now, plus the one duty that stays process-wide: on `SIGTERM`/`SIGINT` it
+releases every steered battery, whichever loop commanded it.
 
 ### What curtailment does with a discharge
 
-Nothing here changes when [PV curtailment](pv-curtailment.md) is also on, and
-this is the one place worth saying why, because the two features do now look at
-the same number.
-
-Net-zero discharges to cover an import. Curtailment reads that discharge and
-[adds it back to what the arrays may
-make](pv-curtailment.md#the-battery-free-when-it-charges-not-when-it-discharges),
-because a discharging battery hides the shortfall its feedback law is looking
-for — otherwise the two would hold each other in a fixed point, with the arrays
-pinned at whatever they were cut to and the battery emptying to cover them.
-
-Curtailment never publishes a command for a battery, so the two never steer the
-same hardware. The handover is the ordinary loop instead: the arrays take the
-house over, the surplus reaches the meter, and net-zero reads it and stops
-discharging on the next tick, exactly as it would for any other load that had
-gone away. Net-zero is the fast loop with no settle time of its own, curtailment
-the slow one paced by `settleSeconds`, which is the right way round for the two
-to converge rather than chase each other.
+[PV curtailment](pv-curtailment.md) reads the batteries' power and adds a
+discharge back to what the arrays may make, because a discharging battery hides
+the shortfall its feedback law is looking for. It never publishes a command for
+a battery, so the two features never steer the same hardware: a battery in
+balance yields on its own once the arrays' surplus reaches the meter.
 
 ## Watching it decide
 
-Every line the loop produces goes to **diagnostics** under the
-`battery-control` origin — see [diagnostics.md](diagnostics.md) for the entry
-shape, the buffer and the download. Two places show it, neither of them this
-feature's alone: the **decision feed** on the home page, which merges this
-origin with PV curtailment's and is open and polling rather than collapsed,
-and the **Tools** page, where it is merged with every other feature's. The
-feed is deliberately not one box per strategy — the two correct against the
-same grid meter within milliseconds of each other, and the pair of decisions
-is the thing worth reading. It shows each entry's **first line only**, since a
-tick's summary is what a glance wants and the per-battery detail below it
-would push the other loop off the bottom; Tools keeps the whole entry, and so
-does the download.
-
-A whole tick looks like this:
+Every plan goes to **diagnostics** under the `charge-limit` origin, and every
+release under `battery-control` — see [diagnostics.md](diagnostics.md) for the
+entry shape, the buffer and the download. The **decision feed** on the home page
+merges them with PV curtailment's, and the **Tools** page with every other
+feature's. A plan looks like this:
 
 ```
-22:50:57 Grid net +842 W (importing), batteries at 0 W → discharge 842 W total. (via live cache, oldest reading 3s)
-         Home battery: discharge at 561 W (SoC 76%, 6.6 kWh to 10%)
-         Garage battery: discharge at 281 W (SoC 76%, 2.8 kWh to 20%)
-         Published: Home battery → discharge 561 W; Garage battery → discharge 281 W
+Home battery: HiGHS cost optimizer active, maximum charge 1200 W, maximum AC output 2000 W. HiGHS: Optimal for modeled objective.
+Published: Home battery → balance (charge ≤ 1200 W, discharge ≤ 2000 W)
 ```
 
-The last line is what actually left the process, and it is deliberately not a
-repeat of the ones above it: a tick whose deadband held everything back has the
-decisions and no `Published:` line at all, which is the difference between "it
-decided this" and "it said this out loud".
+The last line is what actually left the process: a plan whose command was
+unchanged has no `Published:` line at all, which is the difference between "it
+decided this" and "it said this out loud". The **Battery plan** card on the
+home page names the strategy that produced the plan it shows.
 
-The clause in brackets is the provenance: which source the numbers came from and
-how old the oldest of them was. Since nothing refuses to act on an old reading,
-this line is where a sensor that quietly stopped reporting becomes visible.
-
-The whole tick is **one** entry rather than one per line. Identical consecutive
-entries collapse into a `×N` repeat count, and a house that isn't doing anything
-produces the same lines every few seconds — logged separately they interleave, so
-the collapsing would never see two identical entries in a row and the buffer
-would fill with near-duplicates instead of holding useful history.
-
-The buffer holds the last 300 of this feature's entries and is **deliberately
-not persisted**: at a five-second interval the loop produces thousands of lines
-an hour, and an empty log after a restart is intended. Download it from Tools if
-a particular stretch is worth keeping.
+The buffer is **deliberately not persisted**; download it from Tools if a
+particular stretch is worth keeping.
 
 ## History
 
@@ -800,7 +664,7 @@ model module and a `.server` module that reads and writes it:
 | --- | --- | --- |
 | Grid | `grid.ts` | `grid.server.ts` |
 | Batteries | `batteries.ts` | `batteries.server.ts` |
-| Control config and loop status | `control.ts` | `control-config.server.ts` |
+| Control config | `control.ts` (strategies from `strategies/`) | `control-config.server.ts` |
 | PV entities | `pv-entities.ts` | `pv-entities.server.ts` |
 | Curtailment config | `curtailment.ts` | `curtailment-config.server.ts` |
 | Prices | `prices.ts` | `prices.server.ts` |
@@ -817,18 +681,18 @@ concatenation.
 
 | Suite | What it covers |
 | --- | --- |
-| `test/unit/net-zero.test.ts` | the strategy: both directions, the deadband on both sides of zero, the feedback term, SoC limits, an unreadable sensor, the proportional split, and the power caps — each direction independently, and a battery limited to 0 W leaving the split to the others. Also the unsteerable cases: dropping out of the plan, and not being counted into the feedback term |
+| `test/unit/strategies.test.ts` | the registry holding exactly Evening target and HiGHS, Settings offering what it holds, stored ids (`charge-limit` renamed, `net-zero-energy` switched off), Evening target as balance commands, HiGHS reporting a solve with no schedule as a failure, and a real solve on a worker thread that never costs more than Evening target under the shared replay |
 | `test/unit/settings-model.test.ts` | validation and normalization for grid, batteries and control config, including `resolvePowerLimits`, a battery record saved before the control fields existed, one from the version that named a target entity, one saved against the command event staying steered, and the slug rules — collapsing, folded accents, a title with nothing to build a name from, and the id fallback |
 | `test/unit/charge-limit-config.test.ts` | the per-battery control fields: which modes were ticked, the charge-limit requirements, and a pre-event record keeping its intent but arriving unsteered |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
 | `test/unit/battery-commands.test.ts` | the contract and the publish: a signed target becoming charge, discharge or hold, a balance command's boundaries, the full payload an automation acts on, a fresh command id each time, the deadband holding a setpoint back while a mode or boundary change always goes out — per battery, so a quiet neighbour stays quiet — a command restated when due, releases that are not holds, a strategy never releasing a battery another holds, and a failed publish not being remembered so the retry survives |
-| `test/unit/charge-limit-loop.test.ts` | Optimize charge limits' commands: the current interval as a balance command with its validity, the AC output boundary only when the battery can limit discharge, no repeat on an unchanged replan, preview without publishing, releasing once when disabled, un-steered or failed — and the migration restoring an earlier version's direct writes before any command, retrying, respecting a manual edit, and each direction independently |
-| `test/unit/control-loop.test.ts` | scheduling: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, and files its lines under the right origin. Also that a configured cap reaches the strategy, and that an entity an automation moved on our behalf provokes no tick. Also the publish from the loop's side: that a tick publishes what it decided under the battery's key, that a battery unable to follow a setpoint is not commanded, that a second tick doesn't repeat it, that a deadband hold publishes nothing, that an unreadable grid holds the battery, and that switching control off releases the batteries |
-| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/entities` offering readings only, that two batteries may not have names that make the same event while a battery keeps its own name across an edit, that a rename releases the battery under its old name while an ordinary edit publishes nothing, and that control refuses to switch on with no steerable battery but can always be switched off |
-| `test/integration/ingress.test.ts` | the loop running inside the real `server.js`, reached over HTTP through the ingress proxy — including the command event leaving that process over the Supervisor proxy, and the release landing, flagged as one, when control is switched off |
-| `test/integration/charge-limit.test.ts` | Optimize charge limits inside the real server: restoring an earlier version's direct limit write, planning in the background, publishing a balance command, and releasing it when the strategy is switched off |
-| `test/integration/control-loop-boot.test.ts` | that a restart with control already enabled has the loop running before anything asks it to — the one thing no other suite can show, since they all start it themselves. What it reads is the diagnostics entry `syncControlLoop()` writes when it starts an interval: nothing in that process has posted the settings form, so only the boot-time call can have produced it |
-| `test/e2e/app.spec.ts` | configuring it in a browser, enabling it, and watching the decision feed fill with the tick's summary line |
+| `test/unit/charge-limit-loop.test.ts` | the planning loop's commands: planning with the selected strategy and naming it on the command, a strategy switch as a hand-over, the current interval as a balance command with its validity, the AC output boundary only when the battery can limit discharge, no repeat on an unchanged replan, preview without publishing, releasing once when disabled, un-steered or failed — and the migration restoring an earlier version's direct writes before any command, retrying, respecting a manual edit, and each direction independently |
+| `test/unit/control-loop.test.ts` | the shared loop's scheduling, driven by PV curtailment: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, picks up a changed interval, survives an outage, names the source and age of what it read, files its lines under the right origin — and never publishes a battery command |
+| `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/entities` offering readings only, that two batteries may not have names that make the same event while a battery keeps its own name across an edit, that a rename releases the battery under its old name while an ordinary edit publishes nothing, and that each strategy can be enabled for a steered, planned battery, that control refuses to switch on with no steerable battery or with more than one, but can always be switched off |
+| `test/integration/ingress.test.ts` | through the ingress proxy: an install upgrading with net zero energy enabled coming back switched off, with the warning in the downloaded log, and a strategy saved and selected |
+| `test/integration/charge-limit.test.ts` | each strategy inside the real server — Evening target under its old stored id, and HiGHS solving from `../engine` on a worker thread: restoring an earlier version's direct limit write, planning in the background, publishing a balance command named after the strategy, and releasing it when control is switched off |
+| `test/integration/control-loop-boot.test.ts` | that a restart with PV curtailment already enabled has the shared loop running before anything asks it to (the planning loop's boot is covered by charge-limit.test.ts, which never posts the form before its first command) |
+| `test/e2e/app.spec.ts` | configuring a battery in a browser, choosing HiGHS from the two strategies offered, enabling it, and the plan's line reaching the Tools page and the download |
 
 The loop tests run on two clocks on purpose. The event-driven cases use the real
 one, because they turn on a WebSocket message arriving and no fake timer can
@@ -855,34 +719,35 @@ tick currently in flight, since advancing a clock only *starts* one.
   against live power, is what the HiGHS engine's direct modes will need before
   they can be trusted on real hardware.
 - **Planning several batteries together.** Commands are per battery already;
-  Optimize charge limits still plans exactly one, because independent plans
-  would allocate the same solar twice.
+  both strategies still plan exactly one, because independent plans would
+  allocate the same solar twice.
+- **Direct modes in production.** HiGHS plans hold, charge and discharge in the
+  sandbox; production uses balance only until a battery's automation (or an
+  adapter) is trusted to enforce grid-charging and export permissions.
+- **A terminal value for HiGHS.** It values nothing left in the battery at the
+  end of the horizon, so a plan can end at the minimum SoC; replanning moves
+  that end along, and the [gym](strategies.md#the-gym) is where to fix it.
 - **A worked example per inverter family.** The recipes above are the shapes,
   not a catalogue. The register numbers, mode names and sign conventions differ
   per brand, and that is exactly the knowledge this project does not have yet.
-- **Redistributing what a power cap holds back** within a single tick, rather
-  than letting the feedback term converge on it over several. Worth doing if the
-  convergence turns out to be visible in practice.
 - **Price awareness** — dynamic prices, negative-price strategies and PV
   curtailment are separate [roadmap](../roadmap.md) items.
 - **Persisting decisions** for after-the-fact analysis. That wants its own store
   and a retention policy, not the [diagnostics](diagnostics.md) buffer made
   durable.
 
-## Optimize charge limits
+## Evening target
 
-Both strategies use **Steer this battery** as their per-battery authorization,
-and both publish [battery commands](#publishing-commands): net zero energy as
-setpoints, Optimize charge limits as `balance` with boundaries. Unchecked
-batteries are monitored only. Charge-limit planning still supports one
-configured household battery, opted in with **Plan charge limits**.
+Every strategy uses **Steer this battery** as its per-battery authorization and
+**Plan charge limits** as the opt-in, and publishes
+[battery commands](#publishing-commands) as `balance` with boundaries. Unchecked
+batteries are monitored only. Planning supports one configured household
+battery.
 
-**Evening target** is the single production planner for both preview and active
-control. Older stored algorithm selections are ignored and removed on save.
-The previous cost optimizer remains available in the offline gym and Benchmark
-page for comparison.
+The previous cost optimizer remains in the offline gym and the Benchmark page
+for comparison; it is not a registered strategy.
 
-The planner controls the maximum charging power and, when the battery's
+Evening target controls the maximum charging power and, when the battery's
 automation can limit discharge, its maximum AC output power. It reserves energy during cheaper
 hours by limiting discharge, then allows more discharge during expensive demand,
 including the morning before solar recovery. The configured native minimum SoC
@@ -890,7 +755,7 @@ including the morning before solar recovery. The configured native minimum SoC
 
 Evening target uses the battery maximum SoC and the next 18:00 in Home
 Assistant's timezone. Missing coverage through that deadline
-leaves planning unavailable; it does not invent prices or switch algorithms.
+leaves planning unavailable; it does not invent prices or switch strategies.
 The fixed 20% solar margin defines a second reduced-solar scenario, applied once. The
 planner preserves the maximum reachable deadline energy in both scenarios when
 full is impossible, accounting for both available controls. Reaching the evening
@@ -907,6 +772,9 @@ target remains available for high-priced demand and appliance spikes, down to
 the native minimum. On a 3.6 kWh battery with a 5% minimum, the buffer targets
 20% SoC for replenishment; it is not a second discharge floor or a calibrated
 spike probability. Price-based withholding and evening feasibility still apply.
+
+HiGHS is described in [strategies.md](strategies.md#highs-cost-optimizer) and
+[planning-engine.md](planning-engine.md).
 
 None of these are settings: see
 [fixed planning settings](charge-limit.md#fixed-planning-settings) for the full

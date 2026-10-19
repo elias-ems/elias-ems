@@ -4,24 +4,34 @@
 
 ## V1 (current)
 
-- Documentation planner sandbox — import a planner export locally in the browser,
-  rerun the production Evening target algorithm with adjustable settings, and
-  inspect and download its forecast schedule. Historical replay and algorithm
-  changes remain distinct from measured savings.
+- Battery control strategies — one registry of strategies that Settings, the
+  planning loop, the Planner sandbox and the gym all read
+  ([features/strategies.md](features/strategies.md)). Two are registered:
+  **Evening target** and **HiGHS cost optimizer**, both selectable in Battery
+  control and compared side by side in the sandbox. Net zero energy has been
+  removed; installs that had it come back with control switched off. Next: a
+  terminal value for HiGHS, direct modes in production once an adapter enforces
+  permissions, folding the older benchmark gym onto the registry, and learned
+  strategies trained against `gym/strategies.mjs`.
 
-- Optimize charge limits — Evening target is the single production planner.
-  Optional maximum AC output control reserves battery energy during cheaper
-  hours for higher-priced demand. Both limits now go out as a `balance` battery
+- Documentation planner sandbox — import a planner export locally in the browser
+  and compare every registered strategy on it with adjustable settings and
+  capability assumptions, then inspect and download each forecast schedule.
+  Historical replay and algorithm changes remain distinct from measured savings.
+
+- Charge-limit optimization — both strategies plan the maximum charging power
+  and optional maximum AC output, which reserves battery energy during cheaper
+  hours for higher-priced demand. Both limits go out as a `balance` battery
   command for an automation to apply; limits earlier versions wrote directly are
   restored on upgrade. See [charge-limit optimization](features/charge-limit.md).
 
-- Battery control (net-zero energy strategy) — deciding, acting and logging
-  done, see [features/battery-control.md](features/battery-control.md). Both
-  strategies publish one versioned `elias_ems_<battery>_battery_command` event
+- Battery control — deciding, acting and logging done, see
+  [features/battery-control.md](features/battery-control.md). Every strategy
+  publishes one versioned `elias_ems_<battery>_battery_command` event
   per battery — a mode (`balance`, `hold`, `charge`, `discharge`) plus
   boundaries, an optional setpoint, permissions and a validity — for an
-  automation to carry out. The four modes are the HiGHS engine's, so wiring
-  that engine in needs no contract change. Still to do: noticing that nothing
+  automation to carry out. The four modes are the HiGHS engine's, so enabling
+  its direct modes needs no contract change. Still to do: noticing that nothing
   acted on a command — no automation, one listening for a battery's old name,
   or an inverter ignoring it all look identical from here — and a packaged
   adapter that enforces validity and permissions.
@@ -81,8 +91,9 @@
 
 ## Experimental planning engine
 
-Implemented for offline/sandbox evaluation: HiGHS/WASM, explicit modes and
-boundaries, permissions, shared physical comparison, and worker isolation.
-See [Planning engine](features/planning-engine.md). Live event execution, exclusive
-ownership migration, adapter acknowledgement and device watchdogs remain future
-work. Validate ARM64 CI and additional browsers before production integration.
+HiGHS/WASM, explicit modes and boundaries, permissions, shared physical
+comparison, and worker isolation. Selectable in production as the HiGHS cost
+optimizer strategy with balance-only capabilities, packaged into the add-on
+image beside the add-on. See [Planning engine](features/planning-engine.md).
+Direct modes in production, adapter acknowledgement and device watchdogs remain
+future work.

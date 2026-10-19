@@ -5,9 +5,12 @@ output power** while it remains in native self-consumption mode, and publishes
 the current interval as a `balance` [battery
 command](battery-control.md#publishing-commands). Reducing output during
 cheaper hours preserves energy for higher-priced demand, including the morning
-before solar recovery. Like Net zero energy, this strategy only commands a
-battery when **Steer this battery** is checked. The planner still requires one
-configured household battery.
+before solar recovery. This is the feature both [battery control
+strategies](strategies.md) run in: **Evening target** plans with the local
+search described below, **HiGHS cost optimizer** with an exact solver, and both
+publish the same kind of command. A battery is only commanded when **Steer this
+battery** is checked, and planning still requires one configured household
+battery.
 Elias does not request grid charging or change the operating mode or native SoC
 limits. The minimum charge setting (for example 5%) remains the protective floor.
 
@@ -38,16 +41,16 @@ In Settings → Batteries, edit the battery:
    cap battery output — not combined PV/inverter output or grid export. Leave it
    off to retain native discharge.
 4. Tick **Plan charge limits** and save. Home automatically calculates a preview,
-   even while Battery control is disabled or another strategy is selected.
+   even while Battery control is disabled, with the selected strategy.
    Efficiency defaults to 95% in each direction. The other planning inputs are
    fixed; see [Fixed planning settings](#fixed-planning-settings).
 5. Write the automation for the battery's `elias_ems_<slug>_battery_command`
    event, then tick **Steer this battery**. Set self-consumption on the device.
-6. Check the Home plan, then select **Optimize charge limits** and enable Battery
-   control to publish commands. Plans refresh every five minutes and at each
-   interval boundary.
+6. Check the Home plan, then select **Evening target** or **HiGHS cost
+   optimizer** and enable Battery control to publish commands. Plans refresh
+   every five minutes and at each interval boundary.
 
-Once the Optimize charge limits strategy is enabled, that choice persists across
+Once battery control is enabled, the choice of strategy persists across
 restarts and updates. The plan card checks the saved control settings and
 battery configuration independently of planning, without waiting for the history
 fetch or taking the execution lock. Enabled control shows a neutral waiting
@@ -147,11 +150,13 @@ are ignored when read and dropped on the next save. An install that had
 stored different ones plans with these instead. Planner exports still write
 them into `settings` and `model`, so the Planner sandbox reads them as before.
 
-The pure TypeScript Evening target planner is used for all live previews and
-control; the algorithm selector has been removed. Older selections are ignored.
-The legacy cost optimizer remains in Benchmark and the offline gym.
+Evening target is the strategy this section describes; HiGHS plans from the
+same intervals, model and reduced-solar scenario but none of the evening-target
+parameters — see [strategies.md](strategies.md). The old per-battery algorithm
+selector is gone and older selections are ignored. The legacy cost optimizer
+remains in Benchmark and the offline gym.
 
-The planner starts with maximum charging and minimum controllable discharge to
+Evening target starts with maximum charging and minimum controllable discharge to
 establish the reachable evening target in nominal and reduced-solar scenarios.
 It searches charging and output ceilings using exact energy simulation, exploring
 expensive demand first, then improving the charging schedule. It uses up to 41
@@ -220,6 +225,14 @@ and recalculates every five minutes or at the end of the current interval,
 whichever comes first. Settings mutations are serialized with publishing,
 preventing an old plan from going out after the battery is disabled or removed.
 
+The selected strategy is read on every plan, so switching between Evening
+target and HiGHS takes effect at the next plan — a save invalidates the current
+one — and the new strategy's command replaces the old one's rather than a
+release going out in between. A HiGHS solve runs on a worker thread with a
+20-second budget; a settings save **interrupts** a solve in progress rather than
+waiting it out, and the next tick plans under the new settings. A solve that
+returns no schedule, crashes or overruns is a planning failure like any other.
+
 Each plan publishes its current interval as one `balance` command: the charge
 ceiling as `charge_limit_w`, the AC output ceiling as `discharge_limit_w` (null
 without discharge limiting), and a validity from the interval's start to its end
@@ -227,7 +240,7 @@ plus a minute's grace. An unchanged command is not repeated when the plan is
 recalculated inside the same interval; the next interval's command goes out
 when it starts.
 
-The strategy releases a battery it holds when the strategy is disabled, when the
+The loop releases a battery a strategy holds when control is disabled, when the
 battery stops being steered or planned, and when planning fails — a plan that
 cannot be trusted must not leave the battery capped. A release is `action:
 release`, and restoring the battery's normal limits is the automation's job.

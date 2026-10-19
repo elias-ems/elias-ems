@@ -8,8 +8,9 @@ every quarter hour of today and tomorrow.
 ::: tip One thing acts on this so far: PV curtailment.
 [PV curtailment](/guide/pv-curtailment) reads the **production** leg and holds
 your panels back while a kWh put on the grid earns less than it costs to make.
-Battery control does not read prices at all yet — it still runs
-net-zero-energy — so price-aware charging is still to come.
+Both [battery control strategies](/guide/battery-control#choosing-a-strategy)
+plan with both legs too, but within self-consumption: charging from the grid on
+a cheap or negative price is still to come.
 
 Either way, get the arithmetic below right first: curtailment acts on what your
 production formula says, so a wrong formula is a wrong decision.

@@ -73,16 +73,15 @@ then switch control back on.
 
 Stop the add-on and click **Uninstall**. Two things worth knowing:
 
-- **Stopping Net zero energy releases its targets.** Switching control
-  off, and shutting the add-on down cleanly, both publish 0 W for each steered
-  battery, flagged `released: true` so your automation can put an
-  inverter back on self-consumption rather than leaving it forced at 0 W. That
-  last step only happens if your automation does it. And nothing is published at
-  all if the container is killed outright or the power goes, so a battery can be
-  left holding the last target it was given.
-- **Disable Optimize charge limits before stopping or uninstalling** to restore
-  limits it still owns. If stopped with limits applied, its recovery journal
-  restores those limits on restart; intervening manual changes are kept.
+- **Stopping battery control releases its batteries.** Switching control
+  off, and shutting the add-on down cleanly, both publish a release for each
+  steered battery, flagged `released: true` so your automation can put the
+  inverter's normal limits back. That last step only happens if your automation
+  does it. And nothing is published at all if the container is killed outright
+  or the power goes, so a battery can be left with the last limits it was given
+  until the command's `valid_until` passes.
+- **Disable battery control before uninstalling** so the release reaches your
+  automation while the add-on is still running to send it.
 - **Your settings live in the add-on's data directory** and go with it when you
   uninstall. Nothing is written into Home Assistant's own configuration.
 

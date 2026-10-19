@@ -1,8 +1,10 @@
 # Experimental battery planning engine
 
-The documentation site's Planner sandbox compares the production Evening target
-planner with a TypeScript HiGHS/WASM engine under `engine/`. Production control
-continues to use Evening target. The new engine only calculates plans.
+The TypeScript HiGHS/WASM engine under `engine/` is the planner behind the
+**HiGHS cost optimizer** [battery control strategy](strategies.md), selectable
+beside Evening target in Battery control and compared with it in the
+documentation site's Planner sandbox. The engine itself only calculates plans;
+the add-on's planning loop publishes them.
 
 Import a version 1 planner snapshot and choose equivalent capabilities (native
 balance and the exported writable boundaries) or expanded capabilities (explicitly
@@ -10,12 +12,13 @@ assumed hold, charge and discharge modes). Expanded capabilities are the sandbox
 for grid charging and battery export. Equivalent capabilities remain balance-only. Expanded setpoint resolution is supplied by the
 user; power-limit entities do not establish direct-control support.
 
-Both planners use the same physical snapshot and share evaluation for nominal
-and reduced solar. Evening target alone receives its deadline and target. The table compares
-cost including wear, final SoC and runtime. Interval commands
+The sandbox runs every registered strategy on the same physical snapshot and
+scores each with the same evaluation for nominal and reduced solar
+(`scoreCommands`). Evening target alone receives its deadline and target. The
+table compares cost including wear, final SoC and runtime. Interval commands
 show mode, boundaries, applicable signed setpoint and predicted battery power.
-Existing snapshot exports remain version 1; downloaded comparison results add
-the engine inputs and assumptions alongside the original Evening target result.
+Existing snapshot exports remain version 1; a downloaded comparison carries the
+dataset, the engine inputs and every strategy's result.
 
 HiGHS optimizes only mean scenario cost: import charges minus export revenue
 plus configured wear. After proving optimal cost, it uses any remaining solver
@@ -33,15 +36,18 @@ grid charging/export permissions against live conditions. Curtailment remains an
 equilibrium forecast, not a prediction of controller transients. Initial SoC
 outside the configured window is unsupported and reported; it is never clamped.
 
-Both planners run in a browser worker; Node engine calls use worker threads.
+Both strategies run in a browser worker in the sandbox; in the add-on and the
+gym the engine runs on a worker thread through `engine/node.mjs`.
 Solver status and independent physical replay gate every returned schedule.
 Time-limited feasible plans are unproven, infeasible/no-incumbent runs return no
 schedule, and only proven solver results claim modeled optimality. Reduced solar
 is a second modeled scenario, not a guarantee against unexpected weather.
 
 The versioned event contract — a coherent command with mode, boundaries,
-setpoint, permissions, identity and validity — is now what both production
-strategies publish ([battery commands](battery-control.md#publishing-commands)),
-including the hold, charge and discharge modes this engine plans in. The engine
-itself still publishes no events and performs no live writes; production uses
-Evening target and net zero energy.
+setpoint, permissions, identity and validity — is what every strategy publishes
+([battery commands](battery-control.md#publishing-commands)), and carries the
+hold, charge and discharge modes this engine plans in. **In production HiGHS
+plans with equivalent capabilities only** — balance with the battery's
+boundaries, no grid charging or export — because direct modes need an adapter
+that enforces permissions against live power. Expanded capabilities stay in the
+sandbox until then.

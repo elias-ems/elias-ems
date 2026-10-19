@@ -73,16 +73,17 @@ Both strategies use **Steer this battery** to select which batteries they may
 control. Leave it unchecked to monitor a battery without controlling it.
 
 Both send each battery's **command** as a Home Assistant **event**, and an
-automation you write turns that into whatever your inverter wants. **Net zero
-energy** commands a power to hold, charge or discharge at. **Optimize charge
-limits** keeps the device in native self-consumption and commands its charge and
-AC output limits; it currently supports one configured household battery,
-ticked **Plan charge limits** — see [setup and requirements](/internals/charge-limit).
+automation you write turns that into whatever your inverter wants. **Evening
+target** and **HiGHS cost optimizer** both keep the device in native
+self-consumption and command its charge and AC output limits; they currently
+support one configured household battery, ticked **Plan charge limits** — see
+[choosing a strategy](/guide/battery-control#choosing-a-strategy) and [setup and
+requirements](/internals/charge-limit).
 
 Because the add-on never talks to the inverter itself, the battery form asks
-what *your automation* can do: which modes it can carry out (net zero energy
-needs hold, charge and discharge), whether it can limit discharge, and the power
-step its limit setting moves in.
+what *your automation* can do: which modes it can carry out (both strategies
+only need balance today), whether it can limit discharge, and the power step its
+limit setting moves in.
 
 Each battery gets **its own event type, named after its title**:
 
@@ -102,10 +103,8 @@ automation.
 **Steer this battery** authorizes either strategy. Leave it
 unticked and the battery still appears on the dashboard, still counts as part of
 the house, and simply never gets told what to do — a supported state, not an
-unfinished one. **Control cannot be switched on until a battery can be steered
-by the selected strategy**, and the checkbox stays disabled until then. For Net zero energy,
-the rule is "at least one", not "all" — a house can reasonably have one steered battery and one that
-only reports.
+unfinished one. **Control cannot be switched on until exactly one battery is
+steered and planned**, and the checkbox stays disabled until then.
 
 ::: danger Renaming a battery renames its event
 Home Assistant has no idea the two event types were related, so an automation
@@ -188,16 +187,15 @@ The two formulas are the substance of it, and they have a page of their own:
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| **Enabled** | off | Disabled until at least one battery is steered. |
-| **Strategy** | Net zero energy | Net zero energy or Optimize charge limits. |
-| **Loop interval (seconds)** | 5 | 1–3600. |
+| **Enabled** | off | Disabled until exactly one battery is steered and planned. |
+| **Strategy** | Evening target | Evening target or HiGHS cost optimizer — see [choosing a strategy](/guide/battery-control#choosing-a-strategy). |
+| **Loop interval (seconds)** | 5 | 1–3600. How often PV curtailment may reconsider. |
 
-For Net zero energy, the interval is a **rate limit, not a schedule**: at most one decision per
-interval. The loop does not wait for a timer to notice the meter moved — Home
-Assistant tells it, and it acts as soon as the event arrives, subject to that
-limit. A change arriving inside the window schedules a tick for when the window
-closes, so the last change before a lull is never swallowed. A slow idle tick
-runs regardless, so a quiet house still produces evidence the loop is alive.
+The strategies replan every five minutes and at each interval boundary,
+whatever the loop interval says. That interval paces the loop
+[PV curtailment](/guide/pv-curtailment) runs on: a **rate limit, not a
+schedule** — at most one decision per interval, acted on as soon as Home
+Assistant reports a change.
 
 Saving this section takes effect immediately, including switching control off.
 

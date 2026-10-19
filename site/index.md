@@ -22,11 +22,11 @@ hero:
 features:
   - title: Battery control
     details: >-
-      A net-zero-energy strategy reads the grid meter, works out what every
-      battery should be doing, and publishes each target as its own Home
-      Assistant event for your automation to act on. It respects your charge limits,
-      splits the target across batteries by capacity, and caps each share at
-      what the inverter can deliver.
+      Plans the battery from solar forecasts, household history and prices with
+      one of two strategies — Evening target or the HiGHS cost optimizer — and
+      publishes each interval's charge and output limits as a Home Assistant
+      event for your automation to act on. Compare the strategies on your own
+      data in the Planner sandbox.
     link: /guide/battery-control
     linkText: How it decides
   - title: Readings that move

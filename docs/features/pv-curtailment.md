@@ -221,10 +221,9 @@ from where we want it, plus whatever a battery is delivering that the sun could
 deliver instead.*
 
 **The load and the uncurtailable arrays cancel out.** The add-on never measures
-the load — it is already inside the grid reading. It is the same feedback form
-as `S = C - net` in [net-zero.ts](../../addon/app/lib/net-zero.ts), with the
-same property: a wrong answer this tick is corrected on the next one instead of
-accumulating.
+the load — it is already inside the grid reading. It is the feedback form a
+battery chasing the meter uses too, with the same property: a wrong answer this
+tick is corrected on the next one instead of accumulating.
 
 `N` cancelling is the part that is easiest to get wrong. An array nobody can
 command is still generating, and its output is *already* in `G`; counting it
@@ -279,7 +278,7 @@ correctly on its own terms:
 | What acts | What follows | The meter then |
 | --- | --- | --- |
 | Curtailment cuts the arrays | the house is short | swings to import |
-| Net-zero covers the import | the battery discharges | comes back to zero |
+| The battery's self-consumption covers the import | it discharges | comes back to zero |
 | Curtailment sees a balanced meter | nothing to correct | **and the limit never moves again** |
 
 Once something else is holding the meter, *every* level of PV is an equilibrium.
@@ -312,8 +311,9 @@ Four things about that term:
   nothing at all, which is why a dark array on a winter evening is left
   undisturbed by the battery carrying the house.
 - **The battery yields on its own.** As the arrays take the house over, the
-  surplus reaches whatever is steering the battery — net-zero, or the inverter's
-  own self-consumption — and it stops discharging. Neither feature has to be
+  surplus reaches the inverter's own self-consumption — which is what the
+  battery strategies leave in charge, within their boundaries — and it stops
+  discharging. Neither feature has to be
   told about the other; they converge over a tick or two, with the battery's
   loop the fast one and `settleSeconds` pacing the slow one.
 - **A battery whose power sensor is quiet counts as not discharging**, which

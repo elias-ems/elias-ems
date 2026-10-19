@@ -8,8 +8,12 @@ continues to own data collection, presentation and publishing control events.
 Device-specific automations or adapters translate those events into inverter
 commands; the engine does not manipulate Home Assistant entities.
 
-The existing production planner is **Evening target**, implemented in
-[`charge-evening.ts`](../addon/app/lib/charge-evening.ts). It plans maximum
+The engine is the planner behind the **HiGHS cost optimizer** battery control
+strategy ([strategies.md](../docs/features/strategies.md)), selectable in the
+add-on beside **Evening target**, which is implemented in
+[`charge-evening.ts`](../addon/app/lib/charge-evening.ts). Both are registered in
+[`addon/app/lib/strategies/`](../addon/app/lib/strategies/index.ts), which the
+add-on, the Planner sandbox and the gym all read. Evening target plans maximum
 charging and optional maximum discharge power while the inverter remains in
 native self-consumption mode. See [charge-limit optimization](../docs/features/charge-limit.md)
 for the current model and [the Planner sandbox](../site/planner.md) for the
@@ -44,9 +48,10 @@ browser-based replay of exported planning inputs.
   same battery simultaneously; preserve restoration during migration.
   *Status:* the add-on now publishes this contract
   (`elias_ems_<slug>_battery_command`, see
-  [`battery-command.ts`](../addon/app/lib/battery-command.ts)) for both
-  production strategies, with ownership, release and the lease migration in
-  place. What remains is publishing the engine's own plans through it.
+  [`battery-command.ts`](../addon/app/lib/battery-command.ts)) for every
+  strategy, with ownership, release and the lease migration in place, and the
+  engine's balance-only plans go out through it. What remains is the direct
+  modes in production, which need an adapter that enforces permissions.
 - **Produce an inspectable interval schedule.** Respect price boundaries,
   including 15-minute and hourly tariffs. Show the selected mode, power
   boundaries, applicable setpoint, expected charge/discharge and resulting state
