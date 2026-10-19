@@ -49,7 +49,9 @@ version 1): the battery `model` (capacity, SoC window, current SoC, device
 steps, efficiency, wear), the `slots` (15-minute intervals with forecast solar,
 household load, buy and sell prices and modelled PV curtailment), the
 `terminalReserveKwh`, and Evening target's `settings` block, whose
-`solarHaircut` defines the reduced-solar scenario every strategy is scored on.
+`solarHaircut` defines the reduced-solar scenario every strategy is scored on
+(and, mirrored, the excess-solar replay the sandbox reports beside it but
+leaves out of `meanCost`).
 The add-on builds it live in `preparePlannerInputs`; the sandbox and the gym
 parse it from a file. The `StrategyContext` carries what is platform-specific:
 

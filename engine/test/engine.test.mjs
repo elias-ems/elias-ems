@@ -356,6 +356,7 @@ test("mode contracts reject missing, opposite-sign and inapplicable setpoints", 
     );
   }
   assert.throws(() => evaluate(input, commands, 1), /scenario reduction/);
+  assert.throws(() => evaluate(input, commands, -1), /scenario reduction/);
 });
 
 test("cost-only spends available energy without preserving an evening or terminal reserve", async () => {

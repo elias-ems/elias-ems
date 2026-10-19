@@ -26,6 +26,10 @@ export function engineInput(
  * `meanCost` is what HiGHS minimises and what a gym should rank by; it counts
  * import cost, export revenue and wear, and nothing for the energy left in the
  * battery at the end, so compare `finalSoc` alongside it.
+ *
+ * `excess` replays the same commands with solar raised by the same margin. It
+ * is reported only and stays out of `meanCost`: no strategy plans for it, so
+ * counting it would rank strategies on a scenario HiGHS never optimised.
  */
 export function scoreCommands(
   snapshot: PlanningSnapshot,
@@ -38,6 +42,7 @@ export function scoreCommands(
   );
   return {
     scenarios,
+    excess: evaluate(input, commands, -input.solarHaircut),
     meanCost:
       scenarios.reduce((sum, scenario) => sum + scenario.cost, 0) /
       scenarios.length,

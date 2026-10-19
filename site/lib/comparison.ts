@@ -24,6 +24,8 @@ export type StrategyRun = {
   result?: StrategyResult;
   /** The shared physical replay: nominal, then reduced solar. */
   scenarios?: ReturnType<typeof scoreCommands>["scenarios"];
+  /** The same commands replayed with more solar than forecast; not in `meanCost`. */
+  excess?: ReturnType<typeof scoreCommands>["excess"];
   meanCost?: number;
   error?: string;
 };
@@ -79,6 +81,7 @@ export async function compare(
         runtimeMs: performance.now() - started,
         result,
         scenarios: score.scenarios,
+        excess: score.excess,
         meanCost: score.meanCost,
       });
     } catch (error) {

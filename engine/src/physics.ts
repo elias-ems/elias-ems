@@ -178,8 +178,10 @@ export function step<T>(
     ),
   };
 }
+/** `haircut` scales solar by `1 - haircut`: positive is the reduced-solar
+ * scenario, negative a replay with more solar than forecast. */
 export function evaluate(input: Input, commands: Command[], haircut = 0) {
-  if (!Number.isFinite(haircut) || haircut < 0 || haircut >= 1)
+  if (!Number.isFinite(haircut) || haircut <= -1 || haircut >= 1)
     throw new Error("Invalid solar scenario reduction");
   validateCommands(input, commands);
   let energy = (input.model.capacityKwh * input.model.soc) / 100;
