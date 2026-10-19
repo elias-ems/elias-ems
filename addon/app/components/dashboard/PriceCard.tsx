@@ -20,15 +20,7 @@ import {
   ruleStyle,
 } from "./chrome";
 import { AlertIcon, TagIcon } from "./Icons";
-import PriceChart from "./PriceChart";
-
-type PriceView = "production" | "consumption" | "market";
-
-const PRICE_VIEW_LABELS: Record<PriceView, string> = {
-  production: "Production price",
-  consumption: "Consumption price",
-  market: "Market price",
-};
+import PriceChart, { type PriceSeriesId, SERIES_META } from "./PriceChart";
 
 export default function PriceCard({
   prices,
@@ -51,7 +43,25 @@ export default function PriceCard({
   curtailing: boolean;
 }) {
   const [selectedDay, setSelectedDay] = useState<"today" | "tomorrow">("today");
-  const [priceView, setPriceView] = useState<PriceView>("production");
+  const [visibleSeries, setVisibleSeries] = useState<
+    Record<PriceSeriesId, boolean>
+  >({
+    production: true,
+    consumption: true,
+    market: true,
+  });
+
+  const toggleSeries = (id: PriceSeriesId) => {
+    setVisibleSeries((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      // Keep at least one active
+      if (!Object.values(next).some(Boolean)) {
+        return prev;
+      }
+      return next;
+    });
+  };
+
   const hasTomorrow = Boolean(
     prices.curveTomorrow && prices.curveTomorrow.length > 0,
   );
@@ -60,8 +70,6 @@ export default function PriceCard({
       ? prices.curveTomorrow
       : prices.curve;
   const activeNowMinutes = selectedDay === "today" ? prices.nowMinutes : null;
-  const chartCurve = curveForView(activeCurve, priceView);
-  const priceLabel = PRICE_VIEW_LABELS[priceView];
 
   // The question the card is really asking: is exporting worth doing right now?
   // Not "is the price negative" — the threshold is configurable because a
@@ -191,18 +199,9 @@ export default function PriceCard({
             gap: "0.5rem",
           }}
         >
-          <h2 style={eyebrowStyle}>{priceLabel}</h2>
+          <h2 style={eyebrowStyle}>Price curve</h2>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem" }}>
-            <SegmentedControl
-              label="Price view"
-              value={priceView}
-              options={[
-                ["production", "Production"],
-                ["consumption", "Consumption"],
-                ["market", "Market"],
-              ]}
-              onChange={(value) => setPriceView(value as PriceView)}
-            />
+            <SeriesToggles visible={visibleSeries} onChange={toggleSeries} />
             {hasTomorrow && (
               <SegmentedControl
                 label="Forecast day"
@@ -218,7 +217,7 @@ export default function PriceCard({
             )}
           </div>
         </div>
-        {chartCurve.length > 0 ? (
+        {activeCurve.length > 0 ? (
           <>
             {/*
               The same chart at two plot sizes, one shown at a time. The wide
@@ -227,26 +226,22 @@ export default function PriceCard({
             */}
             <div className="dash-chart-wide">
               <PriceChart
-                curve={chartCurve}
+                curve={activeCurve}
+                visibleSeries={visibleSeries}
                 nowMinutes={activeNowMinutes}
-                thresholdPerKwh={
-                  priceView === "production" ? thresholdPerKwh : null
-                }
+                thresholdPerKwh={thresholdPerKwh}
                 currency={prices.currency}
-                priceLabel={priceLabel}
                 dayLabel={selectedDay}
               />
             </div>
             <div className="dash-chart-narrow">
               <PriceChart
                 compact
-                curve={chartCurve}
+                curve={activeCurve}
+                visibleSeries={visibleSeries}
                 nowMinutes={activeNowMinutes}
-                thresholdPerKwh={
-                  priceView === "production" ? thresholdPerKwh : null
-                }
+                thresholdPerKwh={thresholdPerKwh}
                 currency={prices.currency}
-                priceLabel={priceLabel}
                 dayLabel={selectedDay}
               />
             </div>
@@ -254,7 +249,7 @@ export default function PriceCard({
         ) : (
           <Empty>
             {prices.configured
-              ? `Nothing to chart — no ${priceLabel.toLowerCase()} is available for ${selectedDay}.`
+              ? `Nothing to chart — no price curve is available for ${selectedDay}.`
               : "The day's prices appear here once a source is configured."}
           </Empty>
         )}
@@ -308,6 +303,71 @@ function Figure({
         {value}
       </div>
     </div>
+  );
+}
+
+function SeriesToggles({
+  visible,
+  onChange,
+}: {
+  visible: Record<PriceSeriesId, boolean>;
+  onChange: (id: PriceSeriesId) => void;
+}) {
+  const options: PriceSeriesId[] = ["production", "consumption", "market"];
+
+  return (
+    <fieldset
+      aria-label="Toggle price curves"
+      style={{
+        display: "inline-flex",
+        background: "var(--color-border)",
+        border: "none",
+        margin: 0,
+        padding: 2,
+        borderRadius: 6,
+        gap: 2,
+      }}
+    >
+      {options.map((id) => {
+        const meta = SERIES_META[id];
+        const active = visible[id];
+        return (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(id)}
+            style={{
+              border: "none",
+              background: active ? "var(--color-surface)" : "transparent",
+              color: active ? "var(--color-text)" : "var(--color-text-muted)",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: "0.6875rem",
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              opacity: active ? 1 : 0.65,
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                display: "inline-block",
+                width: 7,
+                height: meta.dashed ? 3 : 7,
+                borderRadius: meta.dashed ? 1 : 3,
+                background: meta.color,
+                opacity: active ? 1 : 0.35,
+              }}
+            />
+            {meta.label}
+          </button>
+        );
+      })}
+    </fieldset>
   );
 }
 
@@ -380,25 +440,4 @@ function stripUnit(display: string | null): string {
   if (display === null) return "—";
   const space = display.indexOf(" ");
   return space === -1 ? display : display.slice(0, space);
-}
-
-function curveForView(curve: DashboardPrices["curve"], view: PriceView) {
-  return curve.flatMap((point) => {
-    const value =
-      view === "production"
-        ? point.productionPerKwh
-        : view === "consumption"
-          ? point.consumptionPerKwh
-          : point.marketPerKwh;
-
-    return value === null
-      ? []
-      : [
-          {
-            startMinutes: point.startMinutes,
-            endMinutes: point.endMinutes,
-            pricePerKwh: value,
-          },
-        ];
-  });
 }

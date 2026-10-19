@@ -88,19 +88,10 @@ import PricesSection from "../components/settings/PricesSection";
 import PvSection from "../components/settings/PvSection";
 import Section from "../components/settings/Section";
 import { commandEventType } from "../lib/battery-command";
-import type { PriceCurvePoint } from "../lib/dashboard";
 import { curtailmentSummary } from "../lib/dashboard-view";
 import { playgroundFixtures } from "../lib/playground-fixtures";
 import { pvLimitEventType } from "../lib/pv-entities";
 import type { Route } from "./+types/playground";
-
-function productionChart(curve: PriceCurvePoint[]) {
-  return curve.flatMap((point) =>
-    point.productionPerKwh === null
-      ? []
-      : [{ ...point, pricePerKwh: point.productionPerKwh }],
-  );
-}
 
 /**
  * One clock reading for the whole page.
@@ -954,22 +945,20 @@ export default function Playground({
         >
           <Variant label="Wide, threshold at 0" onCanvas>
             <PriceChart
-              curve={productionChart(fixtures.prices.curve)}
+              curve={fixtures.prices.curve}
               nowMinutes={fixtures.prices.nowMinutes}
               thresholdPerKwh={0}
               currency="EUR"
-              priceLabel="Production price"
               dayLabel="today"
             />
           </Variant>
           <Variant label="Compact, threshold at 0.05" onCanvas>
             <div style={{ maxWidth: 300 }}>
               <PriceChart
-                curve={productionChart(fixtures.prices.curve)}
+                curve={fixtures.prices.curve}
                 nowMinutes={fixtures.prices.nowMinutes}
                 thresholdPerKwh={0.05}
                 currency="EUR"
-                priceLabel="Production price"
                 dayLabel="today"
                 compact
               />
@@ -981,7 +970,6 @@ export default function Playground({
               nowMinutes={null}
               thresholdPerKwh={0}
               currency="EUR"
-              priceLabel="Production price"
               dayLabel="today"
             />
           </Variant>
