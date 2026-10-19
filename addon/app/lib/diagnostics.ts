@@ -72,10 +72,10 @@ export type DiagnosticEntry = {
 export type DiagnosticsData = { entries: DiagnosticEntry[] };
 
 /**
- * Which origins the home page's decision feed asks for — the two strategies,
- * and deliberately not `prices`, whose entries are parse failures rather than
- * something the house just did. Passing no filter at all would fold those in;
- * the Tools page is where the whole log belongs.
+ * Which origins the home page's decision feed asks for — the strategies that
+ * act, and deliberately not `prices`, whose entries are parse failures rather
+ * than something the house just did. Passing no filter at all would fold those
+ * in; the Tools page is where the whole log belongs.
  *
  * Here for the same reason `DiagnosticsData` is, one step further: both ends of
  * that request need the *filter* too, not just the response type. The loader

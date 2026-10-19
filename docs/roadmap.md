@@ -25,11 +25,13 @@
   acted on a command — no automation, one listening for a battery's old name,
   or an inverter ignoring it all look identical from here — and a packaged
   adapter that enforces validity and permissions.
-- Diagnostics — one log every feature writes to, shown on Home as the two
+- Diagnostics — one log every feature writes to, shown on Home as the acting
   strategies' decisions merged into a single feed, in full on the Tools page,
   and downloadable as a text file. Four origins write to it now — battery
-  control, PV curtailment, dynamic prices, and charge limiting — the first two
-  being the pair that feed shows; see [features/diagnostics.md](features/diagnostics.md).
+  control, PV curtailment, dynamic prices, and charge limiting — and the feed
+  shows the three that decide something, leaving out `prices`, whose entries
+  are parse failures rather than anything the house did; see
+  [features/diagnostics.md](features/diagnostics.md).
 - Dynamic prices — importing done, see
   [features/dynamic-prices.md](features/dynamic-prices.md). Day-ahead prices are
   read off a Home Assistant entity and put through a formula per direction, so
