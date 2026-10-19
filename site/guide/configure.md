@@ -190,9 +190,9 @@ The two formulas are the substance of it, and they have a page of their own:
 | **Enabled** | off | Disabled until exactly one battery is steered and planned. |
 | **Strategy** | Evening target | Evening target or HiGHS cost optimizer — see [choosing a strategy](/guide/battery-control#choosing-a-strategy). |
 
-There is no interval to set. Each price interval's command goes out as the
-interval starts — every 15 or 60 minutes, depending on your price source — and
-the plan is refreshed right after.
+There is no interval to set. The plan is refreshed five minutes before each
+price interval ends, and the next interval's command goes out as it starts —
+every 15 or 60 minutes, depending on your price source.
 
 Saving this section takes effect immediately, including switching control off.
 

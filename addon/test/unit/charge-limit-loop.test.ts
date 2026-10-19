@@ -263,63 +263,85 @@ describe("charge limit commands", () => {
     expect(commands()).toHaveLength(1);
   });
 
-  it("waits for the price interval to end before planning again", async () => {
-    const loop = await import("../../app/lib/charge-limit-loop.server");
-    await loop.chargeLimitTick(now);
-    await loop.chargeLimitTick(now + 300_000);
-    await loop.chargeLimitTick(now + 899_999);
+  /** Every plan from here on covers two intervals, the second at 800 W. */
+  const next = () => ({ start: now + 900_000, end: now + 1_800_000 });
+  function twoIntervals() {
+    const one = mocks.calculate.getMockImplementation();
+    const two = async () => {
+      const first = await one?.();
+      return {
+        ...first,
+        commands: [
+          ...first.commands,
+          { ...next(), mode: "balance", chargeLimitW: 800, dischargeLimitW: 0 },
+        ],
+        plan: {
+          ...first.plan,
+          points: [
+            ...first.plan.points,
+            { ...next(), limitW: 800, dischargeLimitW: 0 },
+          ],
+        },
+      };
+    };
+    mocks.calculate.mockImplementation(two);
+    return two;
+  }
 
+  it("plans again five minutes before the interval ends, leaving it alone", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    const lead = now + 900_000 - loop.PLAN_LEAD_MS;
+    await loop.chargeLimitTick(now);
+    await loop.chargeLimitTick(lead - 1);
     expect(mocks.calculate).toHaveBeenCalledTimes(1);
+
+    await loop.chargeLimitTick(lead);
+    expect(mocks.calculate).toHaveBeenCalledTimes(2);
+    // The interval in force came from the previous plan; the new one takes
+    // over at the boundary rather than five minutes early.
     expect(commands()).toHaveLength(1);
   });
 
-  it("applies the next interval from the plan in hand before planning again", async () => {
-    // Two intervals, so the plan already says what the second one should be.
-    const first = await mocks.calculate();
-    const next = { start: now + 900_000, end: now + 1_800_000 };
-    mocks.calculate.mockResolvedValueOnce({
-      ...first,
-      commands: [
-        ...first.commands,
-        { ...next, mode: "balance", chargeLimitW: 800, dischargeLimitW: 0 },
-      ],
-      plan: {
-        ...first.plan,
-        points: [
-          ...first.plan.points,
-          { ...next, limitW: 800, dischargeLimitW: 0 },
-        ],
-      },
-    });
+  it("applies the next interval at the boundary from the plan made before it", async () => {
+    twoIntervals();
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
+    await loop.chargeLimitTick(now + 900_000 - loop.PLAN_LEAD_MS);
+    await loop.chargeLimitTick(next().start);
 
-    // The planner is slow at the boundary; the command must not wait for it.
-    let finish!: () => void;
-    const slow = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    let planning!: () => void;
-    const started = new Promise<void>((resolve) => {
-      planning = resolve;
-    });
-    mocks.calculate.mockImplementationOnce(async () => {
-      planning();
-      await slow;
-      throw new Error("Superseded");
-    });
-    const tick = loop.chargeLimitTick(next.start);
-    await started;
-
+    // No plan at the boundary: the one made five minutes earlier is applied.
+    expect(mocks.calculate).toHaveBeenCalledTimes(2);
+    expect(commands().map((c) => c.charge_limit_w)).toEqual([400, 800]);
     expect(commands().at(-1)).toMatchObject({
       action: "apply",
-      charge_limit_w: 800,
-      valid_from: new Date(next.start).toISOString(),
-      valid_until: new Date(next.end + loop.COMMAND_GRACE_MS).toISOString(),
+      valid_from: new Date(next().start).toISOString(),
+      valid_until: new Date(next().end + loop.COMMAND_GRACE_MS).toISOString(),
     });
     expect((await loop.readChargeLimits()).batteries[0].requestedW).toBe(800);
-    finish();
-    await tick;
+  });
+
+  it("publishes the interval that has started when a plan outlasts the boundary", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(now);
+      const two = twoIntervals();
+      const loop = await import("../../app/lib/charge-limit-loop.server");
+      await loop.chargeLimitTick(now);
+
+      // Planning started five minutes ahead and finished after the boundary.
+      mocks.calculate.mockImplementationOnce(async () => {
+        vi.setSystemTime(next().start + 1);
+        return two();
+      });
+      await loop.chargeLimitTick(now + 900_000 - loop.PLAN_LEAD_MS);
+
+      expect(commands().map((c) => [c.action, c.charge_limit_w])).toEqual([
+        ["apply", 400],
+        ["apply", 800],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports disabled and conflicting settings without calculating a plan", async () => {
