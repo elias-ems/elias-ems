@@ -316,6 +316,7 @@ input {
  * Breakpoints are chosen from what each card needs rather than from a device:
  *  560px  the price chart stops being legible when scaled down past this
  *  620px  four table columns stop fitting
+ *  760px  the plan schedule's ten columns stop fitting
  *  880px  the grid card's three columns stop fitting
  *  920px  the strategy rows and the decision feed stop fitting side by side
  *  992px  a second column of settings cards fits at a comfortable measure
@@ -396,6 +397,37 @@ input {
 @media (min-width: 1500px) {
   .settings-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
+ * The Plans page's schedule table renders in full, with its column headings
+ * pinned under the top bar (64px, always) while the page scrolls past it.
+ *
+ * Sticky binds to the nearest scrolling ancestor, so the wrapper must not be
+ * one: any `overflow` other than `visible` — even `overflow-x: auto` alone,
+ * which forces `overflow-y` to `auto` too — would make the headings stick to
+ * the top of a box that never scrolls vertically, which is to say not at all.
+ *
+ * Below 760px the ten columns (about 645px) stop fitting, and a table that
+ * overflows the page scrolls the whole panel sideways. There it goes back to a
+ * box that scrolls both ways, with the headings pinned to the box's own top
+ * instead.
+ */
+.plan-table th {
+  position: sticky;
+  top: 64px;
+  z-index: 1;
+}
+
+@media (max-width: 760px) {
+  .plan-table {
+    max-height: clamp(16rem, 70vh, 36rem);
+    overflow: auto;
+  }
+
+  .plan-table th {
+    top: 0;
   }
 }
 
