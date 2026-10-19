@@ -68,7 +68,7 @@ const saveBattery = (b: Battery) =>
 const saveControl = (enabled: boolean, strategy = "charge-limit") =>
   writeFile(
     path.join(directory, "control.json"),
-    JSON.stringify({ enabled, strategy, intervalSeconds: 5 }),
+    JSON.stringify({ enabled, strategy }),
   );
 
 /** Every battery command fired so far, as payloads. */
@@ -263,6 +263,65 @@ describe("charge limit commands", () => {
     expect(commands()).toHaveLength(1);
   });
 
+  it("waits for the price interval to end before planning again", async () => {
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+    await loop.chargeLimitTick(now + 300_000);
+    await loop.chargeLimitTick(now + 899_999);
+
+    expect(mocks.calculate).toHaveBeenCalledTimes(1);
+    expect(commands()).toHaveLength(1);
+  });
+
+  it("applies the next interval from the plan in hand before planning again", async () => {
+    // Two intervals, so the plan already says what the second one should be.
+    const first = await mocks.calculate();
+    const next = { start: now + 900_000, end: now + 1_800_000 };
+    mocks.calculate.mockResolvedValueOnce({
+      ...first,
+      commands: [
+        ...first.commands,
+        { ...next, mode: "balance", chargeLimitW: 800, dischargeLimitW: 0 },
+      ],
+      plan: {
+        ...first.plan,
+        points: [
+          ...first.plan.points,
+          { ...next, limitW: 800, dischargeLimitW: 0 },
+        ],
+      },
+    });
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+
+    // The planner is slow at the boundary; the command must not wait for it.
+    let finish!: () => void;
+    const slow = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let planning!: () => void;
+    const started = new Promise<void>((resolve) => {
+      planning = resolve;
+    });
+    mocks.calculate.mockImplementationOnce(async () => {
+      planning();
+      await slow;
+      throw new Error("Superseded");
+    });
+    const tick = loop.chargeLimitTick(next.start);
+    await started;
+
+    expect(commands().at(-1)).toMatchObject({
+      action: "apply",
+      charge_limit_w: 800,
+      valid_from: new Date(next.start).toISOString(),
+      valid_until: new Date(next.end + loop.COMMAND_GRACE_MS).toISOString(),
+    });
+    expect((await loop.readChargeLimits()).batteries[0].requestedW).toBe(800);
+    finish();
+    await tick;
+  });
+
   it("reports disabled and conflicting settings without calculating a plan", async () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await saveBattery({ ...battery, steered: false });
@@ -403,7 +462,7 @@ describe("charge limit commands", () => {
     const loop = await import("../../app/lib/charge-limit-loop.server");
     await loop.chargeLimitTick(now);
     mocks.calculate.mockRejectedValueOnce(new Error("Forecast gap"));
-    await loop.chargeLimitTick(now + 300_000);
+    await loop.chargeLimitTick(now + 900_000);
 
     expect(commands().at(-1)).toMatchObject({
       action: "release",

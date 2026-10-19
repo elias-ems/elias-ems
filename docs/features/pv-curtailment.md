@@ -762,9 +762,10 @@ The loop runs while *either* feature is enabled, and each tick gates its own
 halves on what is stored, so switching one on or off takes effect on the next
 tick rather than needing a restart. Curtailment without battery control is an
 ordinary configuration — a house with panels and no battery — and so is the
-reverse. The tick rate is battery control's `intervalSeconds`, which is a
-ceiling on how often changes can produce a tick rather than the thing producing
-them; curtailment's own pacing comes from `settleSeconds`.
+reverse. Ticks are at least five seconds apart (`minTickMs`, fixed rather than
+a setting), which is a ceiling on how often changes can produce a tick rather
+than the thing producing them; curtailment's own pacing comes from
+`settleSeconds`.
 
 Three entities join the watched set when curtailment is on: every array's power
 sensor, **every battery's power sensor**, and **the price entity**. The price

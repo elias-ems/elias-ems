@@ -13,8 +13,6 @@ export type { StrategyId };
 export type ControlConfig = {
   enabled: boolean;
   strategy: StrategyId;
-  /** How often the loop reconsiders, in seconds. */
-  intervalSeconds: number;
 };
 
 /**
@@ -68,28 +66,17 @@ const RENAMED_STRATEGIES: Record<string, StrategyId> = {
 export const REMOVED_STRATEGIES = new Set(["net-zero-energy"]);
 
 /**
- * The interval paces the shared control loop, which PV curtailment runs on;
- * the planning strategies keep their own cadence. Five seconds: fast enough to
- * follow a kettle, slow enough not to hammer HA.
+ * There is no interval: the planning loop applies each price interval's
+ * command as it starts. An `intervalSeconds` stored by an earlier version is
+ * ignored on read and dropped on the next save.
  */
 export const DEFAULT_CONTROL_CONFIG: ControlConfig = {
   enabled: false,
   strategy: "evening-target",
-  intervalSeconds: 5,
 };
-
-export const MIN_INTERVAL_SECONDS = 1;
-export const MAX_INTERVAL_SECONDS = 3600;
 
 export function isStrategyId(value: unknown): value is StrategyId {
   return STRATEGIES.some((strategy) => strategy.id === value);
-}
-
-function clampInterval(seconds: number): number {
-  return Math.min(
-    MAX_INTERVAL_SECONDS,
-    Math.max(MIN_INTERVAL_SECONDS, Math.round(seconds)),
-  );
 }
 
 /**
@@ -99,7 +86,6 @@ function clampInterval(seconds: number): number {
 export function normalizeControlConfig(
   stored: Partial<ControlConfig> | null,
 ): ControlConfig {
-  const intervalSeconds = Number(stored?.intervalSeconds);
   const storedStrategy: unknown = stored?.strategy;
   const renamed =
     typeof storedStrategy === "string"
@@ -112,39 +98,16 @@ export function normalizeControlConfig(
   return {
     enabled: stored?.enabled === true && !removed,
     strategy: isStrategyId(renamed) ? renamed : DEFAULT_CONTROL_CONFIG.strategy,
-    intervalSeconds: clampInterval(
-      Number.isFinite(intervalSeconds)
-        ? intervalSeconds
-        : DEFAULT_CONTROL_CONFIG.intervalSeconds,
-    ),
   };
 }
 
 export type ControlErrors = {
-  intervalSeconds?: string;
   enabled?: string;
 };
 
 export function parseControlConfig(
   formData: FormData,
 ): { ok: true; config: ControlConfig } | { ok: false; errors: ControlErrors } {
-  const raw = formData.get("intervalSeconds")?.toString().trim();
-  const intervalSeconds = Number(raw);
-
-  if (
-    !raw ||
-    !Number.isInteger(intervalSeconds) ||
-    intervalSeconds < MIN_INTERVAL_SECONDS ||
-    intervalSeconds > MAX_INTERVAL_SECONDS
-  ) {
-    return {
-      ok: false,
-      errors: {
-        intervalSeconds: `Interval must be a whole number of seconds between ${MIN_INTERVAL_SECONDS} and ${MAX_INTERVAL_SECONDS}.`,
-      },
-    };
-  }
-
   const strategy = formData.get("strategy")?.toString();
 
   return {
@@ -156,7 +119,6 @@ export function parseControlConfig(
       strategy: isStrategyId(strategy)
         ? strategy
         : DEFAULT_CONTROL_CONFIG.strategy,
-      intervalSeconds,
     },
   };
 }

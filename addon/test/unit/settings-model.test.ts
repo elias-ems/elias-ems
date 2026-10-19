@@ -14,8 +14,8 @@ import {
 } from "../../app/lib/batteries";
 import { commandEventType } from "../../app/lib/battery-command";
 import {
+  type ControlConfig,
   DEFAULT_CONTROL_CONFIG,
-  MAX_INTERVAL_SECONDS,
   normalizeControlConfig,
   parseControlConfig,
 } from "../../app/lib/control";
@@ -467,14 +467,11 @@ describe("parsePvEntity", () => {
 
 describe("parseControlConfig", () => {
   it("reads an absent checkbox as off, because that is all a browser sends", () => {
-    const off = parseControlConfig(
-      form({ strategy: "net-zero-energy", intervalSeconds: "5" }),
-    );
+    const off = parseControlConfig(form({ strategy: "net-zero-energy" }));
     const on = parseControlConfig(
       form({
         enabled: "on",
         strategy: "net-zero-energy",
-        intervalSeconds: "5",
       }),
     );
 
@@ -482,24 +479,19 @@ describe("parseControlConfig", () => {
     expect(on.ok && on.config.enabled).toBe(true);
   });
 
-  it("rejects an interval outside the allowed range", () => {
-    for (const intervalSeconds of [
-      "0",
-      String(MAX_INTERVAL_SECONDS + 1),
-      "2.5",
-      "",
-    ]) {
-      const result = parseControlConfig(
-        form({ strategy: "net-zero-energy", intervalSeconds }),
-      );
-      expect(result.ok, `interval ${intervalSeconds}`).toBe(false);
-    }
+  it("ignores an interval posted by an older form", () => {
+    const result = parseControlConfig(
+      form({ strategy: "highs", intervalSeconds: "0" }),
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      config: { enabled: false, strategy: "highs" },
+    });
   });
 
   it("falls back to the default strategy rather than storing an unknown id", () => {
-    const result = parseControlConfig(
-      form({ strategy: "does-not-exist", intervalSeconds: "5" }),
-    );
+    const result = parseControlConfig(form({ strategy: "does-not-exist" }));
 
     expect(result.ok && result.config.strategy).toBe(
       DEFAULT_CONTROL_CONFIG.strategy,
@@ -508,24 +500,23 @@ describe("parseControlConfig", () => {
 });
 
 describe("normalizeControlConfig", () => {
-  it("defaults to a stopped loop on a five-second interval", () => {
+  it("defaults to a stopped loop", () => {
     expect(normalizeControlConfig(null)).toEqual(DEFAULT_CONTROL_CONFIG);
   });
 
-  it("clamps an interval that is out of range on disk", () => {
-    expect(normalizeControlConfig({ intervalSeconds: 0 }).intervalSeconds).toBe(
-      1,
-    );
+  it("drops an interval an earlier version stored", () => {
     expect(
-      normalizeControlConfig({ intervalSeconds: 99_999 }).intervalSeconds,
-    ).toBe(MAX_INTERVAL_SECONDS);
+      normalizeControlConfig({
+        enabled: true,
+        intervalSeconds: 10,
+      } as Partial<ControlConfig>),
+    ).toEqual({ ...DEFAULT_CONTROL_CONFIG, enabled: true });
   });
 
   it("keeps a downgrade runnable by falling back to a known strategy", () => {
     const config = normalizeControlConfig({
       enabled: true,
       strategy: "from-a-later-version" as never,
-      intervalSeconds: 10,
     });
 
     expect(config.strategy).toBe(DEFAULT_CONTROL_CONFIG.strategy);

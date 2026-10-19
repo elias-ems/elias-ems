@@ -1,7 +1,7 @@
 /**
- * Battery control's planning loop: every few minutes, ask the selected
- * strategy from the registry (`strategies/`) for a plan, and publish the
- * current interval's boundaries as a `balance` battery command. Every
+ * Battery control's planning loop: at every price interval boundary, publish
+ * the interval that has just started from the plan in hand, then ask the
+ * selected strategy from the registry (`strategies/`) for a fresh plan. Every
  * registered strategy runs here, which is what makes switching between them a
  * hand-over between two plans rather than between two loops.
  *
@@ -12,6 +12,11 @@
  * matter of a second automation rather than a second code path here. What is
  * left of the journal is a one-way migration; see
  * `charge-limit-legacy.server.ts`.
+ *
+ * Applying before planning is what keeps a command on time: planning reads
+ * history and forecasts and may run a solver, which can take far longer than
+ * the moment an interval starts. The fresh plan then republishes the current
+ * interval only if it disagrees with what was just applied.
  */
 import { type Battery, batterySlug, steerableBy } from "./batteries";
 import { listBatteries } from "./batteries.server";
@@ -32,6 +37,7 @@ import {
   chargeLimitControl,
   strategyLabel,
 } from "./charge-limit-status";
+import type { ChargePlan } from "./charge-plan";
 import { calculateChargePlan } from "./charge-planner.server";
 import { CHARGE_LIMIT_PLANNING, type StrategyId } from "./control";
 import { readControlConfig } from "./control-config.server";
@@ -41,20 +47,40 @@ const statuses = new Map<string, ChargeLimitStatus>();
 let queue: Promise<unknown> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let started = false;
+/** Whether a run is under way; its own `finally` then schedules the next one. */
+let running = false;
+/** Set when settings change during a run, so the next one starts at once. */
+let rerun = false;
+/** When the next plan is due: the end of the current price interval. */
 let nextPlan = 0;
+/** The plan each battery is currently commanded from, while it may publish. */
+const applied = new Map<
+  string,
+  {
+    strategy: StrategyId;
+    points: ChargePlan["points"];
+    commands: Awaited<ReturnType<typeof calculateChargePlan>>["commands"];
+  }
+>();
 /** Batteries whose pre-event power limits are still waiting to be restored. */
 let legacyPending = new Set<string>();
 /** Cancels a solve in progress, so a settings save never waits one out. */
 let planning: AbortController | null = null;
-const PLAN_MS = 300_000;
-const TICK_MS = 30_000;
 /**
- * How long past its interval a command stays valid. The loop replans at the
- * interval boundary but ticks only every `TICK_MS`, so without a grace an
- * adapter honouring `valid_until` would let go for up to a tick between two
- * perfectly healthy plans.
+ * How often the loop wakes between boundaries anyway, to restore limits an
+ * earlier version wrote and to let go of batteries that may no longer be
+ * commanded. Neither plans nor publishes a command.
  */
-export const COMMAND_GRACE_MS = 2 * TICK_MS;
+const HOUSEKEEPING_MS = 60_000;
+/** How soon a plan that failed is tried again. */
+const RETRY_MS = 60_000;
+/**
+ * How long past its interval a command stays valid. The next interval's
+ * command goes out at the boundary, but a run still holding the lock can delay
+ * it; without a grace an adapter honouring `valid_until` would let go between
+ * two perfectly healthy commands.
+ */
+export const COMMAND_GRACE_MS = 60_000;
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Serialize settings changes with actuation so a disabled battery cannot receive an old plan. */
@@ -71,6 +97,8 @@ export function interruptPlanning() {
 
 export function invalidateChargePlans() {
   nextPlan = 0;
+  applied.clear();
+  wake();
   for (const status of statuses.values()) {
     status.state = "waiting";
     status.validUntil = null;
@@ -81,6 +109,7 @@ export function invalidateChargePlans() {
 /** Test-only: forget plans, statuses and migration state. */
 export function resetChargeLimitLoop() {
   statuses.clear();
+  applied.clear();
   nextPlan = 0;
   legacyPending = new Set();
 }
@@ -174,6 +203,72 @@ export async function readChargeLimits(): Promise<ChargeLimitsData> {
   };
 }
 
+type PlannedCommand = Awaited<
+  ReturnType<typeof calculateChargePlan>
+>["commands"][number];
+
+/** One planned interval as a `balance` command, restated when it ends. */
+async function publishInterval(
+  b: Battery,
+  strategy: StrategyId,
+  command: PlannedCommand,
+  interval: ChargePlan["points"][number],
+): Promise<CommandPublish> {
+  const [publish] = await publishCommands([
+    {
+      ...targetOf(b),
+      strategy,
+      command: balanceCommand(
+        {
+          chargeLimitW: command.chargeLimitW,
+          // Without discharge limiting the plan holds native output, and the
+          // command says so by leaving the boundary out.
+          dischargeLimitW: b.dischargeLimitSupported
+            ? command.dischargeLimitW
+            : null,
+        },
+        interval.start,
+        interval.end + COMMAND_GRACE_MS,
+      ),
+      // Restated at the next interval at the latest, which is also when the
+      // next plan is due.
+      restateAt: interval.end,
+    },
+  ]);
+  return publish;
+}
+
+/**
+ * Publish the interval that contains `now` from the plan already in hand. A
+ * plan made under another strategy, or one that has run out, says nothing;
+ * the fresh plan that follows covers it.
+ */
+async function applyPlanned(b: Battery, strategy: StrategyId, now: number) {
+  const plan = applied.get(b.id);
+  if (plan?.strategy !== strategy) return;
+  const index = plan.points.findIndex((p) => p.start <= now && now < p.end);
+  if (index < 0) return;
+  const interval = plan.points[index];
+  const publish = await publishInterval(
+    b,
+    strategy,
+    plan.commands[index],
+    interval,
+  );
+  const status = statuses.get(b.id);
+  if (status) {
+    standing(status, b.id);
+    status.validUntil = interval.end;
+  }
+  const sent = describePublishes([publish]);
+  if (sent)
+    appendDiagnostic(
+      "charge-limit",
+      publish.status === "failed" ? "warn" : "info",
+      `${b.title}: applied the planned interval.\n${sent}`,
+    );
+}
+
 export async function chargeLimitTick(now = Date.now()) {
   // Old direct writes first, every tick until they are all back: nothing gets
   // a command while an earlier version's limit may still be capping it.
@@ -204,10 +299,21 @@ export async function chargeLimitTick(now = Date.now()) {
 
   const planned = batteries.filter((b) => b.chargeLimitPlanning);
   if (!planned.length || now < nextPlan) return;
-  nextPlan = now + PLAN_MS;
+  // Until a plan says when its interval ends; a failure leaves it here.
+  nextPlan = now + RETRY_MS;
+
+  // The price interval has changed: apply what the plan in hand says for it
+  // before planning again, so the command does not wait on the planner.
+  for (const b of planned) {
+    if (!active || !steerableBy(b, control.strategy) || legacyBlocks(b.id))
+      continue;
+    await applyPlanned(b, control.strategy, now);
+  }
 
   for (const b of planned) {
     const status = empty(b, control.strategy);
+    // What was just applied stays on the card while the new plan is made.
+    standing(status, b.id);
     statuses.set(b.id, status);
     try {
       // Independent single-battery plans would allocate the same solar twice.
@@ -237,13 +343,20 @@ export async function chargeLimitTick(now = Date.now()) {
       const mayPublish = active && !blocked;
       const current = result.plan.points[0];
       const command = result.commands[0];
-      nextPlan = Math.min(nextPlan, current.end);
+      nextPlan = current.end;
+      if (mayPublish)
+        applied.set(b.id, {
+          strategy: control.strategy,
+          points: result.plan.points,
+          commands: result.commands,
+        });
+      else applied.delete(b.id);
       Object.assign(status, {
         mode: mayPublish ? "active" : "preview",
         plan: result.plan,
         strategyStatus: result.status,
         calculatedAt: now,
-        validUntil: Math.min(now + PLAN_MS, current.end),
+        validUntil: current.end,
         currency: result.currency,
         timeZone: result.timeZone,
         forecastEnd: result.forecastEnd,
@@ -284,27 +397,12 @@ export async function chargeLimitTick(now = Date.now()) {
           throw new Error(
             "Plan expired during calculation; waiting for the next update.",
           );
-        const [publish] = await publishCommands([
-          {
-            ...targetOf(b),
-            strategy: control.strategy,
-            command: balanceCommand(
-              {
-                chargeLimitW: command.chargeLimitW,
-                // Without discharge limiting the plan holds native output, and
-                // the command says so by leaving the boundary out.
-                dischargeLimitW: b.dischargeLimitSupported
-                  ? command.dischargeLimitW
-                  : null,
-              },
-              current.start,
-              current.end + COMMAND_GRACE_MS,
-            ),
-            // Restated at the next interval at the latest, which is also when
-            // the next plan is due.
-            restateAt: current.end,
-          },
-        ]);
+        const publish = await publishInterval(
+          b,
+          control.strategy,
+          command,
+          current,
+        );
         if (publish.status === "failed")
           throw new Error(
             `The battery command did not go out: ${publish.detail}`,
@@ -330,6 +428,7 @@ export async function chargeLimitTick(now = Date.now()) {
         status.message = "Settings changed; calculating a new plan.";
         continue;
       }
+      applied.delete(b.id);
       status.state = "error";
       status.message = messageOf(error);
       status.validUntil = null;
@@ -346,34 +445,70 @@ export async function chargeLimitTick(now = Date.now()) {
   }
 }
 
+/**
+ * Run now rather than at the next scheduled wake — after a settings change.
+ * A run already under way picks the change up when it schedules its successor.
+ */
+function wake() {
+  if (!started) return;
+  if (running) {
+    rerun = true;
+    return;
+  }
+  clearTimeout(timer);
+  timer = setTimeout(run, 0);
+  timer.unref?.();
+}
+
+/**
+ * Until the next plan is due, or the next housekeeping pass if sooner. A due
+ * time already past means nothing could be planned — no battery to plan, or a
+ * run that failed before planning — and waits for housekeeping rather than
+ * spinning.
+ */
+function schedule() {
+  const untilPlan = nextPlan - Date.now();
+  const delay = rerun
+    ? 0
+    : untilPlan > 0
+      ? Math.min(untilPlan, HOUSEKEEPING_MS)
+      : HOUSEKEEPING_MS;
+  rerun = false;
+  timer = setTimeout(run, delay);
+  timer.unref?.();
+}
+
+async function run() {
+  running = true;
+  try {
+    await withChargeLimitLock(() => chargeLimitTick());
+  } catch (error) {
+    for (const s of statuses.values()) {
+      s.state = "error";
+      s.validUntil = null;
+      s.message = messageOf(error);
+    }
+    applied.clear();
+    appendDiagnostic("charge-limit", "error", messageOf(error));
+    await withChargeLimitLock(async () => {
+      try {
+        await releaseHeld(await listBatteries(), "failure");
+      } catch (failure) {
+        appendDiagnostic(
+          "charge-limit",
+          "error",
+          `Releasing the batteries failed and will be retried: ${messageOf(failure)}`,
+        );
+      }
+    });
+  } finally {
+    running = false;
+    schedule();
+  }
+}
+
 export function startChargeLimitLoop() {
   if (started) return;
   started = true;
-  const run = async () => {
-    try {
-      await withChargeLimitLock(() => chargeLimitTick());
-    } catch (error) {
-      for (const s of statuses.values()) {
-        s.state = "error";
-        s.validUntil = null;
-        s.message = messageOf(error);
-      }
-      appendDiagnostic("charge-limit", "error", messageOf(error));
-      await withChargeLimitLock(async () => {
-        try {
-          await releaseHeld(await listBatteries(), "failure");
-        } catch (failure) {
-          appendDiagnostic(
-            "charge-limit",
-            "error",
-            `Releasing the batteries failed and will be retried: ${messageOf(failure)}`,
-          );
-        }
-      });
-    } finally {
-      timer = setTimeout(run, TICK_MS);
-      timer.unref?.();
-    }
-  };
   void run();
 }

@@ -2,14 +2,9 @@ import { useId, useState } from "react";
 import { Form, useNavigation } from "react-router";
 import { CHARGE_LIMIT_BATTERY_ERROR } from "../../lib/charge-limit-status";
 import type { ControlConfig } from "../../lib/control";
-import {
-  MAX_INTERVAL_SECONDS,
-  MIN_INTERVAL_SECONDS,
-  STRATEGIES,
-} from "../../lib/control";
+import { STRATEGIES } from "../../lib/control";
 import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
-import Field from "../Field";
 import {
   errorStyle,
   formStyle,
@@ -57,7 +52,7 @@ export default function ControlSection({
     <Section
       id="battery-control"
       title="Battery control"
-      description="When enabled, the selected strategy plans the battery every few minutes from solar forecasts, household history and prices, publishes the current interval as a battery command, and writes each decision to the diagnostics on the home page."
+      description="When enabled, the selected strategy plans the battery from solar forecasts, household history and prices, publishes each price interval's battery command as that interval starts, and writes each decision to the diagnostics on the home page."
     >
       <Form method="post" style={{ ...formStyle, marginTop: "1rem" }}>
         <input type="hidden" name="intent" value="control-save" />
@@ -111,17 +106,6 @@ export default function ControlSection({
           {selected && <p style={hintStyle}>{selected.description}</p>}
         </div>
 
-        <Field
-          name="intervalSeconds"
-          label="Loop interval (seconds)"
-          type="number"
-          min={MIN_INTERVAL_SECONDS}
-          max={MAX_INTERVAL_SECONDS}
-          step={1}
-          defaultValue={config.intervalSeconds}
-          error={errors.intervalSeconds}
-          hint={`At most how often the shared control loop reconsiders PV curtailment. Battery strategies replan every five minutes regardless. ${MIN_INTERVAL_SECONDS}–${MAX_INTERVAL_SECONDS}s.`}
-        />
         {errors.enabled && <p style={errorStyle}>{errors.enabled}</p>}
 
         <div>

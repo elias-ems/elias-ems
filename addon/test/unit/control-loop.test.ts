@@ -220,7 +220,6 @@ beforeEach(async () => {
   await saveControlConfig({
     enabled: false,
     strategy: "evening-target",
-    intervalSeconds: 5,
   });
   await saveCurtailmentConfig({
     ...DEFAULT_CURTAILMENT_CONFIG,
@@ -236,6 +235,7 @@ afterEach(() => {
   resetControlLoop();
   stopHaLive();
   vi.useRealTimers();
+  delete process.env.CONTROL_MIN_TICK_MS;
 });
 
 describe("runControlTick, curtailment half", () => {
@@ -249,7 +249,6 @@ describe("runControlTick, curtailment half", () => {
     await saveControlConfig({
       enabled: false,
       strategy: "evening-target",
-      intervalSeconds: 5,
     });
     await saveCurtailmentConfig(config);
   }
@@ -550,13 +549,14 @@ describe("runControlTick, curtailment half", () => {
  * Curtailment switched on against a negative injection price, which is what
  * keeps the loop running in these cases: battery control plans elsewhere.
  */
-async function curtailing(intervalSeconds = 5): Promise<void> {
+async function curtailing(minTickSeconds?: number): Promise<void> {
+  if (minTickSeconds)
+    process.env.CONTROL_MIN_TICK_MS = String(minTickSeconds * 1000);
   await addPvEntity(PV_ARRAY);
   await savePriceConfig(NEGATIVE_INJECTION);
   await saveControlConfig({
     enabled: false,
     strategy: "evening-target",
-    intervalSeconds,
   });
   await saveCurtailmentConfig(CURTAILMENT);
 }
@@ -596,7 +596,6 @@ describe("syncControlLoop, with curtailment", () => {
     await saveControlConfig({
       enabled: true,
       strategy: "evening-target",
-      intervalSeconds: 5,
     });
 
     await syncControlLoop();
@@ -612,7 +611,6 @@ describe("syncControlLoop", () => {
     await saveControlConfig({
       enabled: true,
       strategy: "evening-target",
-      intervalSeconds: 5,
     });
 
     const status = await syncControlLoop();
@@ -684,7 +682,7 @@ describe("syncControlLoop", () => {
     expect(decisionTicks()).toBe(before);
   });
 
-  it("holds to its interval under a burst, and still acts on the last change", async () => {
+  it("holds to its rate limit under a burst, and still acts on the last change", async () => {
     await subscribe();
     await curtailing(2);
     await syncControlLoop();
@@ -742,29 +740,6 @@ describe("syncControlLoop", () => {
     const before = decisionTicks();
     await advance(30_000);
     expect(decisionTicks()).toBe(before);
-  });
-
-  it("picks up a changed interval", async () => {
-    await subscribe();
-    await curtailing(60);
-    await syncControlLoop();
-    await pendingControlTick();
-
-    // Under the old sixty-second limit this change would wait a minute.
-    await saveControlConfig({
-      enabled: false,
-      strategy: "evening-target",
-      intervalSeconds: 1,
-    });
-    await syncControlLoop();
-    await pendingControlTick();
-    clearDiagnostics();
-
-    ha.setState("sensor.grid_power", "-1500", { unit_of_measurement: "W" });
-
-    await vi.waitFor(() => expect(logged("exporting")).toBe(true), {
-      timeout: 5_000,
-    });
   });
 
   it("leaves a running loop alone when nothing about it changed", async () => {

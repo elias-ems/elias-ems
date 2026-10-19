@@ -149,7 +149,6 @@ describe("control config", () => {
     const config = {
       enabled: true,
       strategy: "highs" as const,
-      intervalSeconds: 15,
     };
 
     await saveControlConfig(config);
@@ -157,12 +156,12 @@ describe("control config", () => {
     expect(await readControlConfig()).toEqual(config);
   });
 
-  it("clamps an interval that is out of range on disk", async () => {
+  it("drops an interval an earlier version stored", async () => {
     await writeStored("control.json", { enabled: true, intervalSeconds: 0 });
 
-    expect(await readControlConfig()).toMatchObject({
+    expect(await readControlConfig()).toEqual({
+      ...DEFAULT_CONTROL_CONFIG,
       enabled: true,
-      intervalSeconds: 1,
     });
   });
 
@@ -186,14 +185,12 @@ describe("control config", () => {
       expect(config).toEqual({
         enabled: false,
         strategy: "evening-target",
-        intervalSeconds: 5,
       });
     expect(
       JSON.parse(await readFile(path.join(dataDir, "control.json"), "utf-8")),
     ).toEqual({
       enabled: false,
       strategy: "evening-target",
-      intervalSeconds: 5,
     });
     // Identical lines collapse into one entry with a repeat count, so the
     // count is what says how many times it was logged.

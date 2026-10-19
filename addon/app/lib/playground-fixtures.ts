@@ -22,6 +22,7 @@
  * `toLocaleString` in an Alpine container do not agree about separators.
  */
 import type { Battery } from "./batteries";
+import { CHARGE_LIMIT_BATTERY_ERROR } from "./charge-limit-status";
 import type { ControlConfig } from "./control";
 import type { CurtailmentConfig } from "./curtailment";
 import { CHARGER_POWER_ERROR, DEFAULT_CURTAILMENT_CONFIG } from "./curtailment";
@@ -462,7 +463,6 @@ export function playgroundFixtures(now: number) {
       control: {
         enabled: true,
         strategy: "evening-target",
-        intervalSeconds: 5,
       } satisfies ControlConfig,
       curtailment: {
         ...DEFAULT_CURTAILMENT_CONFIG,
@@ -543,7 +543,7 @@ export function playgroundFixtures(now: number) {
       control: {
         section: "control",
         recordId: null,
-        errors: { intervalSeconds: "Pick something between 1 and 3600 s." },
+        errors: { enabled: CHARGE_LIMIT_BATTERY_ERROR },
       },
       curtailment: {
         section: "curtailment",

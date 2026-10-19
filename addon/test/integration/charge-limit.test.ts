@@ -62,7 +62,6 @@ describe.each([
       JSON.stringify({
         enabled: true,
         strategy: stored,
-        intervalSeconds: 5,
       }),
     );
     stack = await startStack({
@@ -142,7 +141,6 @@ describe.each([
     const body = new URLSearchParams({
       intent: "control-save",
       strategy,
-      intervalSeconds: "5",
     });
     const saved = await fetch(`${stack.baseUrl}settings`, {
       method: "POST",

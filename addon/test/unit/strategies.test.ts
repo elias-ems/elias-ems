@@ -73,12 +73,10 @@ describe("stored strategy ids", () => {
       normalizeControlConfig({
         enabled: true,
         strategy: "charge-limit" as never,
-        intervalSeconds: 5,
       }),
     ).toEqual({
       enabled: true,
       strategy: "evening-target",
-      intervalSeconds: 5,
     });
   });
 
@@ -89,12 +87,10 @@ describe("stored strategy ids", () => {
       normalizeControlConfig({
         enabled: true,
         strategy: "net-zero-energy" as never,
-        intervalSeconds: 5,
       }),
     ).toEqual({
       enabled: false,
       strategy: "evening-target",
-      intervalSeconds: 5,
     });
   });
 
