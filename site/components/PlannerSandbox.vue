@@ -372,7 +372,11 @@ function download() {
 .planner .planner-preset button { margin: 0; width: 100%; font-weight: 600; text-align: left; }
 .planner .planner-preset button[aria-pressed="true"] { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
 .planner pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
-.planner-table { overflow-x: auto; }
+/* The tables are wider than the page, so they must scroll sideways, and a box that
+   scrolls sideways is what a sticky heading binds to. Capping it at the viewport
+   below the fixed nav keeps the headings pinned while the rows scroll inside it. */
+.planner-table { overflow: auto; max-height: calc(100vh - var(--vp-nav-height) - 2rem); }
+.planner-table thead { position: sticky; top: 0; z-index: 1; box-shadow: 0 1px 0 var(--vp-c-divider); }
 .planner-table table { display: table; width: 100%; font-size: 0.85rem; white-space: nowrap; }
 .planner-table th, .planner-table td { padding: 6px 8px; }
 .planner-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 1rem 2rem; }

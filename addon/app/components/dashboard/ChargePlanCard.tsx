@@ -318,9 +318,8 @@ function BatteryPlan({
               </p>
               {view === "table" && (
                 <div
+                  className="plan-table"
                   style={{
-                    maxHeight: "clamp(16rem, 52vh, 36rem)",
-                    overflow: "auto",
                     border: "1px solid var(--color-border)",
                     borderRadius: 4,
                   }}
@@ -358,12 +357,11 @@ function BatteryPlan({
                           <th
                             key={label}
                             style={{
-                              position: "sticky",
-                              top: 0,
-                              zIndex: 1,
                               padding: "0.5rem 0.4rem",
                               background: "var(--color-surface)",
-                              borderBottom: "1px solid var(--color-border)",
+                              // A collapsed border stays behind when the
+                              // heading sticks; a shadow travels with it.
+                              boxShadow: "inset 0 -1px 0 var(--color-border)",
                             }}
                           >
                             {label}
