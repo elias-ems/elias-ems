@@ -117,17 +117,17 @@ Newest first, because that is the end anyone opening a box wants to read.
 ### The decision feed
 
 [DecisionFeed.tsx](../../addon/app/components/dashboard/DecisionFeed.tsx), on
-**Home**, inside the strategy rail: the two loops' entries merged into one list,
-open and polling rather than collapsed. The strategies correct against the same
-grid meter within milliseconds of each other, and the pair of decisions is the
-thing worth seeing — a box each would have hidden the one relationship anyone
-comes to the page for.
+**Home**, inside the strategy rail: the acting strategies' entries merged into
+one list, open and polling rather than collapsed. Battery control and PV
+curtailment correct against the same grid meter within milliseconds of each
+other, and that pair of decisions is the thing worth seeing — a box each would
+have hidden the one relationship anyone comes to the page for.
 
-It asks the same route for two origins at once, rather than for none: an
-unfiltered feed would fold in `prices`, which says nothing about what the house
-just did and would push off the bottom the lines that do.
+It asks the same route for the three deciding origins at once, rather than for
+none: an unfiltered feed would fold in `prices`, which says nothing about what
+the house just did and would push off the bottom the lines that do.
 
-Which two is `DECISION_ORIGINS` in [diagnostics.ts](../../addon/app/lib/diagnostics.ts),
+Which three is `DECISION_ORIGINS` in [diagnostics.ts](../../addon/app/lib/diagnostics.ts),
 not a literal in either place that needs it. The home loader seeds the feed with
 that filter and the feed's own poll re-sends it a couple of seconds later, so
 two copies could disagree — and nothing would say so, since either list on its
@@ -201,7 +201,7 @@ anyone can reach should not put a developer's page at eye level.
 ## Not done yet
 
 - **Filtering or searching in the UI.** The two filters that exist are both
-  fixed in code — the decision feed's pair of origins, the Tools box's none —
+  fixed in code — the decision feed's three origins, the Tools box's none —
   and nothing lets a reader narrow the log themselves. Four origins and 300
   entries still fit in a scroll; a fifth writer, or a longer buffer, is what
   would change that.

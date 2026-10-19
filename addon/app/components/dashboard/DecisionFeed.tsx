@@ -8,8 +8,9 @@
  * boxes, each closed by default, put those on opposite sides of the page and
  * made the reader open both and interleave the timestamps by eye.
  *
- * Only the two strategy origins — `DECISION_ORIGINS`, shared with the loader
- * that seeds this feed so the first paint and the first poll cannot disagree.
+ * Only the origins that decide something — `DECISION_ORIGINS`, shared with
+ * the loader that seeds this feed so the first paint and the first poll
+ * cannot disagree.
  * Passing no filter would fold in `prices`, whose entries are parse failures
  * rather than decisions — those belong on the Tools page, which is where the
  * link at the foot goes.

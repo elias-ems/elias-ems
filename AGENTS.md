@@ -6,7 +6,7 @@ This file provides guidance to coding agents working in this repository.
 
 See [docs/project.md](docs/project.md) for what we're building and architecture decisions, [docs/architecture.md](docs/architecture.md) for repo/code structure, [docs/roadmap.md](docs/roadmap.md) for current and future goals, and [docs/routines.md](docs/routines.md) for scheduled Claude routines. Keep these up to date as the project evolves.
 
-Per-feature docs live in [docs/features/](docs/features), one file per feature: [battery-control.md](docs/features/battery-control.md), [live-readings.md](docs/features/live-readings.md), [diagnostics.md](docs/features/diagnostics.md), [dynamic-prices.md](docs/features/dynamic-prices.md), [pv-curtailment.md](docs/features/pv-curtailment.md).
+Per-feature docs live in [docs/features/](docs/features), one file per feature: [battery-control.md](docs/features/battery-control.md), [charge-limit.md](docs/features/charge-limit.md), [planning-engine.md](docs/features/planning-engine.md), [live-readings.md](docs/features/live-readings.md), [diagnostics.md](docs/features/diagnostics.md), [dynamic-prices.md](docs/features/dynamic-prices.md), [pv-curtailment.md](docs/features/pv-curtailment.md).
 
 ## Commands
 
@@ -126,7 +126,7 @@ Note that lefthook globs are matched from the **repo root** and ignore the `root
 Three workflows:
 
 - [.github/workflows/docs.yml](.github/workflows/docs.yml) — builds the site on pull requests touching `site/`, `docs/` or itself, and deploys from `main`. Runs on `ubuntu-24.04` with Node via `actions/setup-node`.
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) — three jobs covering everything else: `addon` (lint, typecheck, unit tests), `addon-integration` (build, then the integration suite), and `site` (lint, typecheck, the link-rewriting tests). Also `ubuntu-24.04` with `actions/setup-node`.
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) — four jobs covering everything else: `addon` (lint, typecheck, unit tests), `addon-integration` (build, then the integration suite), `site` (lint, typecheck, the link-rewriting tests), and `engine` (lint, typecheck, tests), the last matrixed over `ubuntu-24.04` and `ubuntu-24.04-arm` so the solver's WASM runs natively on both architectures. Also `ubuntu-24.04` with `actions/setup-node`.
 - [.github/workflows/image.yml](.github/workflows/image.yml) — builds and publishes the add-on's container image to GHCR. See [Publishing the add-on image](#publishing-the-add-on-image) below; it does not use `setup-node` at all, since nothing in it runs the app's own toolchain.
 
 **The end-to-end suite does not run in CI yet.** Its first run hung for four hours on `npx playwright install --with-deps chromium` — not failing, just never returning, so nothing would have ended it but the 6-hour default job timeout. The browser half is off until that is diagnosed; the integration suite needs no browser and so cannot hit the same wall, and `npm run test:e2e` locally still covers the ground. The steps to restore — a `~/.cache/ms-playwright` cache keyed on the installed Playwright version, the two install steps, the report upload — are in ci.yml's history at commit 9d68687. Every job now sets `timeout-minutes`, so a repeat costs minutes rather than hours.
