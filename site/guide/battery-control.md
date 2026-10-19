@@ -1,10 +1,11 @@
 # Battery control
 
 Battery control plans what the house battery should be doing over the next day
-or two — from your solar forecasts, household history and prices — and as each
-price interval starts publishes that interval as a command for your battery's
-automation to carry out, then refreshes the plan. It only commands batteries with **Steer this battery**
-and **Plan charge limits** checked, and currently supports one configured
+or two — from your solar forecasts, household history and prices. It refreshes
+the plan five minutes before each price interval ends, and as the next interval
+starts publishes it as a command for your battery's automation to carry out.
+It only commands batteries with **Steer this battery** and **Plan charge
+limits** checked, and currently supports one configured
 household battery.
 
 ## Choosing a strategy

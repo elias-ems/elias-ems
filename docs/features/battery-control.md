@@ -590,13 +590,19 @@ command, but it is not nothing. `logbook:`/`recorder:` exclusions take an
 
 Battery control runs in the **planning loop**,
 [charge-limit-loop.server.ts](../../addon/app/lib/charge-limit-loop.server.ts),
-for every registered strategy. It wakes when the current price interval ends —
-every 15 or 60 minutes, depending on the price source — and at that boundary it
-first publishes the new interval from the plan in hand, then calculates a fresh
-plan, republishing only if that plan disagrees. Applying first keeps the
-command on time: planning reads history and forecasts and may run a solver,
-which can take far longer than the moment an interval starts. A settings save
-plans at once, a failed plan releases the battery and is retried after a
+for every registered strategy. Price intervals are 15 or 60 minutes, depending
+on the price source, and the loop wakes twice per interval: `PLAN_LEAD_MS` (five
+minutes) before it ends to calculate a fresh plan, and at the boundary to
+publish the interval that has just started from that plan. Planning ahead keeps
+the command both fresh and on time: planning reads history and forecasts and may
+run a solver, so a plan made at the boundary would make the command wait for it,
+and one made at the previous boundary would be a whole interval old. The plan
+made ahead leaves the interval in force alone, so commands only change at
+boundaries; if it finishes after the boundary, it publishes the interval that
+has started instead. Planning normally takes well under a minute — a HiGHS
+solve is capped at 20 seconds — so five minutes is a wide margin, and a late
+plan costs only freshness: the boundary applies whatever plan is in hand. A
+settings save plans and publishes at once, a failed plan releases the battery and is retried after a
 minute, and a one-minute housekeeping pass in between only restores limits an
 earlier version wrote and lets go of batteries that may no longer be
 commanded. Its lifecycle — including what happens while a
@@ -696,7 +702,7 @@ concatenation.
 | `test/unit/charge-limit-config.test.ts` | the per-battery control fields: which modes were ticked, the charge-limit requirements, and a pre-event record keeping its intent but arriving unsteered |
 | `test/unit/settings-store.test.ts` | persistence round trips, and reading a hand-edited file |
 | `test/unit/battery-commands.test.ts` | the contract and the publish: a signed target becoming charge, discharge or hold, a balance command's boundaries, the full payload an automation acts on, a fresh command id each time, the deadband holding a setpoint back while a mode or boundary change always goes out — per battery, so a quiet neighbour stays quiet — a command restated when due, releases that are not holds, a strategy never releasing a battery another holds, and a failed publish not being remembered so the retry survives |
-| `test/unit/charge-limit-loop.test.ts` | the planning loop's commands: planning with the selected strategy and naming it on the command, a strategy switch as a hand-over, the current interval as a balance command with its validity, the AC output boundary only when the battery can limit discharge, no repeat on an unchanged replan, waiting for the price interval to end before planning again, applying the next interval from the plan in hand before a slow replan, preview without publishing, releasing once when disabled, un-steered or failed — and the migration restoring an earlier version's direct writes before any command, retrying, respecting a manual edit, and each direction independently |
+| `test/unit/charge-limit-loop.test.ts` | the planning loop's commands: planning with the selected strategy and naming it on the command, a strategy switch as a hand-over, the current interval as a balance command with its validity, the AC output boundary only when the battery can limit discharge, no repeat on an unchanged replan, planning five minutes before the interval ends without republishing it, applying the next interval at the boundary from that plan, a plan that outlasts the boundary publishing the interval that has started, preview without publishing, releasing once when disabled, un-steered or failed — and the migration restoring an earlier version's direct writes before any command, retrying, respecting a manual edit, and each direction independently |
 | `test/unit/control-loop.test.ts` | the shared loop's scheduling, driven by PV curtailment: starts only when enabled, ticks at once when switched on, ticks when a watched reading moves, ignores entities it doesn't use, holds its rate limit under a burst without losing the last change, keeps ticking when the house is quiet, survives an outage, names the source and age of what it read, files its lines under the right origin — and never publishes a battery command |
 | `test/unit/routes.test.ts` | the home loader's shape, entity deduplication, every settings intent, `/api/entities` offering readings only, that two batteries may not have names that make the same event while a battery keeps its own name across an edit, that a rename releases the battery under its old name while an ordinary edit publishes nothing, and that each strategy can be enabled for a steered, planned battery, that control refuses to switch on with no steerable battery or with more than one, but can always be switched off |
 | `test/integration/ingress.test.ts` | through the ingress proxy: an install upgrading with net zero energy enabled coming back switched off, with the warning in the downloaded log, and a strategy saved and selected |

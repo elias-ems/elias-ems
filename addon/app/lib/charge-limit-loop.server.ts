@@ -1,7 +1,7 @@
 /**
- * Battery control's planning loop: at every price interval boundary, publish
- * the interval that has just started from the plan in hand, then ask the
- * selected strategy from the registry (`strategies/`) for a fresh plan. Every
+ * Battery control's planning loop: shortly before each price interval ends, ask
+ * the selected strategy from the registry (`strategies/`) for a fresh plan, and
+ * at the boundary publish the interval that has just started from it. Every
  * registered strategy runs here, which is what makes switching between them a
  * hand-over between two plans rather than between two loops.
  *
@@ -13,10 +13,11 @@
  * left of the journal is a one-way migration; see
  * `charge-limit-legacy.server.ts`.
  *
- * Applying before planning is what keeps a command on time: planning reads
- * history and forecasts and may run a solver, which can take far longer than
- * the moment an interval starts. The fresh plan then republishes the current
- * interval only if it disagrees with what was just applied.
+ * Planning `PLAN_LEAD_MS` ahead is what keeps a command both fresh and on time:
+ * planning reads history and forecasts and may run a solver, so a plan made at
+ * the boundary would make the command wait for it, and one made at the
+ * previous boundary would be a whole interval old. A plan that is late still
+ * costs nothing but freshness — the boundary applies whatever plan is in hand.
  */
 import { type Battery, batterySlug, steerableBy } from "./batteries";
 import { listBatteries } from "./batteries.server";
@@ -51,8 +52,10 @@ let started = false;
 let running = false;
 /** Set when settings change during a run, so the next one starts at once. */
 let rerun = false;
-/** When the next plan is due: the end of the current price interval. */
+/** When the next plan is due: `PLAN_LEAD_MS` before an interval ends. */
 let nextPlan = 0;
+/** When the next interval starts and its command is due, from the plan in hand. */
+let nextApply = 0;
 /** The plan each battery is currently commanded from, while it may publish. */
 const applied = new Map<
   string,
@@ -74,6 +77,13 @@ let planning: AbortController | null = null;
 const HOUSEKEEPING_MS = 60_000;
 /** How soon a plan that failed is tried again. */
 const RETRY_MS = 60_000;
+/**
+ * How long before an interval ends the plan for the next one is made. Planning
+ * normally takes well under a minute — a HiGHS solve is capped at 20 seconds
+ * and history is cached after the first read — so this leaves a wide margin
+ * while costing only a few minutes of state-of-charge drift.
+ */
+export const PLAN_LEAD_MS = 5 * 60_000;
 /**
  * How long past its interval a command stays valid. The next interval's
  * command goes out at the boundary, but a run still holding the lock can delay
@@ -111,6 +121,7 @@ export function resetChargeLimitLoop() {
   statuses.clear();
   applied.clear();
   nextPlan = 0;
+  nextApply = 0;
   legacyPending = new Set();
 }
 
@@ -238,16 +249,37 @@ async function publishInterval(
   return publish;
 }
 
+/** The interval of a plan that contains `at`, if the plan reaches that far. */
+const intervalAt = (points: ChargePlan["points"], at: number) =>
+  points.findIndex((p) => p.start <= at && at < p.end);
+
 /**
- * Publish the interval that contains `now` from the plan already in hand. A
- * plan made under another strategy, or one that has run out, says nothing;
- * the fresh plan that follows covers it.
+ * When the plan after this one is due: `PLAN_LEAD_MS` before the end of the
+ * interval in force, or of the one after it when that moment has passed. A plan
+ * with nothing after the interval in force plans again at its end.
  */
-async function applyPlanned(b: Battery, strategy: StrategyId, now: number) {
+function planDue(points: ChargePlan["points"], index: number, at: number) {
+  const lead = (i: number) => points[i].end - PLAN_LEAD_MS;
+  if (lead(index) > at) return lead(index);
+  return index + 1 < points.length
+    ? Math.max(lead(index + 1), points[index].end)
+    : points[index].end;
+}
+
+/**
+ * Publish the interval that contains `now` from the plan already in hand, and
+ * return when it ends. Returns null when there is no plan under this strategy,
+ * and `now` when the plan has run out — both mean a plan is needed instead.
+ */
+async function applyPlanned(
+  b: Battery,
+  strategy: StrategyId,
+  now: number,
+): Promise<number | null> {
   const plan = applied.get(b.id);
-  if (plan?.strategy !== strategy) return;
-  const index = plan.points.findIndex((p) => p.start <= now && now < p.end);
-  if (index < 0) return;
+  if (plan?.strategy !== strategy) return null;
+  const index = intervalAt(plan.points, now);
+  if (index < 0) return now;
   const interval = plan.points[index];
   const publish = await publishInterval(
     b,
@@ -267,6 +299,7 @@ async function applyPlanned(b: Battery, strategy: StrategyId, now: number) {
       publish.status === "failed" ? "warn" : "info",
       `${b.title}: applied the planned interval.\n${sent}`,
     );
+  return interval.end;
 }
 
 export async function chargeLimitTick(now = Date.now()) {
@@ -298,19 +331,35 @@ export async function chargeLimitTick(now = Date.now()) {
   );
 
   const planned = batteries.filter((b) => b.chargeLimitPlanning);
-  if (!planned.length || now < nextPlan) return;
+  if (!planned.length) return;
+
+  // A new price interval has started: apply what the plan in hand says for it.
+  // The plan was made ahead of the boundary, so nothing here waits on one.
+  if (now >= nextApply) {
+    nextApply = Number.POSITIVE_INFINITY;
+    for (const b of planned) {
+      if (!active || !steerableBy(b, control.strategy) || legacyBlocks(b.id))
+        continue;
+      const end = await applyPlanned(b, control.strategy, now);
+      if (end === null) continue;
+      // A plan that has run out is replaced at once rather than at its lead.
+      if (end <= now) nextPlan = 0;
+      else nextApply = Math.min(nextApply, end);
+    }
+  }
+
+  if (now < nextPlan) return;
   // Until a plan says when its interval ends; a failure leaves it here.
   nextPlan = now + RETRY_MS;
 
-  // The price interval has changed: apply what the plan in hand says for it
-  // before planning again, so the command does not wait on the planner.
   for (const b of planned) {
-    if (!active || !steerableBy(b, control.strategy) || legacyBlocks(b.id))
-      continue;
-    await applyPlanned(b, control.strategy, now);
-  }
-
-  for (const b of planned) {
+    // A plan made ahead of the boundary leaves the interval in force alone: it
+    // was applied from the previous plan, and the new one takes over when the
+    // next interval starts. Without a plan in hand — at boot, after a settings
+    // change or a failure — the current interval is published at once.
+    const ahead =
+      applied.get(b.id)?.strategy === control.strategy &&
+      intervalAt(applied.get(b.id)?.points ?? [], now) >= 0;
     const status = empty(b, control.strategy);
     // What was just applied stays on the card while the new plan is made.
     standing(status, b.id);
@@ -341,9 +390,23 @@ export async function chargeLimitTick(now = Date.now()) {
       );
       blocked = [blocked, result.controlBlocker].filter(Boolean).join(" ");
       const mayPublish = active && !blocked;
-      const current = result.plan.points[0];
-      const command = result.commands[0];
-      nextPlan = current.end;
+      // Planning can outlast the interval it started in; what matters is the
+      // interval in force once it is done, which `now` alone cannot say.
+      const at = Math.max(now, Date.now());
+      const index = intervalAt(result.plan.points, at);
+      if (index < 0)
+        throw new Error(
+          "Plan expired during calculation; waiting for the next update.",
+        );
+      const current = result.plan.points[index];
+      const command = result.commands[index];
+      const holdCurrent = ahead && index === 0;
+      // What the log describes: the interval this plan will put in force.
+      const shownIndex =
+        holdCurrent && index + 1 < result.plan.points.length ? 1 : index;
+      const shown = result.commands[shownIndex];
+      nextPlan = planDue(result.plan.points, index, at);
+      nextApply = current.end;
       if (mayPublish)
         applied.set(b.id, {
           strategy: control.strategy,
@@ -391,12 +454,7 @@ export async function chargeLimitTick(now = Date.now()) {
       let sent: string | null = null;
       if (!mayPublish) {
         await releaseHeld([b], "disabled");
-      } else {
-        // Do not publish a plan whose current interval ended while inputs were read.
-        if (Date.now() >= current.end)
-          throw new Error(
-            "Plan expired during calculation; waiting for the next update.",
-          );
+      } else if (!holdCurrent) {
         const publish = await publishInterval(
           b,
           control.strategy,
@@ -416,7 +474,7 @@ export async function chargeLimitTick(now = Date.now()) {
         "charge-limit",
         "info",
         [
-          `${b.title}: ${strategyLabel(control.strategy)} ${status.mode}, maximum charge ${command.chargeLimitW} W${b.dischargeLimitSupported ? `, maximum AC output ${command.dischargeLimitW} W` : ""}. ${status.message}`,
+          `${b.title}: ${strategyLabel(control.strategy)} ${status.mode}${shownIndex === index ? "" : `, from ${status.times[String(result.plan.points[shownIndex].start)]}`}, maximum charge ${shown.chargeLimitW} W${b.dischargeLimitSupported ? `, maximum AC output ${shown.dischargeLimitW} W` : ""}. ${status.message}`,
           sent,
         ]
           .filter(Boolean)
@@ -461,17 +519,18 @@ function wake() {
 }
 
 /**
- * Until the next plan is due, or the next housekeeping pass if sooner. A due
- * time already past means nothing could be planned — no battery to plan, or a
- * run that failed before planning — and waits for housekeeping rather than
- * spinning.
+ * Until the next plan or the next interval is due, or the next housekeeping
+ * pass if sooner. A due time already past means nothing could be planned — no
+ * battery to plan, or a run that failed before planning — and waits for
+ * housekeeping rather than spinning.
  */
 function schedule() {
-  const untilPlan = nextPlan - Date.now();
+  const now = Date.now();
+  const due = [nextPlan, nextApply].filter((t) => t > now);
   const delay = rerun
     ? 0
-    : untilPlan > 0
-      ? Math.min(untilPlan, HOUSEKEEPING_MS)
+    : due.length
+      ? Math.min(Math.min(...due) - now, HOUSEKEEPING_MS)
       : HOUSEKEEPING_MS;
   rerun = false;
   timer = setTimeout(run, delay);
