@@ -389,24 +389,34 @@ function BatteryPlan({
                       of each interval. Forecast solar is before curtailment;
                       generated solar is what remains after PV limits. Both
                       strategies plan for nominal solar and the configured
-                      reduced-solar scenario; this table shows nominal.
+                      reduced-solar scenario; this table shows nominal. Prices
+                      include the configured tariff formulas; * marks estimated
+                      prices. Positive battery power means charging; negative
+                      means discharging. Balance mode has no requested setpoint
+                      (—) and operates within the charge / discharge limits.
+                      Native means no planned discharge limit. Interval costs
+                      include battery wear.
                     </caption>
                     <thead>
                       <tr>
                         {[
                           "Time",
-                          "Charge ceiling W",
-                          "AC output ceiling W",
-                          "Discharge W",
-                          "Charge W",
+                          `Consumption price ${status.currency}/kWh`,
+                          `Production price ${status.currency}/kWh`,
+                          "Load W",
                           "Forecast solar W",
                           "Generated solar W",
                           "Curtailed W",
-                          "Load W",
-                          "SoC %",
+                          "Mode",
+                          "Limits W (charge / discharge)",
+                          "Requested setpoint W",
+                          "Predicted battery W",
+                          "End SoC %",
+                          `Cost ${status.currency}`,
                         ].map((label) => (
                           <th
                             key={label}
+                            scope="col"
                             style={{
                               padding: "0.5rem 0.4rem",
                               background: "var(--color-surface)",
@@ -429,36 +439,40 @@ function BatteryPlan({
                             {stamp(p.start)}
                           </td>
                           {[
-                            p.limitW,
-                            p.dischargeLimitW ?? null,
-                            p.dischargeW,
-                            p.chargeW,
-                            p.solarW,
-                            p.generatedSolarW ?? p.solarW,
-                            p.curtailedW ?? 0,
-                            p.loadW,
-                            p.soc,
-                          ].map((value, i) => (
+                            [
+                              "buy",
+                              `${p.buy.toFixed(4)}${p.estimatedPrice ? " *" : ""}`,
+                            ],
+                            [
+                              "sell",
+                              `${p.sell.toFixed(4)}${p.estimatedPrice ? " *" : ""}`,
+                            ],
+                            ["load", Math.round(p.loadW)],
+                            ["solar", Math.round(p.solarW)],
+                            [
+                              "generated",
+                              Math.round(p.generatedSolarW ?? p.solarW),
+                            ],
+                            ["curtailed", Math.round(p.curtailedW ?? 0)],
+                            ["mode", "balance"],
+                            [
+                              "limits",
+                              `${Math.round(p.limitW)} / ${p.dischargeLimitW === undefined ? "Native" : Math.round(p.dischargeLimitW)}`,
+                            ],
+                            ["setpoint", "—"],
+                            ["battery", Math.round(p.chargeW - p.dischargeW)],
+                            ["soc", p.soc.toFixed(1)],
+                            ["cost", p.cost?.toFixed(3) ?? "—"],
+                          ].map(([key, value]) => (
                             <td
-                              key={
-                                [
-                                  "ceiling",
-                                  "output-ceiling",
-                                  "discharge",
-                                  "charge",
-                                  "solar",
-                                  "generated",
-                                  "curtailed",
-                                  "load",
-                                  "soc",
-                                ][i]
-                              }
+                              key={key}
                               style={{
                                 padding: "0.4rem",
+                                whiteSpace: "nowrap",
                                 borderTop: "1px solid var(--color-border)",
                               }}
                             >
-                              {value === null ? "Native" : Math.round(value)}
+                              {value}
                             </td>
                           ))}
                         </tr>

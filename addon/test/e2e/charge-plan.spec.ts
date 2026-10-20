@@ -119,6 +119,53 @@ for (const modeled of [false, true]) {
         await expect(
           page.getByRole("columnheader", { name: "Curtailed W", exact: true }),
         ).toBeVisible();
+        const scheduleResponse = await page.request.get(
+          `${baseUrl}api/charge-limits`,
+        );
+        const schedule = (await scheduleResponse.json()).batteries[0];
+        for (const name of [
+          `Consumption price ${schedule.currency}/kWh`,
+          `Production price ${schedule.currency}/kWh`,
+          "Mode",
+          "Limits W (charge / discharge)",
+          "Requested setpoint W",
+          "Predicted battery W",
+          "End SoC %",
+          `Cost ${schedule.currency}`,
+        ]) {
+          await expect(
+            page.getByRole("columnheader", { name, exact: true }),
+          ).toBeVisible();
+        }
+        const point = schedule.plan.points[0];
+        const cells = page
+          .getByRole("table")
+          .getByRole("row")
+          .nth(1)
+          .getByRole("cell");
+        await expect(cells.nth(1)).toHaveText(
+          `${point.buy.toFixed(4)}${point.estimatedPrice ? " *" : ""}`,
+        );
+        await expect(cells.nth(2)).toHaveText(
+          `${point.sell.toFixed(4)}${point.estimatedPrice ? " *" : ""}`,
+        );
+        await expect(cells.nth(7)).toHaveText("balance");
+        await expect(cells.nth(8)).toHaveText(
+          `${Math.round(point.limitW)} / ${Math.round(point.dischargeLimitW)}`,
+        );
+        await expect(cells.nth(9)).toHaveText("—");
+        await expect(cells.nth(10)).toHaveText(
+          String(Math.round(point.chargeW - point.dischargeW)),
+        );
+        await expect(cells.nth(11)).toHaveText(point.soc.toFixed(1));
+        await expect(cells.nth(12)).toHaveText(point.cost.toFixed(3));
+        await page.setViewportSize({ width: 390, height: 844 });
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth > innerWidth,
+          ),
+        ).toBe(false);
+        await page.setViewportSize({ width: 1280, height: 720 });
         await expect(
           page.getByRole("img", {
             name: "Charge ceiling and Expected charging over time, W",
