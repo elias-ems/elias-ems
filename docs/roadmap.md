@@ -53,12 +53,14 @@
   [features/pv-curtailment.md](features/pv-curtailment.md). While a kWh put on
   the grid earns less than the configured threshold, each curtailable array's
   generation limit goes out as an `elias_ems_<array>_pv_limit` event for an
-  automation to carry out. It shares the control loop and one snapshot per tick
-  with battery control, which is what gives the battery first refusal on a
-  surplus — and, since a battery **discharging** hides the shortfall the
-  feedback law looks for rather than cancelling out of it the way a charging one
-  does, what stops the two features holding each other with the arrays pinned
-  and the battery emptying to cover them. What happens in the marginal band
+  automation to carry out. It is what the shared control loop runs now that
+  battery control plans in its own, and each tick reads the meter, the arrays,
+  the batteries and the price in one snapshot. A battery that is *charging*
+  cancels out of the feedback law, which is what gives the battery first
+  refusal on a surplus — and, since a **discharging** one hides the shortfall
+  that law looks for rather than cancelling out of it, counting it back in is
+  what stops the two features holding each other with the arrays pinned and the
+  battery emptying to cover them. What happens in the marginal band
   *above* the threshold is now a choice of three strategies — release everything,
   cap each inverter, or allow a price-graded share of export — see
   [Strategies](features/pv-curtailment.md#strategies). How hard an array is

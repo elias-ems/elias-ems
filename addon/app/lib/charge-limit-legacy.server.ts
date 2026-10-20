@@ -13,11 +13,9 @@
  * outstanding gets no command until its limits are back — two controllers
  * steering one battery is the failure the migration exists to avoid.
  */
-import fs from "node:fs/promises";
-import path from "node:path";
 import { numericState } from "./charge-planner.server";
 import { fetchHaState, setHaChargeLimit } from "./ha.server";
-import { readJson } from "./store.server";
+import { readJson, writeJson } from "./store.server";
 
 type Lease = {
   batteryId: string;
@@ -56,16 +54,16 @@ async function leases(): Promise<Lease[]> {
   return records;
 }
 
+/**
+ * Through `store.server.ts` like every other data file. This used to resolve the
+ * data directory and rename a `.tmp` over the target itself, from before
+ * `writeJson` was atomic; keeping that copy now would mean a second place where
+ * the `DATA_DIR` fallback can drift, and a weaker write — one fixed `.tmp` name
+ * two concurrent writes can rename over each other, and nothing clearing it
+ * when the write throws.
+ */
 async function saveLeases(value: Lease[]) {
-  const directory =
-    process.env.DATA_DIR ||
-    (process.env.NODE_ENV === "production"
-      ? "/data"
-      : path.join(process.cwd(), "data"));
-  await fs.mkdir(directory, { recursive: true });
-  const file = path.join(directory, FILE);
-  await fs.writeFile(`${file}.tmp`, JSON.stringify(value));
-  await fs.rename(`${file}.tmp`, file);
+  await writeJson(FILE, value);
 }
 
 /**

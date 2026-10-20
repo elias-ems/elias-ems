@@ -751,21 +751,31 @@ one simply stops hearing anything.
 
 ## Where it runs
 
-Curtailment shares [the control
-loop](../../addon/app/lib/control-loop.server.ts) with battery control rather
-than having one of its own, and shares **one snapshot per tick**. Both features
-correct against the same grid meter, and two independent reads would let the two
-decisions describe different instants — the same argument that makes the loop
-read its stored configuration once per tick rather than once per concern.
+Curtailment runs in [the control
+loop](../../addon/app/lib/control-loop.server.ts), and is the only feature left
+in it: battery control plans in
+[charge-limit-loop.server.ts](../../addon/app/lib/charge-limit-loop.server.ts)
+on the price intervals, so this loop starts and stops on curtailment's own
+setting and never publishes a battery command. The one battery concern still
+here is the shutdown release, which lets go of every steered battery whichever
+loop was steering it.
 
-The loop runs while *either* feature is enabled, and each tick gates its own
-halves on what is stored, so switching one on or off takes effect on the next
-tick rather than needing a restart. Curtailment without battery control is an
-ordinary configuration — a house with panels and no battery — and so is the
-reverse. Ticks are at least five seconds apart (`minTickMs`, fixed rather than
-a setting), which is a ceiling on how often changes can produce a tick rather
-than the thing producing them; curtailment's own pacing comes from
-`settleSeconds`.
+Each tick reads **one snapshot** — the meter, the arrays, the batteries and the
+price together, and the stored configuration once rather than once per concern
+— because two independent reads would let the decisions inside one tick
+describe different instants. The coordination with battery control is physical
+rather than scheduled: curtailment corrects against a meter that already has
+whatever the battery is doing in it, which is the whole of why [a charging
+battery](#the-battery-free-when-it-charges-not-when-it-discharges) needs no
+arrangement between the two features and a discharging one needs the term
+below.
+
+Curtailment without battery control is an ordinary configuration — a house with
+panels and no battery — and so is the reverse, which is now simply two loops
+that start independently. Ticks are at least five seconds apart (`minTickMs`,
+fixed rather than a setting), which is a ceiling on how often changes can
+produce a tick rather than the thing producing them; curtailment's own pacing
+comes from `settleSeconds`.
 
 Three entities join the watched set when curtailment is on: every array's power
 sensor, **every battery's power sensor**, and **the price entity**. The price

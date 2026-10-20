@@ -440,7 +440,7 @@ export const PRODUCTION_CAPABILITIES: Capabilities = {
   batteryExport: false,
 };
 
-/** Solver budget per plan; the loop replans every five minutes. */
+/** Solver budget per plan; the loop starts one five minutes before it is due. */
 export const PRODUCTION_SOLVE_SECONDS = 20;
 
 /** The strategy-neutral snapshot a plan is made from. */
