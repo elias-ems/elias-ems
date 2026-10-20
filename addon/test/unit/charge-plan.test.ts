@@ -37,6 +37,39 @@ const slot = (
 });
 
 describe("native self-consumption charging plan", () => {
+  it("reports interval import, export and wear costs that sum to the plan", async () => {
+    const slots = [
+      slot(0, 2000, 0, 0.1),
+      slot(1, 0, 1500, 0.1),
+      slot(2, 2000, 0, -0.1),
+    ];
+    const battery = { ...model, wearPerKwh: 0.02 };
+    const settings = {
+      deadline: new Date(slots[2].end).toISOString(),
+      targetSoc: 100,
+      solarHaircut: 0,
+      switchCost: 0,
+      passes: 1,
+    };
+    const simulated = replay(
+      { slots, model: battery, terminalReserveKwh: 0 },
+      [1000, 1000, 1000],
+      settings,
+    );
+    // One kWh exported plus one charged; 0.5 kWh imported; then paid export.
+    for (const [i, expected] of [-0.08, 0.2, 0.12].entries()) {
+      expect(simulated.points[i].cost).toBeCloseTo(expected, 10);
+    }
+    for (const plan of [
+      await optimizeCharge(slots, battery, 0),
+      await evening({ slots, model: battery, terminalReserveKwh: 0 }, settings),
+    ]) {
+      expect(
+        plan.points.reduce((sum, p) => sum + (p.cost ?? NaN), 0),
+      ).toBeCloseTo(plan.cost, 10);
+    }
+  });
+
   it.each([0.1, 0, -0.1])(
     "serves known evening demand instead of holding a full terminal reserve (lowest price %s)",
     async (lowestPrice) => {

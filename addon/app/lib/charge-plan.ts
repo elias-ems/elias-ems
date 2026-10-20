@@ -59,6 +59,8 @@ export type ChargePlanPoint = ChargeInterval & {
   dischargeW: number;
   soc: number;
   baselineSoc: number;
+  /** Interval energy cost including battery wear, in the configured currency. */
+  cost?: number;
 };
 export type ChargePlan = {
   points: ChargePlanPoint[];
@@ -311,6 +313,7 @@ export async function optimizeCharge(
       generatedSolarW: next.solarW,
       curtailedW: next.curtailedW,
       limitW: selected,
+      cost: next.cost,
       chargeW: next.chargeW,
       dischargeW: next.dischargeW,
       soc: (energy / m.capacityKwh) * 100,
@@ -334,6 +337,7 @@ export async function optimizeCharge(
       point.limitW = limits[0];
       point.generatedSolarW = next.solarW;
       point.curtailedW = next.curtailedW;
+      point.cost = next.cost;
       point.chargeW = next.chargeW;
       point.dischargeW = next.dischargeW;
       point.soc = point.baselineSoc;

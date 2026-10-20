@@ -221,8 +221,14 @@ for forecast household demand, generated solar and expected battery charging.
 Selecting an interval or playing the timeline updates the diagram's solar,
 battery, home and calculated grid power. The grid balance includes expected
 battery discharge; it is a modeled value, not a live meter reading.
-The schedule includes both ceilings, expected discharge, household demand and separates forecast
-solar, generated solar and curtailed power. Cost difference is modeled over published prices, not
+The schedule mirrors the planner sandbox: consumption and production tariffs
+(to four decimals, marking estimated prices), household demand, forecast solar,
+generated solar and curtailed power, mode, charge / discharge limits together,
+requested setpoint, signed predicted battery power, end-of-interval SoC and
+interval cost including battery wear (to three decimals). Production plans use
+`balance` mode with no requested setpoint; positive predicted battery power is
+charging and negative is discharging. An uncontrolled discharge limit is shown
+as Native. Cost difference is modeled over published prices, not
 measured savings; plans may end with different stored energy. Forecast source
 count, coverage, history sample count and solar margin make the assumptions
 visible.

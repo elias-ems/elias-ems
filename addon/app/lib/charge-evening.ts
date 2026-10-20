@@ -76,6 +76,7 @@ export function replay(
       curtailedW: next.curtailedW,
       limitW: limits[i],
       ...(dischargeLimits ? { dischargeLimitW: dischargeLimits[i] } : {}),
+      cost: next.cost,
       chargeW: next.chargeW,
       dischargeW: next.dischargeW,
       soc: (energy / data.model.capacityKwh) * 100,
