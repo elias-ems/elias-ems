@@ -1,50 +1,56 @@
 /**
- * Today's production price, interval by interval, with the curtailment
- * threshold drawn across it.
+ * Day-ahead electricity prices (production, consumption, and market wholesale),
+ * interval by interval, with the curtailment threshold drawn across it.
  *
- * The threshold line is the point of the chart. Everything below it is an hour
- * where putting a kWh on the grid costs money, which is exactly when curtailment
- * holds the arrays back — so the shaded band is not decoration, it is the rule
- * the strategy underneath is following, drawn.
- *
- * Plotted in SVG with no library: it is two dozen rectangles and five labels,
- * and a charting dependency would be a build-size and upgrade cost for that.
+ * Plotted in SVG with no charting dependency. Stepped lines reflect the
+ * piecewise-constant interval pricing, allowing all three series to be compared
+ * on a single shared time and price axis.
  *
  * Pure. Given the same props it renders the same markup on the server and in
- * the browser, which is what keeps hydration quiet — the numbers arrive already
- * bucketed and already expressed as minutes past local midnight, so nothing
- * here asks what time it is or where the reader lives.
+ * the browser, which keeps hydration quiet — numbers arrive pre-bucketed in
+ * minutes past local midnight.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { PriceCurvePoint } from "../../lib/dashboard";
 import { captionStyle } from "./chrome";
 
 const MINUTES_PER_DAY = 1440;
 
-export type ChartPricePoint = {
-  startMinutes: number;
-  endMinutes: number;
-  pricePerKwh: number;
+export type PriceSeriesId = "production" | "consumption" | "market";
+export type ChartPricePoint = PriceCurvePoint;
+
+export const SERIES_META: Record<
+  PriceSeriesId,
+  { label: string; color: string; dashed?: boolean }
+> = {
+  production: {
+    label: "Production",
+    color: "var(--color-export)",
+  },
+  consumption: {
+    label: "Consumption",
+    color: "var(--color-focus)",
+  },
+  market: {
+    label: "Market",
+    color: "var(--color-chart-bar)",
+    dashed: true,
+  },
 };
 
 /**
  * The plot geometry, in user units.
  *
- * Two of them rather than one scaled down, because an SVG scales its labels
- * along with its plot: the wide chart rendered into a phone-width column comes
- * out at half size, which puts a 10px axis label at five pixels tall. The
- * compact one draws a narrower plot so it renders at close to 1:1 in that
- * space, and thins the hour labels out to match the room they then have.
- *
- * `w`/`h` are the plot area; the viewBox adds the gutters around it.
+ * Two geometries rather than one scaled down: the wide chart scaled into a phone
+ * width comes out at half size, which renders a 10px label at 5px. The compact one
+ * draws a narrower plot so labels stay near 1:1 and thins out hour marks.
  */
 type Geometry = {
   w: number;
   h: number;
-  /** Room for the y labels on the left, and the hour labels underneath. */
   padLeft: number;
   padTop: number;
   padBottom: number;
-  /** Which hours the axis names. */
   hours: number[];
   font: number;
   nowChip: number;
@@ -61,29 +67,11 @@ const WIDE: Geometry = {
   nowChip: 48,
 };
 
-/**
- * How wide the plot is allowed to get, in user units — which are CSS pixels,
- * because the chart is drawn at whatever width it is given rather than scaled
- * into it (see `useMeasuredWidth`).
- *
- * The floor is where the wide plot stops being readable and the compact one
- * takes over anyway. The ceiling is a guard rather than a target: past it the
- * chart goes back to being scaled up, which on a panel that wide is a fraction
- * of a percent and much better than the alternative — a hard cap leaves the
- * card two thirds chart and one third nothing.
- */
 const MIN_WIDE = 480;
 const MAX_WIDE = 2000;
-
-/** Once there is room, the axis names every second hour instead of every third. */
 const DENSE_HOURS = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24];
-
-/** The gutter to the right of the plot. */
 const PAD_RIGHT = 12;
 
-/**
- * The wide plot, redrawn for the width it actually has.
- */
 function wideGeometry(width: number | null): Geometry {
   if (width === null) return WIDE;
 
@@ -97,13 +85,6 @@ function wideGeometry(width: number | null): Geometry {
   };
 }
 
-/**
- * The element's own width, once there is a browser to ask.
- *
- * `null` until then — on the server, and on the client's first render, which
- * is what keeps hydration quiet: both produce the default geometry, and the
- * measured one only arrives in an effect afterwards.
- */
 function useMeasuredWidth(ref: React.RefObject<HTMLDivElement | null>) {
   const [width, setWidth] = useState<number | null>(null);
 
@@ -112,8 +93,6 @@ function useMeasuredWidth(ref: React.RefObject<HTMLDivElement | null>) {
     if (!element) return undefined;
 
     const observer = new ResizeObserver(([entry]) => {
-      // Rounded, so a fractional layout width does not rewrite the whole
-      // viewBox on every scrollbar-sized reflow.
       setWidth(Math.round(entry.contentRect.width));
     });
 
@@ -124,18 +103,10 @@ function useMeasuredWidth(ref: React.RefObject<HTMLDivElement | null>) {
   return width;
 }
 
-/**
- * Sized so that the whole viewBox — 322 units — lands at roughly the 300 css px
- * a phone card has to spare, which puts this chart at about 1:1 and its labels
- * at their nominal size. The gutter is 40 rather than 38 because an 11-unit
- * font needs the extra two for `-0.05`.
- */
 const COMPACT: Geometry = {
   w: 270,
   h: 130,
   padLeft: 40,
-  // The top gridline's label is drawn against this: its ascender rises about
-  // one em above the baseline, so the gutter has to clear the font size.
   padTop: 9,
   padBottom: 24,
   hours: [0, 6, 12, 18, 24],
@@ -145,53 +116,108 @@ const COMPACT: Geometry = {
 
 export default function PriceChart({
   curve,
+  visibleSeries = { production: true, consumption: true, market: true },
   nowMinutes,
   thresholdPerKwh,
   currency,
-  priceLabel,
   dayLabel,
   compact = false,
 }: {
-  curve: ChartPricePoint[];
+  curve: PriceCurvePoint[];
+  visibleSeries?: Record<PriceSeriesId, boolean>;
   nowMinutes: number | null;
-  /** Curtail below this. Omitted for views unrelated to curtailment. */
+  /** Curtail below this. Highlighted when production is visible. */
   thresholdPerKwh: number | null;
   currency: string;
-  priceLabel: string;
   dayLabel: "today" | "tomorrow";
-  /** The narrower plot, for a column a phone can spare. */
   compact?: boolean;
 }) {
-  // Both hooks run before the empty-curve exit below, as they must: a
-  // component cannot call fewer of them on one render than on another.
   const box = useRef<HTMLDivElement>(null);
   const measured = useMeasuredWidth(box);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   const stats = useMemo(() => {
-    if (curve.length === 0) return null;
-    let minPoint = curve[0];
-    let maxPoint = curve[0];
-    let sum = 0;
-    for (const p of curve) {
-      if (p.pricePerKwh < minPoint.pricePerKwh) minPoint = p;
-      if (p.pricePerKwh > maxPoint.pricePerKwh) maxPoint = p;
-      sum += p.pricePerKwh;
-    }
-    return {
-      minPoint,
-      maxPoint,
-      avg: sum / curve.length,
+    if (curve.length === 0) return [];
+    const result: Array<{
+      id: PriceSeriesId;
+      label: string;
+      color: string;
+      min: number;
+      max: number;
+      avg: number;
+    }> = [];
+
+    const compute = (
+      id: PriceSeriesId,
+      label: string,
+      color: string,
+      getValue: (p: PriceCurvePoint) => number | null,
+    ) => {
+      const vals: number[] = [];
+      for (const p of curve) {
+        const v = getValue(p);
+        if (v !== null) vals.push(v);
+      }
+      if (vals.length === 0) return;
+      const min = Math.min(...vals);
+      const max = Math.max(...vals);
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      result.push({ id, label, color, min, max, avg });
     };
-  }, [curve]);
+
+    if (visibleSeries.production) {
+      compute(
+        "production",
+        SERIES_META.production.label,
+        SERIES_META.production.color,
+        (p) => p.productionPerKwh,
+      );
+    }
+    if (visibleSeries.consumption) {
+      compute(
+        "consumption",
+        SERIES_META.consumption.label,
+        SERIES_META.consumption.color,
+        (p) => p.consumptionPerKwh,
+      );
+    }
+    if (visibleSeries.market) {
+      compute(
+        "market",
+        SERIES_META.market.label,
+        SERIES_META.market.color,
+        (p) => p.marketPerKwh,
+      );
+    }
+
+    return result;
+  }, [curve, visibleSeries]);
 
   if (curve.length === 0) return null;
 
   const g = compact ? COMPACT : wideGeometry(measured);
-  const values = curve.map((point) => point.pricePerKwh);
-  const baseline = thresholdPerKwh ?? 0;
-  const scale = buildScale(values, baseline, g.h);
-  const baselineY = scale.y(baseline);
+
+  // Collect values from all currently active series to compute scale domain
+  const activeValues: number[] = [];
+  if (visibleSeries.production) {
+    for (const p of curve) {
+      if (p.productionPerKwh !== null) activeValues.push(p.productionPerKwh);
+    }
+  }
+  if (visibleSeries.consumption) {
+    for (const p of curve) {
+      if (p.consumptionPerKwh !== null) activeValues.push(p.consumptionPerKwh);
+    }
+  }
+  if (visibleSeries.market) {
+    for (const p of curve) {
+      if (p.marketPerKwh !== null) activeValues.push(p.marketPerKwh);
+    }
+  }
+
+  const activeThreshold = visibleSeries.production ? thresholdPerKwh : null;
+  const scale = buildScale(activeValues, activeThreshold, g.h);
+  const baselineY = activeThreshold !== null ? scale.y(activeThreshold) : null;
   const nowX =
     nowMinutes === null ? null : (nowMinutes / MINUTES_PER_DAY) * g.w;
   const halfChip = g.nowChip / 2;
@@ -213,23 +239,66 @@ export default function PriceChart({
   const hoverX = hovered
     ? ((hovered.startMinutes + hovered.endMinutes) / 2 / MINUTES_PER_DAY) * g.w
     : null;
+  const hoveredSlotX = hovered
+    ? (hovered.startMinutes / MINUTES_PER_DAY) * g.w
+    : null;
+  const hoveredSlotW = hovered
+    ? ((hovered.endMinutes - hovered.startMinutes) / MINUTES_PER_DAY) * g.w
+    : null;
 
-  const tooltipWidth = compact ? 130 : 155;
-  const tooltipHeight = 42;
+  // Prepare inspection details for the hovered interval
+  const activeTooltipRows: Array<{
+    id: PriceSeriesId;
+    label: string;
+    color: string;
+    value: number;
+    isBelowThreshold?: boolean;
+  }> = [];
+
+  if (visibleSeries.consumption && hovered?.consumptionPerKwh != null) {
+    activeTooltipRows.push({
+      id: "consumption",
+      label: "Consumption",
+      color: SERIES_META.consumption.color,
+      value: hovered.consumptionPerKwh,
+    });
+  }
+  if (visibleSeries.market && hovered?.marketPerKwh != null) {
+    activeTooltipRows.push({
+      id: "market",
+      label: "Market",
+      color: SERIES_META.market.color,
+      value: hovered.marketPerKwh,
+    });
+  }
+  if (visibleSeries.production && hovered?.productionPerKwh != null) {
+    const isBelow =
+      activeThreshold !== null && hovered.productionPerKwh < activeThreshold;
+    activeTooltipRows.push({
+      id: "production",
+      label: "Production",
+      color: isBelow ? "var(--color-import)" : SERIES_META.production.color,
+      value: hovered.productionPerKwh,
+      isBelowThreshold: isBelow,
+    });
+  }
+
+  const tooltipWidth = compact ? 150 : 175;
+  const tooltipHeight = 22 + activeTooltipRows.length * 16;
   const tooltipX =
     hoverX !== null
       ? clamp(hoverX - tooltipWidth / 2, 0, g.w - tooltipWidth)
       : 0;
-  const hoverY = hovered ? scale.y(hovered.pricePerKwh) : 0;
+
+  const yValues = activeTooltipRows.map((r) => scale.y(r.value));
+  const minY = yValues.length > 0 ? Math.min(...yValues) : g.h / 2;
+  const maxY = yValues.length > 0 ? Math.max(...yValues) : g.h / 2;
   const tooltipY =
-    hoverY > 52
-      ? hoverY - tooltipHeight - 6
-      : Math.min(g.h - tooltipHeight - 4, hoverY + 8);
+    minY > tooltipHeight + 10
+      ? minY - tooltipHeight - 6
+      : Math.min(g.h - tooltipHeight - 4, maxY + 8);
 
   return (
-    // The wrapper is what gets measured, not the svg: the svg's width is
-    // `100%` of exactly this box, so asking it would be asking the answer to
-    // describe itself.
     <div ref={box}>
       <svg
         viewBox={`0 0 ${g.padLeft + g.w + PAD_RIGHT} ${
@@ -239,9 +308,9 @@ export default function PriceChart({
         role="img"
         aria-label={describe(
           curve,
-          thresholdPerKwh,
+          visibleSeries,
+          activeThreshold,
           currency,
-          priceLabel,
           dayLabel,
         )}
         style={{ touchAction: "none" }}
@@ -250,7 +319,8 @@ export default function PriceChart({
         onPointerLeave={() => setHoveredIndex(null)}
       >
         <g transform={`translate(${g.padLeft},${g.padTop})`}>
-          {thresholdPerKwh !== null && (
+          {/* Below-threshold curtailment band */}
+          {baselineY !== null && (
             <rect
               x="0"
               y={baselineY}
@@ -260,6 +330,7 @@ export default function PriceChart({
             />
           )}
 
+          {/* Grid lines */}
           {scale.ticks.map((tick) => (
             <line
               key={tick.value}
@@ -271,10 +342,9 @@ export default function PriceChart({
             />
           ))}
 
-          {/* Subtle neutral zero baseline if 0 is in scale and threshold is non-zero */}
-          {thresholdPerKwh !== null &&
-            thresholdPerKwh !== 0 &&
-            scale.inRange(0) && (
+          {/* Zero reference baseline */}
+          {scale.inRange(0) &&
+            (activeThreshold === null || activeThreshold !== 0) && (
               <line
                 x1="0"
                 y1={scale.y(0)}
@@ -286,60 +356,63 @@ export default function PriceChart({
               />
             )}
 
-          {curve.map((point, index) => {
-            const duration = Math.max(1, point.endMinutes - point.startMinutes);
-            const slotWidth = (duration / MINUTES_PER_DAY) * g.w;
-            const x = (point.startMinutes / MINUTES_PER_DAY) * g.w;
-            const gap = slotWidth > 15 ? 2.5 : slotWidth > 5 ? 1 : 0.5;
-            const barWidth = Math.max(1, slotWidth - gap);
-            const barX = x + (slotWidth - barWidth) / 2;
-            const top = scale.y(point.pricePerKwh);
-            const below =
-              thresholdPerKwh !== null && point.pricePerKwh < thresholdPerKwh;
-            const isNow =
-              nowMinutes !== null &&
-              point.startMinutes <= nowMinutes &&
-              nowMinutes < point.endMinutes;
-            const isHovered = hoveredIndex === index;
+          {/* Hovered interval background */}
+          {hoveredSlotX !== null && hoveredSlotW !== null && (
+            <rect
+              x={hoveredSlotX}
+              y={0}
+              width={Math.max(1, hoveredSlotW)}
+              height={g.h}
+              fill="var(--color-surface-active)"
+              opacity="0.4"
+              pointerEvents="none"
+            />
+          )}
 
-            const fill = isNow
-              ? below
-                ? "var(--color-import-now)"
-                : "var(--color-chart-bar-now)"
-              : below
-                ? "var(--color-import)"
-                : "var(--color-chart-bar)";
+          {/* Stepped price curves */}
+          {visibleSeries.market && (
+            <path
+              d={buildSteppedPath(curve, (p) => p.marketPerKwh, scale.y, g.w)}
+              fill="none"
+              stroke={SERIES_META.market.color}
+              strokeWidth="1.75"
+              strokeDasharray="5 3"
+              strokeLinejoin="round"
+            />
+          )}
 
-            return (
-              <rect
-                key={point.startMinutes}
-                x={barX}
-                y={Math.min(top, baselineY)}
-                width={barWidth}
-                // A price sitting exactly on the threshold still gets a mark,
-                // so an interval never silently disappears from the row.
-                height={Math.max(1.5, Math.abs(top - baselineY))}
-                rx={Math.min(1.5, Math.max(0.5, barWidth / 4))}
-                fill={fill}
-                opacity={
-                  hoveredIndex !== null && !isHovered && !isNow ? 0.75 : 1
-                }
-                stroke={isHovered ? "var(--color-text)" : undefined}
-                strokeWidth={isHovered ? 1 : 0}
-              >
-                <title>
-                  {`${clock(point.startMinutes)}–${clock(point.endMinutes)}: ${point.pricePerKwh.toFixed(4)} ${currency}/kWh${
-                    thresholdPerKwh === null
-                      ? ""
-                      : ` (${below ? "below" : "above"} threshold)`
-                  }`}
-                </title>
-              </rect>
-            );
-          })}
+          {visibleSeries.consumption && (
+            <path
+              d={buildSteppedPath(
+                curve,
+                (p) => p.consumptionPerKwh,
+                scale.y,
+                g.w,
+              )}
+              fill="none"
+              stroke={SERIES_META.consumption.color}
+              strokeWidth="2"
+              strokeLinejoin="round"
+            />
+          )}
 
-          {/* Drawn over the bars: it is the line they are measured against. */}
-          {thresholdPerKwh !== null && (
+          {visibleSeries.production && (
+            <path
+              d={buildSteppedPath(
+                curve,
+                (p) => p.productionPerKwh,
+                scale.y,
+                g.w,
+              )}
+              fill="none"
+              stroke={SERIES_META.production.color}
+              strokeWidth="2"
+              strokeLinejoin="round"
+            />
+          )}
+
+          {/* Curtailment threshold line */}
+          {baselineY !== null && (
             <line
               x1="0"
               y1={baselineY}
@@ -351,7 +424,7 @@ export default function PriceChart({
             />
           )}
 
-          {/* Hover guideline and floating inspection chip */}
+          {/* Hover guideline, point circles, and tooltip */}
           {hovered && hoverX !== null && (
             <g pointerEvents="none">
               <line
@@ -362,57 +435,114 @@ export default function PriceChart({
                 stroke="var(--color-text)"
                 strokeWidth="1"
                 strokeDasharray="2 2"
-                opacity="0.35"
+                opacity="0.4"
               />
-              <rect
-                x={tooltipX}
-                y={tooltipY}
-                width={tooltipWidth}
-                height={tooltipHeight}
-                rx="4"
-                fill="var(--color-surface)"
-                stroke="var(--color-border)"
-                strokeWidth="1"
-                style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.18))" }}
-              />
-              <text
-                x={tooltipX + 8}
-                y={tooltipY + 15}
-                fontSize={g.font}
-                fontWeight="600"
-                fill="var(--color-text)"
-                fontFamily="var(--font-mono)"
-              >
-                {clock(hovered.startMinutes)}–{clock(hovered.endMinutes)}
-              </text>
-              <text
-                x={tooltipX + 8}
-                y={tooltipY + 31}
-                fontSize={g.font}
-                fontWeight="600"
-                fill={
-                  thresholdPerKwh !== null &&
-                  hovered.pricePerKwh < thresholdPerKwh
-                    ? "var(--color-import)"
-                    : "var(--color-text)"
-                }
-                fontFamily="var(--font-mono)"
-              >
-                {hovered.pricePerKwh.toFixed(4)} {currency}
-                {thresholdPerKwh !== null && (
-                  <tspan
-                    fill="var(--color-text-muted)"
-                    fontWeight="normal"
-                    fontSize={g.font - 1}
-                    dx={5}
-                  >
-                    {hovered.pricePerKwh < thresholdPerKwh ? "below" : "above"}
-                  </tspan>
+
+              {visibleSeries.consumption &&
+                hovered.consumptionPerKwh !== null && (
+                  <circle
+                    cx={hoverX}
+                    cy={scale.y(hovered.consumptionPerKwh)}
+                    r="3.5"
+                    fill={SERIES_META.consumption.color}
+                    stroke="var(--color-surface)"
+                    strokeWidth="1.5"
+                  />
                 )}
-              </text>
+
+              {visibleSeries.market && hovered.marketPerKwh !== null && (
+                <circle
+                  cx={hoverX}
+                  cy={scale.y(hovered.marketPerKwh)}
+                  r="3"
+                  fill={SERIES_META.market.color}
+                  stroke="var(--color-surface)"
+                  strokeWidth="1.5"
+                />
+              )}
+
+              {visibleSeries.production &&
+                hovered.productionPerKwh !== null && (
+                  <circle
+                    cx={hoverX}
+                    cy={scale.y(hovered.productionPerKwh)}
+                    r="3.5"
+                    fill={
+                      activeThreshold !== null &&
+                      hovered.productionPerKwh < activeThreshold
+                        ? "var(--color-import)"
+                        : SERIES_META.production.color
+                    }
+                    stroke="var(--color-surface)"
+                    strokeWidth="1.5"
+                  />
+                )}
+
+              {activeTooltipRows.length > 0 && (
+                <>
+                  <rect
+                    x={tooltipX}
+                    y={tooltipY}
+                    width={tooltipWidth}
+                    height={tooltipHeight}
+                    rx="4"
+                    fill="var(--color-surface)"
+                    stroke="var(--color-border)"
+                    strokeWidth="1"
+                    style={{
+                      filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.18))",
+                    }}
+                  />
+                  <text
+                    x={tooltipX + 8}
+                    y={tooltipY + 14}
+                    fontSize={g.font}
+                    fontWeight="600"
+                    fill="var(--color-text)"
+                    fontFamily="var(--font-mono)"
+                  >
+                    {clock(hovered.startMinutes)}–{clock(hovered.endMinutes)}
+                  </text>
+                  {activeTooltipRows.map((row, idx) => (
+                    <g key={row.id}>
+                      <circle
+                        cx={tooltipX + 11}
+                        cy={tooltipY + 26 + idx * 16}
+                        r="3"
+                        fill={row.color}
+                      />
+                      <text
+                        x={tooltipX + 18}
+                        y={tooltipY + 29 + idx * 16}
+                        fontSize={g.font - 1}
+                        fill="var(--color-text-muted)"
+                        fontFamily="var(--font-mono)"
+                      >
+                        {row.label}
+                      </text>
+                      <text
+                        x={tooltipX + tooltipWidth - 8}
+                        y={tooltipY + 29 + idx * 16}
+                        textAnchor="end"
+                        fontSize={g.font}
+                        fontWeight="600"
+                        fill={
+                          row.isBelowThreshold
+                            ? "var(--color-import)"
+                            : "var(--color-text)"
+                        }
+                        fontFamily="var(--font-mono)"
+                      >
+                        {row.value.toFixed(4)}
+                      </text>
+                    </g>
+                  ))}
+                </>
+              )}
             </g>
           )}
 
+          {/* Current slot marker */}
           {nowX !== null && (
             <>
               <line
@@ -441,8 +571,6 @@ export default function PriceChart({
                 textAnchor="middle"
                 fontSize={g.font}
                 fontWeight="600"
-                // The canvas colour, so the chip's label inverts with the theme
-                // exactly as its background does.
                 fill="var(--color-surface)"
                 fontFamily="var(--font-mono)"
                 pointerEvents="none"
@@ -452,6 +580,7 @@ export default function PriceChart({
             </>
           )}
 
+          {/* Hour labels on X axis */}
           <g
             fontSize={g.font}
             fill="var(--color-text-muted)"
@@ -466,6 +595,7 @@ export default function PriceChart({
           </g>
         </g>
 
+        {/* Y axis price tick labels */}
         <g
           fontSize={g.font}
           fill="var(--color-text-muted)"
@@ -478,7 +608,7 @@ export default function PriceChart({
               x={g.padLeft - 6}
               y={g.padTop + tick.y + 4}
               fill={
-                thresholdPerKwh !== null && tick.value === thresholdPerKwh
+                activeThreshold !== null && tick.value === activeThreshold
                   ? "var(--color-import)"
                   : "var(--color-text-muted)"
               }
@@ -489,38 +619,39 @@ export default function PriceChart({
         </g>
       </svg>
 
-      <div
-        style={{
-          ...captionStyle,
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: "0.25rem 0.875rem",
-          marginTop: "0.375rem",
-        }}
-      >
-        {thresholdPerKwh !== null && (
-          <>
+      {/* Threshold and now legends */}
+      {(activeThreshold !== null || nowMinutes !== null) && (
+        <div
+          style={{
+            ...captionStyle,
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "0.25rem 0.875rem",
+            marginTop: "0.375rem",
+          }}
+        >
+          {activeThreshold !== null && (
             <span>
-              <Swatch color="var(--color-import)" />
-              below threshold
+              <Swatch
+                color="var(--color-import-soft)"
+                border="var(--color-import)"
+              />
+              below threshold ({activeThreshold.toFixed(4)} {currency})
             </span>
+          )}
+          {nowMinutes !== null && (
             <span>
-              <Swatch color="var(--color-chart-bar)" />
-              above threshold
+              <Swatch color="var(--color-chart-bar-now)" />
+              current slot
             </span>
-          </>
-        )}
-        {nowMinutes !== null && (
-          <span>
-            <Swatch color="var(--color-chart-bar-now)" />
-            current slot
-          </span>
-        )}
-        <span style={{ marginLeft: "auto" }}>{currency}/kWh</span>
-      </div>
+          )}
+          <span style={{ marginLeft: "auto" }}>{currency}/kWh</span>
+        </div>
+      )}
 
-      {stats && (
+      {/* Min / Max / Avg stats */}
+      {stats.length > 0 && (
         <div
           style={{
             ...captionStyle,
@@ -532,53 +663,52 @@ export default function PriceChart({
             fontSize: "0.6875rem",
           }}
         >
-          <span>
-            Min:{" "}
-            <strong style={{ color: "var(--color-text)" }}>
-              {stats.minPoint.pricePerKwh.toFixed(4)}
-            </strong>{" "}
-            ({clock(stats.minPoint.startMinutes)}–
-            {clock(stats.minPoint.endMinutes)})
-          </span>
-          <span>
-            Max:{" "}
-            <strong style={{ color: "var(--color-text)" }}>
-              {stats.maxPoint.pricePerKwh.toFixed(4)}
-            </strong>{" "}
-            ({clock(stats.maxPoint.startMinutes)}–
-            {clock(stats.maxPoint.endMinutes)})
-          </span>
-          <span>
-            Avg:{" "}
-            <strong style={{ color: "var(--color-text)" }}>
-              {stats.avg.toFixed(4)}
-            </strong>{" "}
-            {currency}/kWh
-          </span>
+          {stats.map((s) => (
+            <span key={s.id}>
+              <Swatch color={s.color} dashed={s.id === "market"} />
+              <span style={{ color: "var(--color-text)", fontWeight: 500 }}>
+                {s.label}
+              </span>
+              : min <strong>{s.min.toFixed(4)}</strong> · max{" "}
+              <strong>{s.max.toFixed(4)}</strong> · avg{" "}
+              <strong>{s.avg.toFixed(4)}</strong>
+            </span>
+          ))}
+          {activeThreshold === null && nowMinutes === null && (
+            <span style={{ marginLeft: "auto" }}>{currency}/kWh</span>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function Swatch({ color }: { color: string }) {
+function Swatch({
+  color,
+  border,
+  dashed,
+}: {
+  color: string;
+  border?: string;
+  dashed?: boolean;
+}) {
   return (
     <span
       aria-hidden="true"
       style={{
         display: "inline-block",
-        width: 9,
-        height: 9,
-        borderRadius: 2,
+        width: 8,
+        height: dashed ? 3 : 8,
+        borderRadius: dashed ? 1 : 2,
         marginRight: 5,
-        verticalAlign: -1,
+        verticalAlign: dashed ? 2 : -1,
         background: color,
+        border: border ? `1px dashed ${border}` : undefined,
       }}
     />
   );
 }
 
-/** `795` → `13:15`, without asking the browser what a time looks like. */
 function clock(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -591,18 +721,16 @@ type Scale = {
   inRange: (value: number) => boolean;
 };
 
-/**
- * The y axis: a domain wide enough for the data *and* the threshold, and a set
- * of round gridlines across it.
- *
- * The threshold has to be inside the domain even when no interval comes near it —
- * a chart that cropped the line out would show a day of prices with nothing to
- * compare them to, which is the one thing this chart exists to do.
- */
-function buildScale(values: number[], threshold: number, h: number): Scale {
-  const lo = Math.min(...values, threshold);
-  const hi = Math.max(...values, threshold);
-  // A flat day would otherwise divide by zero and put every bar on the axis.
+function buildScale(
+  values: number[],
+  threshold: number | null,
+  h: number,
+): Scale {
+  const all = threshold !== null ? [...values, threshold] : [...values];
+  if (all.length === 0) all.push(0);
+
+  const lo = Math.min(...all);
+  const hi = Math.max(...all);
   const span = Math.max(hi - lo, 0.01);
   const step = niceStep(span);
 
@@ -612,16 +740,12 @@ function buildScale(values: number[], threshold: number, h: number): Scale {
   const inRange = (value: number) => value >= min && value <= max;
 
   const ticks: Scale["ticks"] = [];
-  // Multiplied out from an integer count rather than accumulated, so that a
-  // step of 0.05 does not drift into 0.15000000000000002 by the fourth line.
   for (let i = 0; min + i * step <= max + step / 2; i++) {
     const value = round(min + i * step);
     ticks.push({ value, y: y(value), label: value.toFixed(2) });
   }
 
-  // The threshold gets its own line whenever it is not already on one, so the
-  // number the shading is about is always labelled.
-  if (!ticks.some((tick) => tick.value === threshold)) {
+  if (threshold !== null && !ticks.some((tick) => tick.value === threshold)) {
     ticks.push({
       value: threshold,
       y: y(threshold),
@@ -632,7 +756,6 @@ function buildScale(values: number[], threshold: number, h: number): Scale {
   return { y, ticks, inRange };
 }
 
-/** The roundest step that puts four to eight gridlines across the span. */
 function niceStep(span: number): number {
   const steps = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1];
   return steps.find((step) => span / step <= 6) ?? steps[steps.length - 1];
@@ -642,31 +765,55 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
 }
 
-/** Kills the float noise a multiplied step leaves behind. */
 function round(value: number): number {
   return Math.round(value * 1e6) / 1e6;
 }
 
+function buildSteppedPath(
+  curve: PriceCurvePoint[],
+  getValue: (p: PriceCurvePoint) => number | null,
+  scaleY: (v: number) => number,
+  plotW: number,
+): string {
+  let path = "";
+  let inSegment = false;
+  for (const p of curve) {
+    const val = getValue(p);
+    if (val === null) {
+      inSegment = false;
+      continue;
+    }
+    const xStart = (p.startMinutes / MINUTES_PER_DAY) * plotW;
+    const xEnd = (p.endMinutes / MINUTES_PER_DAY) * plotW;
+    const y = scaleY(val);
+    if (!inSegment) {
+      path += `M ${xStart.toFixed(1)} ${y.toFixed(1)} H ${xEnd.toFixed(1)} `;
+      inSegment = true;
+    } else {
+      path += `L ${xStart.toFixed(1)} ${y.toFixed(1)} H ${xEnd.toFixed(1)} `;
+    }
+  }
+  return path.trim();
+}
+
 function describe(
-  curve: ChartPricePoint[],
+  curve: PriceCurvePoint[],
+  visibleSeries: Record<PriceSeriesId, boolean>,
   threshold: number | null,
   currency: string,
-  priceLabel: string,
   dayLabel: "today" | "tomorrow",
 ): string {
-  if (threshold === null) {
-    return `${priceLabel} by interval ${dayLabel}, in ${currency}/kWh.`;
+  const activeLabels = (Object.keys(visibleSeries) as PriceSeriesId[])
+    .filter((id) => visibleSeries[id])
+    .map((id) => SERIES_META[id].label);
+
+  if (activeLabels.length === 0) {
+    return `No price series selected for ${dayLabel}.`;
   }
 
-  const below = curve.filter((point) => point.pricePerKwh < threshold);
-  const cheapest = curve.reduce((low, point) =>
-    point.pricePerKwh < low.pricePerKwh ? point : low,
-  );
-
-  const intervals =
-    below.length === 0
-      ? `No interval ${dayLabel} is below it.`
-      : `${below.length} of ${curve.length} intervals are below it, the lowest at ${clock(cheapest.startMinutes)}.`;
-
-  return `${priceLabel} by interval ${dayLabel}, against a curtailment threshold of ${threshold.toFixed(4)} ${currency}/kWh. ${intervals}`;
+  return `Electricity price curves (${activeLabels.join(", ")}) by interval ${dayLabel}, in ${currency}/kWh${
+    threshold !== null
+      ? `, against a curtailment threshold of ${threshold.toFixed(4)} ${currency}/kWh.`
+      : "."
+  } Total ${curve.length} intervals.`;
 }
