@@ -163,6 +163,30 @@ for (const modeled of [false, true]) {
           () => document.documentElement.scrollWidth > innerWidth,
         ),
       ).toBe(false);
+      {
+        // At phone width the schedule scrolls sideways in its own box but
+        // never vertically: its headings follow the page under the top bar.
+        await page.getByRole("button", { name: "Schedule table" }).click();
+        const box = page.locator(".plan-table");
+        await box.evaluate((b) => {
+          const rows = b.querySelector("tbody")?.getBoundingClientRect();
+          if (rows) scrollTo(0, scrollY + rows.top + 200);
+        });
+        expect(
+          await box.evaluate((b) => [
+            b.scrollHeight <= b.clientHeight,
+            b.scrollWidth > b.clientWidth,
+          ]),
+        ).toEqual([true, true]);
+        await expect
+          .poll(() =>
+            box
+              .locator("thead")
+              .evaluate((h) => Math.round(h.getBoundingClientRect().top)),
+          )
+          .toBe(64);
+        await page.getByRole("button", { name: "Charts" }).click();
+      }
       await page.goto(`${stack.baseUrl}settings`);
       await expect(page.locator('select[name="chargeLimitMode"]')).toHaveCount(
         0,

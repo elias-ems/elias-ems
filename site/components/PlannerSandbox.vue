@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import type { compare } from "../lib/comparison";
 import type { PlannerDataset } from "../lib/planner";
 import { parseDataset } from "../lib/planner";
@@ -43,6 +43,48 @@ function stop() {
 onBeforeUnmount(() => {
   importSequence++;
   stop();
+});
+// The tables are wider than the page and scroll sideways, and a box that
+// scrolls sideways is what `position: sticky` binds to — so a sticky heading
+// would only pin to the top of a box that never scrolls vertically. Capping the
+// box's height instead gave every table a scrollbar of its own. Rather than
+// either, the headings follow the page: on each scroll, each table's heading
+// cells are shifted down to sit under the fixed nav, until its table's last row passes.
+const root = ref<HTMLElement>();
+function pinHeadings() {
+  const top = Math.max(
+    0,
+    ...[...document.querySelectorAll(".VPNav, .VPLocalNav")].map(
+      (bar) => bar.getBoundingClientRect().bottom,
+    ),
+  );
+  for (const box of root.value?.querySelectorAll(".planner-table") ?? []) {
+    const head = box.querySelector("thead");
+    const body = box.querySelector("tbody");
+    if (!head || !body) continue;
+    // The cells are what move — a shifted thead left a band of its own text
+    // behind in Chrome — so the thead's box still marks where they belong.
+    const from = head.getBoundingClientRect().top;
+    const shift = Math.min(
+      Math.max(top - from, 0),
+      Math.max(
+        body.getBoundingClientRect().bottom - from - head.offsetHeight,
+        0,
+      ),
+    );
+    for (const cell of head.querySelectorAll("th"))
+      cell.style.transform = shift ? `translateY(${shift}px)` : "";
+  }
+}
+onMounted(() => {
+  addEventListener("scroll", pinHeadings, { passive: true });
+  addEventListener("resize", pinHeadings, { passive: true });
+  // Opening the side-by-side details or loading a run moves the tables.
+  root.value?.addEventListener("toggle", pinHeadings, true);
+});
+onBeforeUnmount(() => {
+  removeEventListener("scroll", pinHeadings);
+  removeEventListener("resize", pinHeadings);
 });
 function invalidate() {
   stop();
@@ -262,7 +304,7 @@ function download() {
 </script>
 
 <template>
-  <section class="planner" aria-label="Planner sandbox">
+  <section ref="root" class="planner" aria-label="Planner sandbox">
     <label>Import planner export <input ref="fileInput" type="file" accept=".json,application/json" @change="importFile" /></label>
     <fieldset class="planner-presets">
       <legend>Or load a synthetic preset</legend>
@@ -392,11 +434,9 @@ function download() {
 .planner .planner-preset button { margin: 0; width: 100%; font-weight: 600; text-align: left; }
 .planner .planner-preset button[aria-pressed="true"] { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
 .planner pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* The tables are wider than the page, so they must scroll sideways, and a box that
-   scrolls sideways is what a sticky heading binds to. Capping it at the viewport
-   below the fixed nav keeps the headings pinned while the rows scroll inside it. */
-.planner-table { overflow: auto; max-height: calc(100vh - var(--vp-nav-height) - 2rem); }
-.planner-table thead { position: sticky; top: 0; z-index: 1; box-shadow: 0 1px 0 var(--vp-c-divider); }
+.planner-table { overflow-x: auto; }
+/* Shifted by pinHeadings(); raised so the rows they slide over stay beneath. */
+.planner-table th { position: relative; z-index: 1; background: var(--vp-c-bg-soft); }
 .planner-table table { display: table; width: 100%; font-size: 0.85rem; white-space: nowrap; }
 .planner-table th, .planner-table td { padding: 6px 8px; }
 .planner-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 1rem 2rem; }

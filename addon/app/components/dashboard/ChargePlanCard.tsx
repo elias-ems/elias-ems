@@ -15,6 +15,51 @@ type PlanView = "charts" | "table";
 
 const PLAN_VIEW_STORAGE_KEY = "elias-plans-view";
 
+/**
+ * Keeps the schedule table's headings under the top bar on narrow screens.
+ *
+ * Wide, the table fits and its `th`s are plain `position: sticky` (see the
+ * `.plan-table` block in app.css). Below 760px it has to scroll sideways, and a
+ * box that scrolls sideways is what sticky binds to — so the headings would
+ * stick to a box that never scrolls vertically. Instead of capping the box's
+ * height, which gave the table a scrollbar of its own, the heading cells
+ * are shifted down on each page scroll until the table's last row passes. A ref callback
+ * so it starts and stops with the table view; React calls the returned cleanup.
+ */
+function pinScheduleHeadings(box: HTMLDivElement | null) {
+  if (!box) return;
+  const pin = () => {
+    const head = box.querySelector("thead");
+    const body = box.querySelector("tbody");
+    if (!head || !body) return;
+    const cells = head.querySelectorAll("th");
+    if (getComputedStyle(box).overflowX === "visible") {
+      for (const cell of cells) cell.style.transform = "";
+      return;
+    }
+    // The cells are what move — a shifted thead left a band of its own text
+    // behind in Chrome — so the thead's box still marks where they belong.
+    const from = head.getBoundingClientRect().top;
+    // The top bar is 64px tall at every width.
+    const shift = Math.min(
+      Math.max(64 - from, 0),
+      Math.max(
+        body.getBoundingClientRect().bottom - from - head.offsetHeight,
+        0,
+      ),
+    );
+    for (const cell of cells)
+      cell.style.transform = shift ? `translateY(${shift}px)` : "";
+  };
+  pin();
+  addEventListener("scroll", pin, { passive: true });
+  addEventListener("resize", pin, { passive: true });
+  return () => {
+    removeEventListener("scroll", pin);
+    removeEventListener("resize", pin);
+  };
+}
+
 function BatteryPlan({
   status,
   now,
@@ -323,6 +368,7 @@ function BatteryPlan({
               </p>
               {view === "table" && (
                 <div
+                  ref={pinScheduleHeadings}
                   className="plan-table"
                   style={{
                     border: "1px solid var(--color-border)",

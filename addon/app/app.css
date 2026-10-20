@@ -410,9 +410,10 @@ input {
  * the top of a box that never scrolls vertically, which is to say not at all.
  *
  * Below 760px the ten columns (about 645px) stop fitting, and a table that
- * overflows the page scrolls the whole panel sideways. There it goes back to a
- * box that scrolls both ways, with the headings pinned to the box's own top
- * instead.
+ * overflows the page scrolls the whole panel sideways. There the wrapper
+ * scrolls sideways itself, sticky is off, and `pinScheduleHeadings` in
+ * ChargePlanCard shifts the heading cells down with the page instead — still no
+ * scrollbar of the table's own.
  */
 .plan-table th {
   position: sticky;
@@ -422,12 +423,12 @@ input {
 
 @media (max-width: 760px) {
   .plan-table {
-    max-height: clamp(16rem, 70vh, 36rem);
-    overflow: auto;
+    overflow-x: auto;
   }
 
+  /* Raised so the rows they slide over stay beneath. */
   .plan-table th {
-    top: 0;
+    position: relative;
   }
 }
 
