@@ -803,10 +803,13 @@ function armShutdownRelease(): void {
  * it. Idempotent, so it is safe to call on
  * every save and at boot.
  *
- * The loop runs while **either** feature is enabled, and each tick decides for
- * itself which halves to run. Curtailment without battery control is a
- * perfectly ordinary configuration — a house with panels and no battery — and
- * so is the reverse.
+ * This is curtailment's loop and nothing else's: battery control plans in
+ * `charge-limit-loop.server.ts` on the price intervals, so there is no second
+ * half here to gate and nothing to read but the curtailment config. What is
+ * still armed whatever is enabled is the shutdown release, below. Curtailment
+ * without battery control is a perfectly ordinary configuration — a house with
+ * panels and no battery — and so is the reverse; they are now simply two loops
+ * that start independently.
  */
 export async function syncControlLoop(): Promise<
   ReturnType<typeof curtailmentLoopStatus>
@@ -832,14 +835,6 @@ export async function syncControlLoop(): Promise<
       await releasePvArrays();
     }
     return curtailmentLoopStatus();
-  }
-
-  // A feature switched off while the other keeps the loop running still has to
-  // let its own hardware go — the tick simply stops deciding for it, which on
-  // its own would leave the last command standing forever.
-  if (previousCurtailment?.enabled && !curtailment.enabled) {
-    log("pv-curtailment", "info", "PV curtailment disabled.");
-    await releasePvArrays();
   }
 
   // Switching the feature on has to restart the loop, because the watched set
