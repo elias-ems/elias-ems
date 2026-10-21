@@ -29,8 +29,8 @@ mise install
 
 | Tool | Version | Needed for |
 | --- | --- | --- |
-| **Node** | 24.19.0 | Everything. The add-on requires Node >= 24 and its images pin `node:24-alpine` (which is also why it ships for `aarch64` and `amd64` only — Node 24 has no 32-bit ARM builds). |
-| **GitHub CLI (`gh`)** | 2.97.0 | Opening pull requests and reading CI from the terminal. |
+| **Node** | 26.12.0 | Everything. The add-on requires Node >= 24, and note that the published images pin `node:24-alpine` rather than this version — that is also why it ships for `aarch64` and `amd64` only, since Node 24 has no 32-bit ARM builds. See [AGENTS.md](AGENTS.md#framework-and-toolchain) for the three places a Node major is pinned and why they are separate. |
+| **GitHub CLI (`gh`)** | 2.102.0 | Opening pull requests and reading CI from the terminal. |
 
 Everything else — Vite, Biome, Playwright, lefthook — is an npm devDependency and arrives with `npm install`. Playwright also needs its browser downloaded once: `npx playwright install chromium`.
 
