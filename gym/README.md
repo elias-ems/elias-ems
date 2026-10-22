@@ -5,12 +5,13 @@ Run commands from the repository root; no Home Assistant connection is needed.
 
 ## Fixed dataset
 
-The EMS exposes this benchmark under **More → Benchmark**, with a **Run all
-algorithms** button. The page allows temporary edits to interval solar, demand and tariffs for
-reruns. Reset restores the bundled input; page edits do not change CLI files.
-The CLI and EMS share the algorithm registry, fixed input
-and experiment settings. The input and settings live in
-`addon/app/lib/benchmark-data/` so they ship with the add-on; the historical
+Comparing strategies interactively happens in the
+[Planner sandbox](https://elias-ems.github.io/elias-ems/planner) on the
+documentation site; the EMS's **More → Benchmark** page links there and
+downloads a planner export to load into it. The gym's algorithm table, fixed
+input and experiment settings live in `addon/app/lib/benchmark-data/` and
+`addon/app/lib/benchmark-algorithms.ts`, beside the production modules they
+replay; the historical
 context and frozen reference remain in `gym/datasets/household-2026-09-11/`.
 
 - `addon/app/lib/benchmark-data/input.json`: 11 September 2026, 07:00–20:00 Brussels (52 quarter-hours).
@@ -149,10 +150,9 @@ the download link on the battery dashboard card). The exported JSON file
 
 You can replay and evaluate these exports in two ways:
 
-1. **In the EMS web UI**:
-   Go to **More → Benchmark**, click **Import exported planner data**, and pick the JSON file.
-   The page loads the custom dataset, previews configured devices and assumptions, displays the
-   full schedule table, and allows testing what-if edits or running all algorithms.
+1. **In the Planner sandbox**:
+   Open the [Planner sandbox](https://elias-ems.github.io/elias-ems/planner) and import the
+   JSON file. It replays every registered strategy on the snapshot in your browser.
 
 2. **In the CLI gym**:
    Both `run.mjs` and `benchmark.mjs` accept the exported snapshot JSON directly. When a

@@ -39,7 +39,15 @@ export default function Tools({ loaderData }: Route.ComponentProps) {
         <p style={{ ...hintStyle, marginTop: "0.35rem", maxWidth: "62ch" }}>
           Export all current planner inputs—including configured devices, load
           and solar forecasts, dynamic tariffs, and interval models—to a JSON
-          dataset for replay and analysis in the Benchmark tool.
+          dataset for replay and analysis in the{" "}
+          <a
+            href="https://elias-ems.github.io/elias-ems/planner"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Planner sandbox
+          </a>
+          .
         </p>
       </section>
 

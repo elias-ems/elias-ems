@@ -760,8 +760,7 @@ Every strategy uses **Steer this battery** as its per-battery authorization and
 batteries are monitored only. Planning supports one configured household
 battery.
 
-The previous cost optimizer remains in the offline gym and the Benchmark page
-for comparison; it is not a registered strategy.
+The previous cost optimizer remains in the offline gym for comparison; it is not a registered strategy.
 
 Evening target controls the maximum charging power and, when the battery's
 automation can limit discharge, its maximum AC output power. It reserves energy during cheaper

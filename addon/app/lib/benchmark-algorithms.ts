@@ -5,7 +5,7 @@ import {
 } from "./charge-evening.ts";
 import { optimizeCharge } from "./charge-plan.ts";
 
-// Shared by the in-app benchmark and the command-line gym.
+// The algorithm table the command-line gym replays (`gym/algorithms/`).
 export const benchmarkAlgorithms = {
   "cost-optimized": {
     label: "Cost optimized",
