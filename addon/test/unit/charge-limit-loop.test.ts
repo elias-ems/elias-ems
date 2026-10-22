@@ -209,6 +209,45 @@ describe("charge limit commands", () => {
     expect(mocks.set).not.toHaveBeenCalled();
   });
 
+  it("publishes a direct command with the grid permissions its modes imply", async () => {
+    await saveBattery({ ...battery, controlModes: ["balance", "charge"] });
+    const calculate = mocks.calculate.getMockImplementation();
+    mocks.calculate.mockImplementation(async () => {
+      const result = await calculate?.();
+      return {
+        ...result,
+        commands: [
+          {
+            start: now,
+            end: now + 900_000,
+            mode: "charge",
+            setpointW: 700,
+            chargeLimitW: 700,
+            dischargeLimitW: 0,
+          },
+        ],
+      };
+    });
+    const loop = await import("../../app/lib/charge-limit-loop.server");
+    await loop.chargeLimitTick(now);
+
+    expect(commands()).toEqual([
+      expect.objectContaining({
+        action: "apply",
+        mode: "charge",
+        setpoint_w: 700,
+        charge_w: 700,
+        discharge_w: 0,
+        grid_charging: true,
+        // Discharge is not ticked, so neither is export.
+        battery_export: false,
+      }),
+    ]);
+    expect((await loop.readChargeLimits()).batteries[0].requestedSetpoint).toBe(
+      "charge 700 W",
+    );
+  });
+
   it("plans with the selected strategy and names it on the command", async () => {
     await saveControl(true, "highs");
     const loop = await import("../../app/lib/charge-limit-loop.server");

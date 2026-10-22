@@ -14,6 +14,7 @@ import {
   STRATEGIES,
 } from "../../app/lib/control";
 import { solveHighs } from "../../app/lib/highs-runner.server";
+import { batteryCapabilities } from "../../app/lib/strategies/capabilities.ts";
 import {
   type Capabilities,
   type PlanningSnapshot,
@@ -172,5 +173,35 @@ describe("HiGHS", () => {
       expect(score(highs.commands).meanCost).toBeLessThanOrEqual(
         score(eveningTarget.commands).meanCost + 1e-6,
       );
+  });
+});
+
+describe("batteryCapabilities", () => {
+  it("plans balance only for a battery with no direct modes", () => {
+    expect(
+      batteryCapabilities({ controlModes: ["balance"], powerStepW: 100 }),
+    ).toEqual(BALANCE);
+  });
+
+  it("lets charge imply grid charging and discharge imply export", () => {
+    expect(
+      batteryCapabilities({
+        controlModes: ["balance", "hold", "charge", "discharge"],
+        powerStepW: 50,
+      }),
+    ).toEqual({
+      modes: ["balance", "hold", "charge", "discharge"],
+      gridCharging: true,
+      batteryExport: true,
+      setpointStepW: 50,
+    });
+    expect(
+      batteryCapabilities({ controlModes: ["hold", "charge"], powerStepW: 50 }),
+    ).toEqual({
+      modes: ["balance", "hold", "charge"],
+      gridCharging: true,
+      batteryExport: false,
+      setpointStepW: 50,
+    });
   });
 });

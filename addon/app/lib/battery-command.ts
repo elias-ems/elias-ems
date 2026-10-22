@@ -60,9 +60,9 @@ export type BatteryCommand = {
   /** Most it may discharge at, as a positive magnitude; null for native. */
   dischargeLimitW: number | null;
   /**
-   * Whether the battery may charge from the grid, and discharge into it. No
-   * strategy shipping today asks for either; they are in the contract so an
-   * adapter can enforce them against live power from the first version.
+   * Whether the battery may charge from the grid, and discharge into it. Set
+   * on direct commands for a battery whose `charge` / `discharge` modes are
+   * allowed; always false in `balance`, which never does either.
    */
   gridCharging: boolean;
   batteryExport: boolean;
@@ -103,14 +103,15 @@ export function commandEventType(slug: string): string {
 
 /**
  * Turns a signed power target into a direct-control command: `charge`,
- * `discharge`, or `hold` at exactly zero. No strategy issues it in production
- * yet; it is the shape a direct-mode HiGHS plan would publish.
+ * `discharge`, or `hold` at exactly zero — what a direct-mode HiGHS plan
+ * publishes for a battery that allows those modes.
  */
 export function setpointCommand(
   targetW: number,
   limits: { maxChargeW: number | null; maxDischargeW: number | null },
   validFrom: number,
   validUntil: number,
+  permissions = { gridCharging: false, batteryExport: false },
 ): BatteryCommand {
   // Whole watts: a target carried to fifteen decimals only makes an
   // automation's trace harder to read.
@@ -122,8 +123,8 @@ export function setpointCommand(
     setpointW: setpointW + 0,
     chargeLimitW: limits.maxChargeW,
     dischargeLimitW: limits.maxDischargeW,
-    gridCharging: false,
-    batteryExport: false,
+    gridCharging: permissions.gridCharging,
+    batteryExport: permissions.batteryExport,
     validFrom,
     validUntil,
   };

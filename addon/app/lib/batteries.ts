@@ -28,8 +28,8 @@ export type BatteryFields = {
    * receives a battery command. `balance` is always there: it is the battery's
    * own self-consumption, which needs nothing but boundaries. The direct modes
    * — `hold`, `charge`, `discharge` — need something that can force a power
-   * setpoint. No production strategy issues them yet; they are recorded so a
-   * direct-mode strategy can be enabled per battery.
+   * setpoint. HiGHS plans with exactly these (`batteryCapabilities`); allowing
+   * `charge` also allows grid charging, and `discharge` battery export.
    */
   controlModes: BatteryMode[];
   /**
@@ -255,10 +255,9 @@ export function isSteerable(battery: Pick<BatteryFields, "steered">): boolean {
 
 /**
  * Whether this strategy may command this battery: steered, and opted in to
- * planning. Both registered strategies publish `balance` with boundaries in
- * production, which every battery supports. The strategy stays a parameter
- * because one that issues direct modes would also need the battery's
- * `controlModes` to include them.
+ * planning. Every battery supports `balance`, and a strategy that can issue
+ * direct modes is narrowed to the battery's `controlModes` when it plans
+ * (`batteryCapabilities`), so no strategy is ruled out here.
  */
 export function steerableBy(
   battery: Pick<BatteryFields, "steered" | "chargeLimitPlanning">,

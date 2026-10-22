@@ -186,16 +186,18 @@ export default function BatteriesSection({
                   />
                 ))}
                 <p style={hintStyle}>
-                  Both battery control strategies command balance today. Hold,
-                  charge and discharge are recorded for strategies that will
-                  issue direct setpoints.
+                  HiGHS cost optimizer plans with every mode ticked here and
+                  publishes it on the event above; Evening target only ever
+                  sends balance. Ticking charge also lets it charge from the
+                  grid, and discharge lets it export, so untick any mode the
+                  automation does not carry out.
                 </p>
               </fieldset>
               <CheckboxField
                 name="dischargeLimitSupported"
                 label="Can limit discharge (AC output) in balance"
                 defaultChecked={battery?.dischargeLimitSupported ?? false}
-                hint="Lets Optimize charge limits hold energy back for higher-priced hours. The automation must cap battery output, not whole-inverter or grid export. Off leaves discharge native."
+                hint="Lets the strategy hold energy back for higher-priced hours. The automation must cap battery output, not whole-inverter or grid export. Off leaves discharge native."
               />
               <Field
                 name="powerStepW"

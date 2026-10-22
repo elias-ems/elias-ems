@@ -6,11 +6,14 @@ beside Evening target in Battery control and compared with it in the
 documentation site's Planner sandbox. The engine itself only calculates plans;
 the add-on's planning loop publishes them.
 
-Import a version 1 planner snapshot and choose equivalent capabilities (native
-balance and the exported writable boundaries) or expanded capabilities (explicitly
-assumed hold, charge and discharge modes). Expanded capabilities are the sandbox default and always assume permission
-for grid charging and battery export. Equivalent capabilities remain balance-only. Expanded setpoint resolution is supplied by the
-user; power-limit entities do not establish direct-control support.
+Import a version 1 planner snapshot and choose its capabilities: **as in Home
+Assistant** (the control modes ticked for the exported battery, and its power
+step — the default whenever the export records them), balance only (native
+balance and the exported writable boundaries), or expanded (all four modes
+assumed, the default for exports and presets without the battery's modes).
+Expanded always permits grid charging and battery export, and its setpoint
+resolution is supplied by the user; power-limit entities do not establish
+direct-control support.
 
 The sandbox runs every registered strategy on the same physical snapshot and
 scores each with the same evaluation for nominal and reduced solar
@@ -51,7 +54,9 @@ The versioned event contract — a coherent command with mode, boundaries,
 setpoint, permissions, identity and validity — is what every strategy publishes
 ([battery commands](battery-control.md#publishing-commands)), and carries the
 hold, charge and discharge modes this engine plans in. **In production HiGHS
-plans with equivalent capabilities only** — balance with the battery's
-boundaries, no grid charging or export — because direct modes need an adapter
-that enforces permissions against live power. Expanded capabilities stay in the
-sandbox until then.
+plans with the battery's own control modes** (`batteryCapabilities` in
+[strategies/capabilities.ts](../../addon/app/lib/strategies/capabilities.ts)):
+balance always, plus whichever of hold, charge and discharge are ticked in
+Settings, with `charge` permitting grid charging and `discharge` battery export.
+Nothing yet enforces those permissions against live power but the battery's own
+automation, so untick a mode it does not carry out.

@@ -20,7 +20,7 @@ const fixture = {
 
 test("compares every registered strategy on one snapshot", async () => {
   const comparison = await compare(fixture, {
-    expanded: false,
+    capabilities: "balance",
     setpointStepW: 100,
     timeLimitSeconds: 20,
   });
@@ -48,7 +48,7 @@ test("compares every registered strategy on one snapshot", async () => {
 
 test("reports a strategy that fails without hiding the others", async () => {
   const comparison = await compare(fixture, {
-    expanded: false,
+    capabilities: "balance",
     setpointStepW: 100,
     // Outside the engine's accepted budget, so only HiGHS can fail.
     timeLimitSeconds: 0,
@@ -56,4 +56,39 @@ test("reports a strategy that fails without hiding the others", async () => {
   const [eveningTarget, highs] = comparison.runs;
   assert.ok(eveningTarget.scenarios);
   assert.match(highs.error, /./);
+});
+
+test("plans with the exported battery's own modes", async () => {
+  const comparison = await compare(
+    {
+      ...fixture,
+      devices: {
+        battery: { controlModes: ["balance", "charge"], powerStepW: 50 },
+      },
+    },
+    { capabilities: "battery", setpointStepW: 100, timeLimitSeconds: 5 },
+  );
+  // Charge implies grid charging; discharge, and so export, is not allowed.
+  assert.deepEqual(comparison.input.capabilities, {
+    modes: ["balance", "charge"],
+    gridCharging: true,
+    batteryExport: false,
+    setpointStepW: 50,
+  });
+  for (const run of comparison.runs)
+    assert.ok(
+      run.result.commands.every((c) => ["balance", "charge"].includes(c.mode)),
+      run.id,
+    );
+});
+
+test("refuses battery capabilities an export does not record", async () => {
+  await assert.rejects(
+    compare(fixture, {
+      capabilities: "battery",
+      setpointStepW: 100,
+      timeLimitSeconds: 20,
+    }),
+    /does not record the battery's control modes/,
+  );
 });

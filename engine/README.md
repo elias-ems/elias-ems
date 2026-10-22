@@ -5,8 +5,8 @@ Uses [highs-js](https://github.com/lovasoa/highs-js), pinned as `highs@1.15.4`.
 Planning only. No Home Assistant imports, service calls, event publishing or
 persistence. The add-on runs it as the **HiGHS cost optimizer** battery control
 strategy ([strategies.md](../docs/features/strategies.md)), through `node.mjs`
-on a worker thread, with balance-only capabilities; the add-on's planning loop
-publishes the result.
+on a worker thread, with the capabilities of the battery's ticked control modes;
+the add-on's planning loop publishes the result.
 
 Install with `npm ci --prefix engine`. The site build now requires this install
 as well as `npm ci --prefix site`. Engine lint/types borrow the add-on toolchain:
