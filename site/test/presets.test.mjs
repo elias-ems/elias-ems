@@ -53,7 +53,7 @@ test("Evening target plans every preset", async () => {
 test("HiGHS widens balance boundaries past a few watts of surplus", async () => {
   const preset = presets.find((p) => p.key === "marginal-surplus");
   const { runs } = await compare(preset.dataset, {
-    expanded: false,
+    capabilities: "balance",
     setpointStepW: 100,
     timeLimitSeconds: 30,
   });

@@ -1,3 +1,4 @@
+import { batteryCapabilities } from "../../addon/app/lib/strategies/capabilities.ts";
 import {
   type Capabilities,
   engineInput,
@@ -7,14 +8,46 @@ import {
   scoreCommands,
 } from "../../addon/app/lib/strategies/index.ts";
 import { solve } from "../../engine/src/solve.ts";
-import type { Input } from "../../engine/src/types.ts";
-import { parseDataset } from "./planner.ts";
+import type { Input, Mode } from "../../engine/src/types.ts";
+import { type PlannerDataset, parseDataset } from "./planner.ts";
 
 export type ComparisonOptions = {
-  expanded: boolean;
+  /**
+   * `battery`: the modes ticked for the exported battery, which is what the
+   * add-on planned with. `balance`: balance with boundaries only. `expanded`:
+   * all four modes with grid charging and export, whatever the battery allows.
+   */
+  capabilities: "battery" | "balance" | "expanded";
+  /** The setpoint step `expanded` assumes; `battery` uses the battery's own. */
   setpointStepW: number;
   timeLimitSeconds: number;
 };
+
+const MODES: Mode[] = ["balance", "hold", "charge", "discharge"];
+
+/**
+ * The exported battery's control modes and power step, when the export
+ * carries them: exports from before per-battery modes, and the presets, do not.
+ */
+export function exportedBattery(
+  dataset: Pick<PlannerDataset, "devices">,
+): { controlModes: Mode[]; powerStepW: number } | undefined {
+  const devices = dataset.devices as
+    | { battery?: { controlModes?: unknown; powerStepW?: unknown } }
+    | undefined;
+  const battery = devices?.battery;
+  if (
+    !Array.isArray(battery?.controlModes) ||
+    !battery.controlModes.every((mode) => MODES.includes(mode)) ||
+    typeof battery.powerStepW !== "number" ||
+    !(battery.powerStepW > 0)
+  )
+    return undefined;
+  return {
+    controlModes: battery.controlModes,
+    powerStepW: battery.powerStepW,
+  };
+}
 
 /** One registered strategy's outcome on the imported snapshot. */
 export type StrategyRun = {
@@ -30,10 +63,21 @@ export type StrategyRun = {
   error?: string;
 };
 
-export function sandboxCapabilities(options: ComparisonOptions): Capabilities {
-  return options.expanded
+export function sandboxCapabilities(
+  options: ComparisonOptions,
+  dataset: Pick<PlannerDataset, "devices">,
+): Capabilities {
+  if (options.capabilities === "battery") {
+    const battery = exportedBattery(dataset);
+    if (!battery)
+      throw new Error(
+        "This export does not record the battery's control modes; choose balance or expanded.",
+      );
+    return batteryCapabilities(battery);
+  }
+  return options.capabilities === "expanded"
     ? {
-        modes: ["balance", "hold", "charge", "discharge"],
+        modes: MODES,
         gridCharging: true,
         batteryExport: true,
         setpointStepW: options.setpointStepW,
@@ -59,7 +103,7 @@ export async function compare(
     terminalReserveKwh: dataset.terminalReserveKwh,
     settings: dataset.settings,
   };
-  const capabilities = sandboxCapabilities(options);
+  const capabilities = sandboxCapabilities(options, dataset);
   const input: Input = engineInput(
     snapshot,
     capabilities,

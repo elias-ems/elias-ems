@@ -18,7 +18,7 @@ export const highs: Strategy<"highs"> = {
   id: "highs",
   label: "HiGHS cost optimizer",
   description:
-    "Plan with solar forecasts and prices for the lowest expected cost, solved exactly with the HiGHS optimizer and checked against a physical replay. Publishes balance commands with a maximum charge power and, where supported, an AC output limit, so the battery stays in native self-consumption. Has no evening target.",
+    "Plan with solar forecasts and prices for the lowest expected cost, solved exactly with the HiGHS optimizer and checked against a physical replay. Publishes balance commands with a maximum charge power and, where supported, an AC output limit — and, for a battery whose automation allows them, hold, charge and discharge setpoints, charging from the grid or exporting when that is cheaper. Has no evening target.",
   supportedModes: ["balance", "hold", "charge", "discharge"],
   needsDeadline: false,
   async plan(snapshot, context) {

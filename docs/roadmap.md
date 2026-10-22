@@ -9,9 +9,11 @@
   ([features/strategies.md](features/strategies.md)). Two are registered:
   **Evening target** and **HiGHS cost optimizer**, both selectable in Battery
   control and compared side by side in the sandbox. Net zero energy has been
-  removed; installs that had it come back with control switched off. Next: a
-  terminal value for HiGHS, direct modes in production once an adapter enforces
-  permissions, folding the older benchmark gym onto the registry, and learned
+  removed; installs that had it come back with control switched off. HiGHS plans
+  with the modes ticked for the battery (`batteryCapabilities`), so direct
+  hold/charge/discharge commands now reach production. Next: a terminal value
+  for HiGHS, an adapter that enforces grid permissions against live power,
+  folding the older benchmark gym onto the registry, and learned
   strategies trained against `gym/strategies.mjs`.
 
 - Documentation planner sandbox — import a planner export locally in the browser
@@ -95,7 +97,7 @@
 
 HiGHS/WASM, explicit modes and boundaries, permissions, shared physical
 comparison, and worker isolation. Selectable in production as the HiGHS cost
-optimizer strategy with balance-only capabilities, packaged into the add-on
-image beside the add-on. See [Planning engine](features/planning-engine.md).
-Direct modes in production, adapter acknowledgement and device watchdogs remain
-future work.
+optimizer strategy with the battery's own control modes, packaged into the
+add-on image beside the add-on. See [Planning engine](features/planning-engine.md).
+Adapter acknowledgement, permission enforcement against live power and device
+watchdogs remain future work.

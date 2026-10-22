@@ -274,17 +274,15 @@ What each strategy issues today:
 | Strategy | Mode | Setpoint | Boundaries |
 | --- | --- | --- | --- |
 | Evening target | `balance` | none | the plan's charge ceiling, and its AC output ceiling when the battery can limit discharge |
-| HiGHS cost optimizer | `balance` | none | the same |
+| HiGHS cost optimizer | `balance`, plus `hold` / `charge` / `discharge` where the battery allows them | in the direct modes | the same |
 
-The direct modes are in the contract and in the HiGHS engine's model — the
-Planner sandbox compares plans that use them — but no production strategy issues
-them yet: the add-on plans with **balance-only capabilities**
-(`PRODUCTION_CAPABILITIES` in
-[charge-planner.server.ts](../../addon/app/lib/charge-planner.server.ts)), the one
-place that would change. `grid_charging` and `battery_export` are in the
-contract from the first version and every strategy sends `false`: none asks a
-battery to charge from the grid or to discharge into it. They are there so an adapter can enforce them against
-live power before a strategy exists that wants either.
+HiGHS plans with the modes ticked for the battery (`batteryCapabilities` in
+[strategies/capabilities.ts](../../addon/app/lib/strategies/capabilities.ts)).
+Ticking `charge` also permits charging from the grid, and `discharge` exporting
+from the battery: a direct command carries `grid_charging` / `battery_export`
+as the battery permits, while `balance` always sends `false` for both, since it
+never does either. Nothing but the automation enforces them against live power
+yet, so untick any mode it does not carry out.
 
 Which modes a battery's automation can carry out is configured per battery —
 see [What the automation can do](#what-the-automation-can-do).
@@ -416,15 +414,15 @@ the add-on has no way to find out:
 
 | Field | Meaning |
 | --- | --- |
-| `controlModes` | `balance` always; `hold`, `charge`, `discharge` when the automation can force a setpoint. No production strategy issues the direct modes yet; recorded so one can be enabled per battery |
+| `controlModes` | `balance` always; `hold`, `charge`, `discharge` when the automation can force a setpoint. HiGHS plans and publishes every mode ticked; `charge` implies grid charging and `discharge` battery export. New batteries start with all four |
 | `dischargeLimitSupported` | the automation can cap AC output in `balance`. Without it the strategies plan native discharge and send `discharge_limit_w: null` |
 | `powerStepW` | the resolution boundaries are planned in — what a `number` entity's `step` used to supply. Default 100 W |
 | `chargeLimitPlanning` | the selected strategy plans (and previews) this battery |
 
 ### A setpoint over Modbus
 
-Direct-mode commands, written to a signed register. No production strategy
-sends these yet; this is the shape an automation takes once one does:
+Direct-mode commands, written to a signed register — what HiGHS sends for a
+battery with hold, charge or discharge ticked:
 
 ```yaml
 alias: Battery command → inverter
@@ -737,9 +735,10 @@ tick currently in flight, since advancing a clock only *starts* one.
 - **Planning several batteries together.** Commands are per battery already;
   both strategies still plan exactly one, because independent plans would
   allocate the same solar twice.
-- **Direct modes in production.** HiGHS plans hold, charge and discharge in the
-  sandbox; production uses balance only until a battery's automation (or an
-  adapter) is trusted to enforce grid-charging and export permissions.
+- **Enforcing direct-mode permissions.** HiGHS publishes hold, charge and
+  discharge for a battery that ticks them, and only the automation stands
+  between a `grid_charging: false` and a grid import; an adapter checking live
+  power would make that a guarantee rather than a convention.
 - **A terminal value for HiGHS.** It values nothing left in the battery at the
   end of the horizon, so a plan can end at the minimum SoC; replanning moves
   that end along, and the [gym](strategies.md#the-gym) is where to fix it.

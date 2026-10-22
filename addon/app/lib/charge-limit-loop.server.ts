@@ -21,7 +21,12 @@
  */
 import { type Battery, batterySlug, steerableBy } from "./batteries";
 import { listBatteries } from "./batteries.server";
-import { balanceCommand, type ReleaseReason } from "./battery-command";
+import {
+  balanceCommand,
+  describeCommand,
+  type ReleaseReason,
+  setpointCommand,
+} from "./battery-command";
 import {
   type CommandPublish,
   type CommandTarget,
@@ -43,6 +48,7 @@ import { calculateChargePlan } from "./charge-planner.server";
 import { CHARGE_LIMIT_PLANNING, type StrategyId } from "./control";
 import { readControlConfig } from "./control-config.server";
 import { appendDiagnostic } from "./diagnostics.server";
+import { batteryCapabilities } from "./strategies/capabilities.ts";
 
 const statuses = new Map<string, ChargeLimitStatus>();
 let queue: Promise<unknown> = Promise.resolve();
@@ -169,6 +175,7 @@ function empty(b: Battery, strategy: StrategyId): ChargeLimitStatus {
     validUntil: null,
     requestedW: null,
     requestedDischargeW: null,
+    requestedSetpoint: null,
     plan: null,
     currency: "EUR",
     timeZone: "UTC",
@@ -191,6 +198,8 @@ function standing(status: ChargeLimitStatus, batteryId: string) {
   const command = commandOwner(batteryId) ? publishedCommand(batteryId) : null;
   status.requestedW = command?.chargeLimitW ?? null;
   status.requestedDischargeW = command?.dischargeLimitW ?? null;
+  status.requestedSetpoint =
+    command && command.mode !== "balance" ? describeCommand(command) : null;
 }
 
 export async function readChargeLimits(): Promise<ChargeLimitsData> {
@@ -218,7 +227,38 @@ type PlannedCommand = Awaited<
   ReturnType<typeof calculateChargePlan>
 >["commands"][number];
 
-/** One planned interval as a `balance` command, restated when it ends. */
+/**
+ * One planned command as the event an automation acts on: `balance` with its
+ * boundaries, or a direct setpoint carrying the battery's grid permissions.
+ */
+function batteryCommand(
+  b: Battery,
+  command: PlannedCommand,
+  validFrom: number,
+  validUntil: number,
+) {
+  // Without discharge limiting the plan holds native output, and the command
+  // says so by leaving the boundary out.
+  const dischargeLimitW = b.dischargeLimitSupported
+    ? command.dischargeLimitW
+    : null;
+  if (command.mode === "balance")
+    return balanceCommand(
+      { chargeLimitW: command.chargeLimitW, dischargeLimitW },
+      validFrom,
+      validUntil,
+    );
+  const { gridCharging, batteryExport } = batteryCapabilities(b);
+  return setpointCommand(
+    command.setpointW,
+    { maxChargeW: command.chargeLimitW, maxDischargeW: dischargeLimitW },
+    validFrom,
+    validUntil,
+    { gridCharging, batteryExport },
+  );
+}
+
+/** One planned interval as a battery command, restated when it ends. */
 async function publishInterval(
   b: Battery,
   strategy: StrategyId,
@@ -229,15 +269,9 @@ async function publishInterval(
     {
       ...targetOf(b),
       strategy,
-      command: balanceCommand(
-        {
-          chargeLimitW: command.chargeLimitW,
-          // Without discharge limiting the plan holds native output, and the
-          // command says so by leaving the boundary out.
-          dischargeLimitW: b.dischargeLimitSupported
-            ? command.dischargeLimitW
-            : null,
-        },
+      command: batteryCommand(
+        b,
+        command,
         interval.start,
         interval.end + COMMAND_GRACE_MS,
       ),
@@ -476,7 +510,7 @@ export async function chargeLimitTick(now = Date.now()) {
         "charge-limit",
         "info",
         [
-          `${b.title}: ${strategyLabel(control.strategy)} ${status.mode}${shownIndex === index ? "" : `, from ${status.times[String(result.plan.points[shownIndex].start)]}`}, maximum charge ${shown.chargeLimitW} W${b.dischargeLimitSupported ? `, maximum AC output ${shown.dischargeLimitW} W` : ""}. ${status.message}`,
+          `${b.title}: ${strategyLabel(control.strategy)} ${status.mode}${shownIndex === index ? "" : `, from ${status.times[String(result.plan.points[shownIndex].start)]}`}: ${describeCommand(batteryCommand(b, shown, 0, 0))}. ${status.message}`,
           sent,
         ]
           .filter(Boolean)

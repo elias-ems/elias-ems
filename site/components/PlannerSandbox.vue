@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
-import type { compare } from "../lib/comparison";
+import type { ComparisonOptions, compare } from "../lib/comparison";
+import { exportedBattery } from "../lib/comparison";
 import type { PlannerDataset } from "../lib/planner";
 import { parseDataset } from "../lib/planner";
 import type { PlannerPreset } from "../lib/presets";
@@ -9,12 +10,17 @@ import { presets } from "../lib/presets";
 
 const dataset = shallowRef<PlannerDataset>();
 const comparison = shallowRef<Awaited<ReturnType<typeof compare>>>();
+/** The exported battery's own modes, which is what Home Assistant planned with. */
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const battery = computed(() =>
+  dataset.value ? exportedBattery(dataset.value) : undefined,
+);
 /** Every registered strategy that produced a schedule, in registry order. */
 const scored = computed(
   () => comparison.value?.runs.filter((run) => run.scenarios) ?? [],
 );
-const options = ref({
-  expanded: true,
+const options = ref<ComparisonOptions>({
+  capabilities: "expanded",
   setpointStepW: 100,
   timeLimitSeconds: 30,
 });
@@ -101,6 +107,8 @@ function load(parsed: PlannerDataset, name: string) {
     deadline: new Date(parsed.settings.deadline).toISOString(),
     spikeBufferKwh: parsed.settings.spikeBufferKwh ?? 0.54,
   };
+  // Start from what Home Assistant planned with when the export says so.
+  options.value.capabilities = exportedBattery(parsed) ? "battery" : "expanded";
   filename.value = name;
 }
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
@@ -332,9 +340,11 @@ function download() {
           <label>Spike buffer (kWh)<input v-model.number="settings.spikeBufferKwh" type="number" min="0" step="any" required /></label>
         </div>
         <fieldset>
-          <legend>Capability assumptions for every strategy (not established by this export)</legend>
-          <label>Comparison<select aria-label="Comparison capabilities" v-model="options.expanded"><option :value="false">Equivalent: balance + existing boundaries</option><option :value="true">Expanded: assume all four modes</option></select></label>
-          <template v-if="options.expanded">
+          <legend>Capabilities for every strategy</legend>
+          <label>Comparison<select aria-label="Comparison capabilities" v-model="options.capabilities"><option v-if="battery" value="battery">As in Home Assistant: {{ battery.controlModes.join(", ") }}</option><option value="balance">Balance + existing boundaries</option><option value="expanded">Expanded: assume all four modes</option></select></label>
+          <p v-if="options.capabilities === 'battery'">The modes ticked for this battery in Settings, which is what the add-on planned with. Charge allows grid charging and discharge allows battery export; setpoints in its {{ battery?.powerStepW }} W power step.</p>
+          <p v-else-if="!battery">This export does not record the battery's modes, so what Home Assistant would plan with is unknown.</p>
+          <template v-if="options.capabilities === 'expanded'">
             <p>Hypothetical direct control with signed AC setpoints and native SoC protection. Grid charging and battery export are always permitted in this expanded simulation. No device compatibility is inferred from limit entities.</p>
             <label>Assumed setpoint step (W)<input v-model.number="options.setpointStepW" type="number" min="1" required /></label>
           </template>

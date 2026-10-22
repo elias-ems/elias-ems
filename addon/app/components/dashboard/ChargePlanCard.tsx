@@ -141,8 +141,12 @@ function BatteryPlan({
         <span style={hintStyle}>
           Recommended charge ceiling{expired ? " (previous plan)" : ""}
         </span>
-        {status.requestedW !== null && (
-          <span style={hintStyle}>Commanded: {status.requestedW} W</span>
+        {status.requestedSetpoint ? (
+          <span style={hintStyle}>Commanded: {status.requestedSetpoint}</span>
+        ) : (
+          status.requestedW !== null && (
+            <span style={hintStyle}>Commanded: {status.requestedW} W</span>
+          )
         )}
       </div>
       {first?.dischargeLimitW !== undefined && (

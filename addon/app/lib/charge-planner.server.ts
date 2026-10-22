@@ -13,11 +13,8 @@ import { parsePriceFormulas, priceSlot } from "./prices";
 import { listPvEntities } from "./pv-entities.server";
 import { publishedLimitPercent } from "./pv-limits.server";
 import { readStates } from "./states.server";
-import {
-  type Capabilities,
-  type PlanningSnapshot,
-  strategyById,
-} from "./strategies/index.ts";
+import { batteryCapabilities } from "./strategies/capabilities.ts";
+import { type PlanningSnapshot, strategyById } from "./strategies/index.ts";
 
 export function numericState(state: HaState | null | undefined): number | null {
   if (!state?.state.trim()) return null;
@@ -427,19 +424,6 @@ export async function preparePlannerInputs(
   };
 }
 
-/**
- * What a strategy may ask the battery for in production: its native balance
- * mode with boundaries, never grid charging or battery export. The engine
- * plans direct modes too, and the command contract carries them, but they stay
- * in the Planner sandbox until a strategy is approved to issue them; this is
- * the one place that would change.
- */
-export const PRODUCTION_CAPABILITIES: Capabilities = {
-  modes: ["balance"],
-  gridCharging: false,
-  batteryExport: false,
-};
-
 /** Solver budget per plan; the loop starts one five minutes before it is due. */
 export const PRODUCTION_SOLVE_SECONDS = 20;
 
@@ -468,7 +452,7 @@ export async function calculateChargePlan(
       "Waiting for solar and price coverage through the next evening deadline.",
     );
   const result = await strategy.plan(planningSnapshot(inputs), {
-    capabilities: PRODUCTION_CAPABILITIES,
+    capabilities: batteryCapabilities(battery),
     timeLimitSeconds: PRODUCTION_SOLVE_SECONDS,
     solveHighs: (input) => solveHighs(input, signal),
   });

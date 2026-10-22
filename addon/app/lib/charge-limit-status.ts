@@ -14,6 +14,11 @@ export type ChargeLimitStatus = {
   requestedW: number | null;
   /** Its discharge boundary; null when native or nothing is standing. */
   requestedDischargeW?: number | null;
+  /**
+   * The standing command when it is a direct one, e.g. "charge 700 W"; null
+   * in `balance`, where the boundaries above say everything.
+   */
+  requestedSetpoint?: string | null;
   plan: ChargePlan | null;
   /** Which registered strategy produced `plan`. */
   strategy: StrategyId;

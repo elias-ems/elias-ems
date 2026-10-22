@@ -57,7 +57,7 @@ parse it from a file. The `StrategyContext` carries what is platform-specific:
 
 | Field | Add-on | Sandbox | Gym |
 | --- | --- | --- | --- |
-| `capabilities` | balance only, no grid charging or export (`PRODUCTION_CAPABILITIES`) | equivalent (balance) or expanded (all four modes) | balance, or `--expanded` |
+| `capabilities` | the battery's ticked control modes (`batteryCapabilities`) | the exported battery's modes, balance only, or expanded (all four modes) | balance, or `--expanded` |
 | `timeLimitSeconds` | 20 | the form's solver budget | 30 |
 | `solveHighs` | a worker thread via `engine/node.mjs` | the sandbox's browser worker | a worker thread via `engine/node.mjs` |
 
@@ -105,15 +105,15 @@ value**, so a plan can end at the minimum SoC; the planning loop replanning
 at every price interval moves that horizon along, but valuing the end state properly
 is open work.
 
-In production it runs with **equivalent capabilities**: balance plus the
-battery's charge ceiling and, when the automation can limit discharge, its AC
-output ceiling — exactly what Evening target publishes. The engine also plans
-hold, charge and discharge setpoints with grid-charging and export permissions,
-and the command contract carries them, but those stay in the sandbox until a
-battery's automation (or an adapter) is trusted to enforce the permissions
-against live power. Enabling them is `PRODUCTION_CAPABILITIES` in
-[charge-planner.server.ts](../../addon/app/lib/charge-planner.server.ts),
-narrowed per battery by its `controlModes`.
+In production it plans with **the battery's own capabilities**:
+`batteryCapabilities` in
+[strategies/capabilities.ts](../../addon/app/lib/strategies/capabilities.ts)
+turns the modes ticked in Settings into balance plus hold, charge and discharge
+setpoints, with `charge` permitting grid charging and `discharge` battery
+export, in the battery's power step. A battery with only balance gets exactly
+what Evening target publishes: the charge ceiling and, when the automation can
+limit discharge, the AC output ceiling. The Planner sandbox uses the same
+function on an export, so its default run is what production planned.
 
 The solver runs on a worker thread
 ([highs-runner.server.ts](../../addon/app/lib/highs-runner.server.ts) importing
