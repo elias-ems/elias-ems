@@ -159,7 +159,7 @@ Evening target is the strategy this section describes; HiGHS plans from the
 same intervals, model and reduced-solar scenario but none of the evening-target
 parameters — see [strategies.md](strategies.md). The old per-battery algorithm
 selector is gone and older selections are ignored. The legacy cost optimizer
-remains in Benchmark and the offline gym.
+remains in the offline gym.
 
 Evening target starts with maximum charging and minimum controllable discharge to
 establish the reachable evening target in nominal and reduced-solar scenarios.

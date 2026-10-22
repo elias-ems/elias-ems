@@ -1,5 +1,7 @@
 # Planner Data Export & Benchmark Import Implementation Plan
 
+> **Superseded in part.** The in-app `/benchmark` import and runner described here were later removed: strategies are compared in the documentation site's Planner sandbox, and `/benchmark` now only links there and downloads the export.
+
 ## Overview
 This plan implements an end-to-end export and import pipeline for the EMS battery planner:
 1. **Export from Home Assistant**: Capture all live inputs used by the planner—including interval solar forecasts, load profile forecasts, dynamic price slots, terminal reserve calculations, algorithm settings, and all configured devices (batteries, PV arrays, grid meter, curtailment config, price rules, and control settings)—into a clean, portable JSON dataset.

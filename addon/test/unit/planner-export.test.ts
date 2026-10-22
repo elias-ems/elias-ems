@@ -120,7 +120,7 @@ describe("planner export data generation and route", () => {
     expect(dataset.devices.grid.powerEntityId).toBe("sensor.grid_power");
     expect(dataset.settings.algorithm).toBe("evening-target");
     expect(dataset.devices.control.strategy).toBe("highs");
-    // `settings.algorithm` above is the Benchmark's default, not what steers.
+    // `settings.algorithm` above is the replay's default, not what steers.
     expect(dataset.assumptions).toContain(
       "Battery control strategy: HiGHS cost optimizer.",
     );

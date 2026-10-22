@@ -94,7 +94,7 @@ export async function exportPlannerData(
       ? `PV curtailment modeled with strategy "${curtailment.strategy}" across ${pvEntities.length} configured PV array(s).`
       : "PV curtailment unmodeled or disabled.",
     `Battery "${battery.title}": ${battery.capacityKwh} kWh capacity, ${inputs.model.minSoc}%–${inputs.model.maxSoc}% SoC window, initial SoC ${inputs.model.soc.toFixed(1)}%.`,
-    // `settings.algorithm` is the Benchmark's default and always reads
+    // `settings.algorithm` is the replay's default and always reads
     // "evening-target", so name the strategy actually steering here.
     `Battery control strategy: ${strategyById(control.strategy).label}${control.enabled ? "" : " (battery control disabled)"}.`,
     inputs.reserveCovered
