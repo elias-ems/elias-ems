@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from "vue";
 import type { ComparisonOptions, compare } from "../lib/comparison";
 import { exportedBattery } from "../lib/comparison";
 import type { PlannerDataset } from "../lib/planner";
@@ -222,14 +229,30 @@ function intervalTime(start: number, end: number) {
   const to = `${day.format(start) === day.format(end) ? "" : `${date.format(end)}, `}${clock.format(end)}${changesOffset ? ` ${zone(end)}` : ""}`;
   return `${from} – ${to}`;
 }
-// Plot area of each SoC chart, in viewBox units: x 40–590, y 200 (0%) to 20 (100%).
+// Plot area of the SoC chart, in viewBox units: x 40–520, y 200 (0%) to 20
+// (100%). The 200 units right of it hold each line's direct label, which is
+// long enough for "HiGHS cost optimizer 100%".
+const VIEW_WIDTH = 720;
+const PLOT_LEFT = 40;
+const PLOT_RIGHT = 520;
+function plotX(i: number, count: number) {
+  return PLOT_LEFT + (i / Math.max(1, count - 1)) * (PLOT_RIGHT - PLOT_LEFT);
+}
+function plotY(soc: number) {
+  return 200 - soc * 1.8;
+}
 function polyline(socs: number[]) {
   return socs
-    .map(
-      (soc, i) =>
-        `${40 + (i / Math.max(1, socs.length - 1)) * 550},${200 - soc * 1.8}`,
-    )
+    .map((soc, i) => `${plotX(i, socs.length)},${plotY(soc)}`)
     .join(" ");
+}
+/**
+ * A strategy's colour follows its place in the registry, never its rank, so a
+ * rerun that reorders the scoreboard repaints nothing. Slots in `--series-*`.
+ */
+function series(id: string) {
+  const slot = comparison.value?.runs.findIndex((run) => run.id === id) ?? 0;
+  return `var(--planner-series-${(slot % 8) + 1})`;
 }
 // The scenario table's row groups, each labelled with its solar adjustment.
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
@@ -251,29 +274,96 @@ const replays = computed(() => {
     group(`Excess solar (+${margin}%)`, (run) => run.excess),
   ];
 });
-// One chart per registered strategy, nominal solar, side by side.
+// Every strategy's nominal SoC on one chart, each labelled at its end. Labels
+// are nudged apart so two plans ending at the same SoC stay readable.
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
-const strategies = computed(() =>
-  scored.value.flatMap((run) => {
+const chart = computed(() => {
+  const lines = scored.value.flatMap((run) => {
     const nominal = run.scenarios?.[0];
     if (!nominal) return [];
-    const target = (
-      run.result?.details as
-        | { target?: { requestedSoc: number; reachableSoc: number[] } }
-        | undefined
-    )?.target;
     return {
       id: run.id,
       name: run.label,
-      cost: nominal.cost,
-      finalSoc: nominal.finalSoc,
+      color: series(run.id),
+      socs: nominal.points.map((p) => p.soc),
       curve: polyline(nominal.points.map((p) => p.soc)),
-      baseline: polyline(
-        run.result?.plan.points.map((p) => p.baselineSoc) ?? [],
-      ),
-      target,
+      finalSoc: nominal.finalSoc,
+      labelY: plotY(nominal.finalSoc) + 4,
     };
-  }),
+  });
+  const byY = [...lines].sort((a, b) => a.labelY - b.labelY);
+  for (const [i, line] of byY.entries())
+    if (i) line.labelY = Math.max(line.labelY, byY[i - 1].labelY + 14);
+  // Then back up from the axis labels, for plans that all end near empty.
+  for (let i = byY.length - 1; i >= 0; i--)
+    byY[i].labelY = Math.min(
+      byY[i].labelY,
+      i === byY.length - 1 ? 204 : byY[i + 1].labelY - 14,
+    );
+  // The unrestricted baseline is the same battery left alone, whoever plans.
+  const baseline = scored.value[0]?.result?.plan.points.map(
+    (p) => p.baselineSoc,
+  );
+  return { lines, baseline: baseline ? polyline(baseline) : "" };
+});
+// The hovered interval on the chart, for its crosshair and readout.
+const hover = ref<number>();
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+function track(event: PointerEvent) {
+  const svg = event.currentTarget as SVGSVGElement;
+  const box = svg.getBoundingClientRect();
+  const x = ((event.clientX - box.left) / box.width) * VIEW_WIDTH;
+  const count = comparison.value?.input.slots.length ?? 0;
+  if (!count || x < PLOT_LEFT - 10 || x > PLOT_RIGHT + 10) {
+    hover.value = undefined;
+    return;
+  }
+  hover.value = Math.max(
+    0,
+    Math.min(
+      count - 1,
+      Math.round(
+        ((x - PLOT_LEFT) / (PLOT_RIGHT - PLOT_LEFT)) * Math.max(1, count - 1),
+      ),
+    ),
+  );
+}
+/**
+ * One row per strategy, cheapest mean cost first; a strategy that failed on
+ * this snapshot keeps its row at the foot, so it never silently disappears.
+ */
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const board = computed(() => {
+  const runs = comparison.value?.runs ?? [];
+  const ranked = runs
+    .filter((run) => run.meanCost !== undefined)
+    .sort((a, b) => (a.meanCost ?? 0) - (b.meanCost ?? 0));
+  const best = ranked[0]?.meanCost ?? 0;
+  return [
+    ...ranked.map((run, i) => ({
+      run,
+      rank: i + 1,
+      delta: (run.meanCost ?? 0) - best,
+    })),
+    ...runs
+      .filter((run) => run.meanCost === undefined)
+      .map((run) => ({ run, rank: undefined, delta: undefined })),
+  ];
+});
+/**
+ * The interval table carries six columns per strategy, so past two it is a
+ * wall. Two cheapest by default; any set can be ticked.
+ */
+const tableIds = ref<string[]>([]);
+watch(comparison, () => {
+  tableIds.value = [...scored.value]
+    .sort((a, b) => (a.meanCost ?? 0) - (b.meanCost ?? 0))
+    .slice(0, 2)
+    .map((run) => run.id);
+});
+// biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
+const tabled = computed(() =>
+  scored.value.filter((run) => tableIds.value.includes(run.id)),
 );
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function axisTime(value: number) {
@@ -357,36 +447,74 @@ function download() {
     </template>
     <template v-if="comparison">
       <h2>Strategy comparison</h2>
-      <ul>
-        <li v-for="run in comparison.runs" :key="run.id"><strong>{{ run.label }}</strong>: {{ run.error ?? run.result?.status }} · {{ run.runtimeMs.toFixed(0) }} ms<template v-if="run.result?.notes.length"> · {{ run.result.notes.join(" ") }}</template></li>
-      </ul>
-      <div class="planner-charts">
-        <figure v-for="strategy in strategies" :key="strategy.id">
-          <h3>{{ strategy.name }}</h3>
-          <svg viewBox="0 0 600 230" role="img" :aria-label="`${strategy.name}: end-of-interval battery state of charge, solid planned, dashed unrestricted baseline`">
-            <g class="planner-grid"><line v-for="soc in [0, 50, 100]" :key="soc" x1="40" :y1="200 - soc * 1.8" x2="590" :y2="200 - soc * 1.8" /></g>
-            <text v-for="soc in [0, 50, 100]" :key="soc" x="34" :y="204 - soc * 1.8" text-anchor="end">{{ soc }}%</text>
-            <text x="40" y="222">{{ axisTime(dataset!.slots[0].start) }}</text>
-            <text x="590" y="222" text-anchor="end">{{ axisTime(dataset!.slots.at(-1)!.end) }}</text>
-            <polyline :points="strategy.baseline" fill="none" stroke="currentColor" stroke-dasharray="6 5" stroke-width="1.5" />
-            <polyline :points="strategy.curve" fill="none" stroke="var(--vp-c-brand-1)" stroke-width="2.5" />
-          </svg>
-          <figcaption>Cost incl. wear <strong>{{ strategy.cost.toFixed(3) }} {{ dataset!.currency }}</strong> · final SoC {{ strategy.finalSoc.toFixed(1) }}%<template v-if="strategy.target"> · reachable at deadline (forecast / reduced solar) {{ strategy.target.reachableSoc.map(s => s.toFixed(1) + "%").join(" / ") }} of {{ strategy.target.requestedSoc }}%</template></figcaption>
-        </figure>
-      </div>
-      <p>Battery SoC across the horizon at nominal solar: solid = planned; dashed = unrestricted baseline. Exact values per interval are in the schedule below.</p>
-      <p>Every registered strategy plans the same snapshot under the same capabilities and is scored by the same physical replay, for nominal and reduced solar: import charges minus export revenue plus battery wear. Excess solar replays the same schedule with solar raised by the same margin, to show what each plan leaves on the table on a sunnier day; it is reported only, and no strategy plans for it. Evening target keeps balance mode and aims for its deadline and reserve; HiGHS minimizes that mean cost directly and, at equal cost, prefers balance. HiGHS has no evening target or terminal-reserve value, so a lower final SoC can explain a lower cost. These are forecast simulations, not measured savings, and costs exclude Evening target’s switching and buffer penalties.</p>
-      <div class="planner-table" tabindex="0">
-        <table><thead><tr><th>Scenario</th><th>Strategy</th><th>Cost incl. wear</th><th>Final SoC</th><th>PV generated / curtailed kWh</th></tr></thead>
-          <tbody><template v-for="scenario in replays" :key="scenario.name">
-            <tr v-for="(row, j) in scenario.rows" :key="row.id"><th v-if="j === 0" scope="rowgroup" :rowspan="scenario.rows.length">{{ scenario.name }}</th><td>{{ row.label }}</td><td>{{ row.result.cost.toFixed(3) }}</td><td>{{ row.result.finalSoc.toFixed(1) }}%</td><td>{{ row.result.generatedKwh.toFixed(2) }} / {{ row.result.curtailedKwh.toFixed(2) }}</td></tr>
-          </template></tbody>
+      <div class="planner-table" tabindex="0" role="region" aria-label="Strategy scoreboard">
+        <table>
+          <thead><tr><th scope="col">Rank</th><th scope="col">Strategy</th><th scope="col">Mean cost</th><th scope="col">vs best</th><th scope="col">Nominal</th><th scope="col">Reduced solar</th><th scope="col">Excess solar</th><th scope="col">Final SoC<br />nominal / reduced</th><th scope="col">Runtime</th><th scope="col">Status</th></tr></thead>
+          <tbody>
+            <tr v-for="row in board" :key="row.run.id" :class="{ 'planner-best': row.rank === 1 }">
+              <td>{{ row.rank ?? "—" }}</td>
+              <th scope="row"><span class="planner-swatch" :style="{ background: series(row.run.id) }" aria-hidden="true"></span>{{ row.run.label }}</th>
+              <template v-if="row.run.scenarios">
+                <td>{{ row.run.meanCost!.toFixed(3) }}</td>
+                <td>{{ row.rank === 1 ? "best" : `+${row.delta!.toFixed(3)}` }}</td>
+                <td>{{ row.run.scenarios[0].cost.toFixed(3) }}</td>
+                <td>{{ row.run.scenarios[1].cost.toFixed(3) }}</td>
+                <td>{{ row.run.excess!.cost.toFixed(3) }}</td>
+                <td>{{ row.run.scenarios[0].finalSoc.toFixed(1) }}% / {{ row.run.scenarios[1].finalSoc.toFixed(1) }}%</td>
+              </template>
+              <td v-else colspan="6">—</td>
+              <td>{{ row.run.runtimeMs.toFixed(0) }} ms</td>
+              <td class="planner-status">{{ row.run.error ?? row.run.result?.status }}<template v-if="row.run.result?.notes.length"> · {{ row.run.result.notes.join(" ") }}</template></td>
+            </tr>
+          </tbody>
         </table>
       </div>
+      <p>Costs in {{ dataset!.currency }}, including battery wear. Ranked by mean cost over nominal and reduced solar, which is what every strategy is scored on; excess solar is reported only. Mean cost puts no value on energy left at the end, so read final SoC beside it: a plan that ends fuller has kept something back for after the horizon.</p>
+      <figure v-if="chart.lines.length" class="planner-chart">
+        <h3>Battery SoC at nominal solar</h3>
+        <ul class="planner-legend">
+          <li v-for="line in chart.lines" :key="line.id"><span class="planner-swatch" :style="{ background: line.color }" aria-hidden="true"></span>{{ line.name }}</li>
+          <li><span class="planner-swatch planner-swatch-dashed" aria-hidden="true"></span>Unrestricted baseline</li>
+        </ul>
+        <svg :viewBox="`0 0 ${VIEW_WIDTH} 230`" role="img" :aria-label="`End-of-interval battery state of charge for ${chart.lines.map(l => l.name).join(', ')}; dashed unrestricted baseline. Exact values are in the scoreboard and the interval table.`" @pointermove="track" @pointerleave="hover = undefined">
+          <g class="planner-grid"><line v-for="soc in [0, 50, 100]" :key="soc" :x1="PLOT_LEFT" :y1="plotY(soc)" :x2="PLOT_RIGHT" :y2="plotY(soc)" /></g>
+          <text v-for="soc in [0, 50, 100]" :key="soc" x="34" :y="plotY(soc) + 4" text-anchor="end">{{ soc }}%</text>
+          <text :x="PLOT_LEFT" y="222">{{ axisTime(dataset!.slots[0].start) }}</text>
+          <text :x="PLOT_RIGHT" y="222" text-anchor="end">{{ axisTime(dataset!.slots.at(-1)!.end) }}</text>
+          <polyline :points="chart.baseline" fill="none" stroke="currentColor" stroke-dasharray="6 5" stroke-width="1.5" />
+          <polyline v-for="line in chart.lines" :key="line.id" :points="line.curve" fill="none" :stroke="line.color" stroke-width="2" stroke-linejoin="round" />
+          <g v-for="line in chart.lines" :key="line.id">
+            <line :x1="PLOT_RIGHT + 6" :y1="line.labelY - 4" :x2="PLOT_RIGHT + 18" :y2="line.labelY - 4" :stroke="line.color" stroke-width="2" />
+            <text class="planner-label" :x="PLOT_RIGHT + 22" :y="line.labelY">{{ line.name }} {{ line.finalSoc.toFixed(0) }}%</text>
+          </g>
+          <template v-if="hover !== undefined">
+            <line class="planner-crosshair" :x1="plotX(hover, comparison.input.slots.length)" y1="20" :x2="plotX(hover, comparison.input.slots.length)" y2="200" />
+            <circle v-for="line in chart.lines" :key="line.id" :cx="plotX(hover, comparison.input.slots.length)" :cy="plotY(line.socs[hover])" r="4" :fill="line.color" class="planner-dot" />
+          </template>
+        </svg>
+        <figcaption>
+          <template v-if="hover !== undefined">{{ intervalTime(comparison.input.slots[hover].start, comparison.input.slots[hover].end) }}: <template v-for="(line, i) in chart.lines" :key="line.id">{{ i ? " · " : "" }}{{ line.name }} {{ line.socs[hover].toFixed(1) }}%</template></template>
+          <template v-else>End-of-interval SoC: solid lines are each strategy's plan, dashed is the battery left to its own self-consumption. Hover for every strategy's value at one interval.</template>
+        </figcaption>
+      </figure>
+      <details class="planner-details"><summary>Per-scenario detail, with PV generated and curtailed</summary>
+        <div class="planner-table" tabindex="0">
+          <table><thead><tr><th>Scenario</th><th>Strategy</th><th>Cost incl. wear</th><th>Final SoC</th><th>PV generated / curtailed kWh</th></tr></thead>
+            <tbody><template v-for="scenario in replays" :key="scenario.name">
+              <tr v-for="(row, j) in scenario.rows" :key="row.id"><th v-if="j === 0" scope="rowgroup" :rowspan="scenario.rows.length">{{ scenario.name }}</th><td>{{ row.label }}</td><td>{{ row.result.cost.toFixed(3) }}</td><td>{{ row.result.finalSoc.toFixed(1) }}%</td><td>{{ row.result.generatedKwh.toFixed(2) }} / {{ row.result.curtailedKwh.toFixed(2) }}</td></tr>
+            </template></tbody>
+          </table>
+        </div>
+      </details>
+      <p>Every registered strategy plans the same snapshot under the same capabilities and is scored by the same physical replay, for nominal and reduced solar: import charges minus export revenue plus battery wear. Excess solar replays the same schedule with solar raised by the same margin, to show what each plan leaves on the table on a sunnier day; it is reported only, and no strategy plans for it. Evening target keeps balance mode and aims for its deadline and reserve; HiGHS minimizes that mean cost directly and, at equal cost, prefers balance, with no evening target or terminal-reserve value, so a lower final SoC can explain a lower cost. Dynamic programming minimizes the same cost over a grid of battery levels and values the terminal reserve like Evening target does, so it ends fuller when the add-on expects demand before solar recovers. These are forecast simulations, not measured savings, and costs exclude Evening target’s switching and buffer penalties.</p>
       <template v-if="scored.length">
         <h3>Interval controls and predictions (nominal)</h3>
         <p>Times are in {{ dataset!.timeZone }}. Prices are the snapshot’s configured consumption/import and production/export tariffs, including pricing formulas—not raw EPEX spot prices. Expected load and solar are the snapshot’s forecasts, before curtailment and the solar reduction. Positive battery power means charging; negative means discharging. “—” means balance has no requested setpoint. Balance only moves the battery within its limits: with a 0 W discharge limit it cannot discharge, so check predicted battery power rather than the mode alone.</p>
         <button type="button" @click="download">Download inputs and every strategy’s result</button>
+        <fieldset class="planner-picker">
+          <legend>Strategies in the interval table</legend>
+          <label v-for="run in scored" :key="run.id"><input v-model="tableIds" type="checkbox" :value="run.id" /><span class="planner-swatch" :style="{ background: series(run.id) }" aria-hidden="true"></span>{{ run.label }}</label>
+        </fieldset>
         <div class="planner-table" tabindex="0" role="region" aria-label="Side-by-side interval comparison"><table>
           <thead>
             <tr>
@@ -395,10 +523,10 @@ function download() {
               <th scope="col" rowspan="2">Production<br />{{ dataset!.currency }}/kWh</th>
               <th scope="col" rowspan="2">Expected<br />load W</th>
               <th scope="col" rowspan="2">Expected<br />solar W</th>
-              <th v-for="run in scored" :key="run.id" scope="colgroup" colspan="6">{{ run.label }}</th>
+              <th v-for="run in tabled" :key="run.id" scope="colgroup" colspan="6"><span class="planner-swatch" :style="{ background: series(run.id) }" aria-hidden="true"></span>{{ run.label }}</th>
             </tr>
             <tr>
-              <template v-for="run in scored" :key="run.id">
+              <template v-for="run in tabled" :key="run.id">
                 <th scope="col">Mode</th>
                 <th scope="col">Limits W<br />charge / discharge</th>
                 <th scope="col">Requested<br />setpoint W</th>
@@ -415,7 +543,7 @@ function download() {
               <td>{{ slot.sell.toFixed(4) }}{{ slot.estimatedPrice ? ' *' : '' }}</td>
               <td>{{ slot.loadW.toFixed(0) }}</td>
               <td>{{ slot.solarW.toFixed(0) }}</td>
-              <template v-for="run in scored" :key="run.id">
+              <template v-for="run in tabled" :key="run.id">
                 <td>{{ run.scenarios![0].points[i].mode }}</td>
                 <td>{{ run.scenarios![0].points[i].chargeLimitW }} / {{ run.scenarios![0].points[i].dischargeLimitW }}</td>
                 <td>{{ run.scenarios![0].points[i].setpointW ?? '—' }}</td>
@@ -449,10 +577,30 @@ function download() {
 .planner-table th { position: relative; z-index: 1; background: var(--vp-c-bg-soft); }
 .planner-table table { display: table; width: 100%; font-size: 0.85rem; white-space: nowrap; }
 .planner-table th, .planner-table td { padding: 6px 8px; }
-.planner-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 1rem 2rem; }
-.planner-charts figure { margin: 0; min-width: 0; }
-.planner-charts h3 { margin: 0 0 0.25rem; }
-.planner-charts figcaption { font-size: 0.9rem; color: var(--vp-c-text-2); }
+/*
+ * Strategy colours, slots in registry order. Validated as a categorical set
+ * against VitePress's light (#ffffff) and dark (#1b1b1f) surfaces; the first
+ * three also pass all-pairs. Aqua is under 3:1 on white, which is why every
+ * line is labelled directly and the scoreboard repeats the numbers.
+ */
+.planner { --planner-series-1: #2a78d6; --planner-series-2: #eb6834; --planner-series-3: #1baf7a; --planner-series-4: #eda100; --planner-series-5: #e87ba4; --planner-series-6: #008300; --planner-series-7: #6250d6; --planner-series-8: #e34948; }
+:global(.dark) .planner { --planner-series-1: #3987e5; --planner-series-2: #d95926; --planner-series-3: #199e70; --planner-series-4: #c98500; --planner-series-5: #d55181; --planner-series-6: #008300; --planner-series-7: #9085e9; --planner-series-8: #e66767; }
+.planner-swatch { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; margin-right: 0.4rem; vertical-align: -0.05rem; }
+.planner-swatch-dashed { height: 0; border-top: 2px dashed var(--vp-c-text-2); border-radius: 0; vertical-align: 0.2rem; }
+.planner-best td, .planner-best th { font-weight: 600; }
+.planner-table td.planner-status { white-space: normal; min-width: 16rem; text-align: left; }
+.planner-chart { margin: 1rem 0 0; min-width: 0; }
+.planner-chart h3 { margin: 0 0 0.25rem; }
+.planner-chart figcaption { font-size: 0.9rem; color: var(--vp-c-text-2); min-height: 2.8em; }
+.planner-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; list-style: none; padding: 0; margin: 0.25rem 0 0.5rem; font-size: 0.9rem; }
+.planner-legend li { margin: 0; }
+.planner-label { fill: var(--vp-c-text-1); }
+.planner-crosshair { stroke: var(--vp-c-text-3); stroke-width: 1; }
+.planner-dot { stroke: var(--vp-c-bg); stroke-width: 2; }
+.planner-details { margin: 1rem 0; }
+.planner-picker { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; border: 1px solid var(--vp-c-divider); border-radius: 6px; padding: 0.5rem 1rem 0.75rem; margin: 1rem 0; }
+.planner .planner-picker label { display: flex; align-items: center; gap: 0.4rem; }
+.planner .planner-picker input { padding: 0; }
 .planner-grid line { stroke: var(--vp-c-divider); }
 .planner svg { width: 100%; color: var(--vp-c-text-2); }
 .planner svg text { fill: currentColor; font-size: 12px; }
