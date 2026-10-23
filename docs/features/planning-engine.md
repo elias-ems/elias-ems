@@ -60,3 +60,8 @@ balance always, plus whichever of hold, charge and discharge are ticked in
 Settings, with `charge` permitting grid charging and `discharge` battery export.
 Nothing yet enforces those permissions against live power but the battery's own
 automation, so untick a mode it does not carry out.
+
+Evening target prepares nominal and reduced-solar interval data once per plan.
+Its candidate search replays the same physics while accumulating scores without
+building display timelines; only the selected schedule and baseline need those.
+This keeps per-array curtailment and AC output limit searches responsive at boot.

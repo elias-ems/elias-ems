@@ -99,6 +99,82 @@ describe("native self-consumption charging plan", () => {
     },
   );
 
+  it("scores curtailable search candidates consistently with their displayed timelines", async () => {
+    const slots = [
+      slot(0, 0, 300, 0.01),
+      slot(1, 2000, 400, 0.02),
+      slot(2, 3000, 600, -0.1),
+      slot(3, 500, 800, 0.01),
+    ].map((interval) => ({
+      ...interval,
+      curtailment: {
+        fixedW: 0,
+        availableW: interval.solarW,
+        floorW: 0,
+        gridTargetW: 0,
+        exportAllowanceW: 0,
+        modulatingArrays: [
+          { availableW: interval.solarW, floorW: 0, ceilingW: 1200 },
+        ],
+      },
+    }));
+    const data = {
+      slots,
+      model: { ...model, soc: 30, dischargeMinW: 0, dischargeStepW: 100 },
+      terminalReserveKwh: 0,
+    };
+    const original = structuredClone(data);
+    const settings = {
+      deadline: new Date(slots[2].end).toISOString(),
+      targetSoc: 100,
+      solarHaircut: 0.2,
+      switchCost: 0.01,
+      passes: 2,
+      spikeBufferKwh: 0.54,
+    };
+    const plan = await evening(data, settings);
+    const limits = plan.points.map((p) => p.limitW);
+    const outputs = plan.points.map(
+      (p) => p.dischargeLimitW ?? model.dischargeW,
+    );
+    const runs = [0, 0.2].map((haircut) => {
+      const run = replay(data, limits, settings, haircut, outputs);
+      // Buffer value is judged with native output, so holding energy back
+      // through a discharge restriction cannot earn a better buffer score.
+      const native = replay(
+        data,
+        limits,
+        settings,
+        haircut,
+        slots.map(() => model.dischargeW),
+      );
+      const bufferPenalty = native.points.reduce(
+        (sum, p) =>
+          sum +
+          (p.solarW > 0 && p.end <= Date.parse(settings.deadline)
+            ? (Math.max(0, 0.54 - p.soc / 100) *
+                Math.max(0, p.buy) *
+                (p.end - p.start)) /
+              3_600_000
+            : 0),
+        0,
+      );
+      expect(run.deadlineSoc).toBeGreaterThanOrEqual(100 - 1e-8);
+      return { run, bufferPenalty };
+    });
+    expect(plan.searchObjective).toBeCloseTo(
+      runs.reduce((sum, r) => sum + r.run.energyCost + r.bufferPenalty, 0) / 2 +
+        settings.switchCost * runs[0].run.switches,
+      10,
+    );
+    expect(plan.bufferPenalty).toBeCloseTo(runs[0].bufferPenalty, 10);
+    expect(plan.points.map((p) => p.soc)).toEqual(
+      runs[0].run.points.map((p) => p.soc),
+    );
+    expect(plan.points.some((p) => (p.curtailedW ?? 0) > 0)).toBe(true);
+    expect(data).toEqual(original);
+  });
+
   it("starts a fixed step only on surplus, holds through demand, and releases on price recovery", () => {
     const forecast: ChargeInterval = {
       ...slot(0, 1000, 500, -0.1),
