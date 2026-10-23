@@ -86,7 +86,7 @@ export default function PlanPowerFlow({
           aria-label={`At ${stamp(point.start)}: solar ${watts(solar)}, household demand ${watts(demand)}, battery charging ${watts(charging)}, battery discharging ${watts(discharging)}, grid ${grid >= 0 ? "import" : "export"} ${watts(Math.abs(grid))}`}
           style={{ display: "block", width: "100%", minWidth: 650 }}
         >
-          <title>Modeled power balance at {stamp(point.start)}</title>
+          <title>{`Modeled power balance at ${stamp(point.start)}`}</title>
           <line
             x1="88"
             x2="742"
