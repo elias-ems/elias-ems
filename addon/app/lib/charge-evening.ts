@@ -1,4 +1,8 @@
-import type { ChargeInterval, ChargeModel } from "./charge-plan.ts";
+import type {
+  ChargeInterval,
+  ChargeModel,
+  ChargePlanPoint,
+} from "./charge-plan.ts";
 export type EveningData = {
   slots: ChargeInterval[];
   model: ChargeModel;
@@ -22,14 +26,17 @@ export function replay(
   haircut = 0,
   dischargeLimits?: number[],
 ) {
-  let energy = (data.model.capacityKwh * data.model.soc) / 100;
-  let cost = 0;
-  let deadlineEnergy: number | undefined;
-  let switches = 0;
-  let gridImportKwh = 0;
-  let stepped = false;
-  const points = data.slots.map((original, i) => {
-    const slot = {
+  return prepareReplay(data, settings, haircut)(limits, dischargeLimits);
+}
+
+/** Reuse scenario physics across candidate schedules; only winners need a timeline. */
+function prepareReplay(
+  data: EveningData,
+  settings: EveningSettings,
+  haircut: number,
+) {
+  const slots = data.slots.map((original) => {
+    return {
       ...original,
       solarW: original.solarW * (1 - haircut),
       curtailment: original.curtailment
@@ -50,48 +57,77 @@ export function replay(
           }
         : undefined,
     };
-    const next = simulateCharge(
-      slot,
-      energy,
-      limits[i],
-      data.model,
-      stepped,
-      dischargeLimits?.[i],
-    );
-    stepped = next.stepped;
-    energy = next.energy;
-    cost += next.cost;
-    if (i && limits[i] !== limits[i - 1]) switches++;
-    if (i && dischargeLimits && dischargeLimits[i] !== dischargeLimits[i - 1])
-      switches++;
-    gridImportKwh +=
-      (Math.max(0, slot.loadW - next.solarW - next.dischargeW) *
-        (slot.end - slot.start)) /
-      3600000 /
-      1000;
-    if (slot.end === Date.parse(settings.deadline)) deadlineEnergy = energy;
-    return {
-      ...original,
-      generatedSolarW: next.solarW,
-      curtailedW: next.curtailedW,
-      limitW: limits[i],
-      ...(dischargeLimits ? { dischargeLimitW: dischargeLimits[i] } : {}),
-      cost: next.cost,
-      chargeW: next.chargeW,
-      dischargeW: next.dischargeW,
-      soc: (energy / data.model.capacityKwh) * 100,
-    };
   });
-  if (deadlineEnergy === undefined)
-    throw new Error("Deadline must match an interval end inside the dataset");
-  return {
-    points,
-    energyCost: cost,
-    switches,
-    gridImportKwh,
-    deadlineEnergy,
-    deadlineSoc: (deadlineEnergy / data.model.capacityKwh) * 100,
-    endSoc: (energy / data.model.capacityKwh) * 100,
+  const deadline = Date.parse(settings.deadline);
+  const m = data.model;
+  const buffer = Math.min(
+    settings.spikeBufferKwh ?? 0.54,
+    (m.capacityKwh * (m.maxSoc - m.minSoc)) / 100,
+  );
+  const bufferTarget = (m.capacityKwh * m.minSoc) / 100 + buffer;
+  return (limits: number[], dischargeLimits?: number[], timeline = true) => {
+    let energy = (data.model.capacityKwh * data.model.soc) / 100;
+    let cost = 0;
+    let deadlineEnergy: number | undefined;
+    let switches = 0;
+    let gridImportKwh = 0;
+    let stepped = false;
+    let bufferPenalty = 0;
+    const points: Omit<ChargePlanPoint, "baselineSoc">[] = [];
+    slots.forEach((slot, i) => {
+      const original = data.slots[i];
+      const next = simulateCharge(
+        slot,
+        energy,
+        limits[i],
+        data.model,
+        stepped,
+        dischargeLimits?.[i],
+      );
+      stepped = next.stepped;
+      energy = next.energy;
+      cost += next.cost;
+      if (i && limits[i] !== limits[i - 1]) switches++;
+      if (i && dischargeLimits && dischargeLimits[i] !== dischargeLimits[i - 1])
+        switches++;
+      gridImportKwh +=
+        (Math.max(0, slot.loadW - next.solarW - next.dischargeW) *
+          (slot.end - slot.start)) /
+        3600000 /
+        1000;
+      if (slot.end === deadline) deadlineEnergy = energy;
+      const soc = (energy / m.capacityKwh) * 100;
+      if (original.solarW > 0 && slot.end <= deadline)
+        bufferPenalty +=
+          (Math.max(0, bufferTarget - (soc * m.capacityKwh) / 100) *
+            Math.max(0, original.buy) *
+            (slot.end - slot.start)) /
+          3600000;
+      if (timeline)
+        points.push({
+          ...original,
+          generatedSolarW: next.solarW,
+          curtailedW: next.curtailedW,
+          limitW: limits[i],
+          ...(dischargeLimits ? { dischargeLimitW: dischargeLimits[i] } : {}),
+          cost: next.cost,
+          chargeW: next.chargeW,
+          dischargeW: next.dischargeW,
+          soc,
+        });
+    });
+    if (deadlineEnergy === undefined)
+      throw new Error("Deadline must match an interval end inside the dataset");
+    return {
+      points,
+      bufferPenalty,
+      energyCost: cost,
+      switches,
+      gridImportKwh,
+      deadlineEnergy,
+      deadlineSoc: (deadlineEnergy / data.model.capacityKwh) * 100,
+      endSoc: (energy / data.model.capacityKwh) * 100,
+    };
   };
 }
 
@@ -157,13 +193,12 @@ export async function evening(data: EveningData, settings: EveningSettings) {
   const nativeOutput = dischargeModel
     ? data.slots.map(() => deviceLimit(dischargeModel.maxW, dischargeModel))
     : undefined;
-  const haircuts = [0, settings.solarHaircut];
+  const scenarios = [0, settings.solarHaircut].map((haircut) =>
+    prepareReplay(data, settings, haircut),
+  );
   const target = (m.capacityKwh * settings.targetSoc) / 100;
-  const required = haircuts.map((h) =>
-    Math.min(
-      target,
-      replay(data, limits, settings, h, dischargeLimits).deadlineEnergy,
-    ),
+  const required = scenarios.map((run) =>
+    Math.min(target, run(limits, dischargeLimits, false).deadlineEnergy),
   );
   const buffer = Math.min(
     settings.spikeBufferKwh ?? 0.54,
@@ -173,33 +208,19 @@ export async function evening(data: EveningData, settings: EveningSettings) {
   // Prefer earlier replenishment of the spike buffer, priced per missing kWh
   // per hour. Evaluate it with unrestricted discharge: an output restriction
   // must not earn a better buffer score by preventing use of that same buffer.
-  const bufferPenalty = (points: ReturnType<typeof replay>["points"]) =>
-    points.reduce(
-      (sum, p) =>
-        sum +
-        (p.solarW > 0 && p.end <= Date.parse(settings.deadline)
-          ? (Math.max(0, bufferTarget - (p.soc * m.capacityKwh) / 100) *
-              Math.max(0, p.buy) *
-              (p.end - p.start)) /
-            3600000
-          : 0),
-      0,
-    );
   // Output moves share a charging schedule. Cache its reference scores so we
   // do not double the simulation work for every candidate output ceiling.
   let bufferReference: { limits: number[]; penalties: number[] } | undefined;
   const chargingBufferPenalties = (candidate: number[]) => {
-    if (buffer === 0) return haircuts.map(() => 0);
+    if (buffer === 0) return scenarios.map(() => 0);
     if (
       !bufferReference ||
       candidate.some((w, i) => w !== bufferReference?.limits[i])
     ) {
       bufferReference = {
         limits: candidate.slice(),
-        penalties: haircuts.map((h) =>
-          bufferPenalty(
-            replay(data, candidate, settings, h, nativeOutput).points,
-          ),
+        penalties: scenarios.map(
+          (run) => run(candidate, nativeOutput, false).bufferPenalty,
         ),
       };
     }
@@ -210,14 +231,12 @@ export async function evening(data: EveningData, settings: EveningSettings) {
   const reservePrice =
     Math.max(0, Math.min(...data.slots.map((s) => s.buy))) * m.efficiency;
   const evaluate = (candidate: number[], output = dischargeLimits) => {
-    const runs = haircuts.map((h) =>
-      replay(data, candidate, settings, h, output),
-    );
+    const runs = scenarios.map((run) => run(candidate, output, false));
     if (runs.some((r, i) => r.deadlineEnergy < required[i] - 1e-8))
       return Infinity;
     const bufferPenalties = output
       ? chargingBufferPenalties(candidate)
-      : runs.map((r) => bufferPenalty(r.points));
+      : runs.map((r) => r.bufferPenalty);
     // Import costs price expected household demand along the way. The terminal
     // reserve evaluator remains in the gym report for comparison with reference.
     return (
@@ -384,6 +403,6 @@ export async function evening(data: EveningData, settings: EveningSettings) {
     bufferTargetSoc: (bufferTarget / m.capacityKwh) * 100,
     bufferPenalty: dischargeLimits
       ? chargingBufferPenalties(limits)[0]
-      : bufferPenalty(run.points),
+      : run.bufferPenalty,
   };
 }
