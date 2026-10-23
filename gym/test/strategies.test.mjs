@@ -14,7 +14,7 @@ test("every registered strategy runs and is scored by the shared replay", async 
   const first = await runStrategies(snapshot, { timeLimitSeconds: 20 });
   assert.deepEqual(
     first.results.map((r) => r.id),
-    ["evening-target", "highs"],
+    ["evening-target", "highs", "dynamic-programming"],
   );
   for (const result of first.results) {
     assert.equal(result.error, undefined, result.error);

@@ -6,8 +6,9 @@
 
 - Battery control strategies — one registry of strategies that Settings, the
   planning loop, the Planner sandbox and the gym all read
-  ([features/strategies.md](features/strategies.md)). Two are registered:
-  **Evening target** and **HiGHS cost optimizer**, both selectable in Battery
+  ([features/strategies.md](features/strategies.md)). Three are registered:
+  **Evening target**, **HiGHS cost optimizer** and **Dynamic programming**,
+  all selectable in Battery
   control and compared side by side in the sandbox. Net zero energy has been
   removed; installs that had it come back with control switched off. HiGHS plans
   with the modes ticked for the battery (`batteryCapabilities`), so direct

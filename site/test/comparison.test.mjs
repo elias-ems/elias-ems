@@ -26,7 +26,7 @@ test("compares every registered strategy on one snapshot", async () => {
   });
   assert.deepEqual(
     comparison.runs.map((run) => run.id),
-    ["evening-target", "highs"],
+    ["evening-target", "highs", "dynamic-programming"],
   );
   for (const run of comparison.runs) {
     assert.equal(run.error, undefined, `${run.id}: ${run.error}`);

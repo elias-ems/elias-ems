@@ -10,12 +10,13 @@ household battery.
 
 ## Choosing a strategy
 
-Under **Settings → Battery control**, pick one of two strategies:
+Under **Settings → Battery control**, pick one of three strategies:
 
 | Strategy | What it aims for |
 | --- | --- |
 | **Evening target** | the battery full by 18:00 even with 20% less solar than forecast, then the cheapest way to get there — reserving energy during cheap hours for expensive demand |
 | **HiGHS cost optimizer** | the lowest expected cost over the forecast and a 20%-less-solar scenario, solved exactly; it has no evening target, so it may leave the battery emptier |
+| **Dynamic programming** | the same low expected cost, searched over the battery's levels interval by interval, while keeping enough charge at the end to cover demand until solar recovers |
 
 Both keep the battery in its **own self-consumption mode** and only move two
 limits: its maximum charging power and, if your automation can apply it, its

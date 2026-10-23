@@ -1,12 +1,13 @@
 # Battery control strategies
 
 A **strategy** decides what the battery should be doing over the next day or
-two. There are two, and one registry that everything reads:
+two. There are three, and one registry that everything reads:
 
 | Id | Label | What it optimises |
 | --- | --- | --- |
 | `evening-target` | Evening target | the battery's maximum charge by 18:00, in nominal and reduced solar, then cost — a bounded local search |
 | `highs` | HiGHS cost optimizer | the lowest mean cost over the nominal and reduced-solar scenarios — an exact mixed-integer solve |
+| `dynamic-programming` | Dynamic programming | the same mean cost plus a value for the terminal reserve — backward induction over a grid of battery levels |
 
 The registry is [addon/app/lib/strategies/index.ts](../../addon/app/lib/strategies/index.ts).
 Four places read it, and none of them names a strategy itself:
@@ -122,6 +123,39 @@ budget and the engine's own wall-clock deadline on top. A settings save aborts a
 solve in progress. A solve with no schedule, a crash or an overrun is a
 planning failure: the battery is released to its native self-consumption rather
 than another strategy being substituted silently.
+
+## Dynamic programming
+
+[dynamic-programming.ts](../../addon/app/lib/strategies/dynamic-programming.ts)
+tabulates the cheapest cost-to-go at 161 battery energies per interval,
+backwards from the end of the horizon, then walks forward from the exact
+starting energy picking each interval's cheapest command. Its transition is the
+engine's own `step` ([engine/src/physics.ts](../../engine/src/physics.ts)), so
+what it plans is what `scoreCommands` replays: there is no second battery
+model to drift from the first. It needs no solver and runs in a fraction of a
+second to a couple of seconds, on the add-on's thread, yielding between
+intervals.
+
+Three choices define it:
+
+- **One trajectory for both scenarios.** Each interval is charged the mean of
+  its nominal and reduced-solar cost from the same state, and the state moves
+  along the nominal forecast. HiGHS keeps a trajectory per scenario, which is
+  why it can still beat dynamic programming on `meanCost` when both value the
+  end the same.
+- **A menu, not a continuum.** Per interval it tries balance at nine charge and
+  nine discharge boundaries (only the one that can matter, without PV
+  curtailment), hold, and nine setpoints each way where the capabilities allow
+  them. A tie keeps the earlier entry, so it settles on balance at the device's
+  widest boundaries.
+- **The terminal reserve has a value.** Energy short of
+  `terminalReserveKwh` at the end costs the horizon's lowest import price
+  times efficiency — the same soft terminal value the add-on's other planners
+  use ([charge-limit.md](charge-limit.md#forecast-and-financial-model)). That
+  is the "valuing the end state" HiGHS lacks, and it is the main reason its
+  `meanCost`, which counts nothing for energy left over, can look worse than
+  HiGHS's: read `finalSoc` beside it. Set the reserve to zero and, on the
+  benchmark snapshot, it lands within 0.3–0.6% of HiGHS's proven optimum.
 
 ## Adding a strategy
 
