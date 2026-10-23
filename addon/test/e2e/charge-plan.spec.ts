@@ -225,10 +225,14 @@ for (const modeled of [false, true]) {
             b.scrollWidth > b.clientWidth,
           ]),
         ).toEqual([true, true]);
+        // The cells, not the thead: the pin moves the cells and leaves the
+        // thead's box where it was, so measuring the thead never saw a heading
+        // that landed in the wrong place.
         await expect
           .poll(() =>
             box
-              .locator("thead")
+              .locator("th")
+              .first()
               .evaluate((h) => Math.round(h.getBoundingClientRect().top)),
           )
           .toBe(64);
