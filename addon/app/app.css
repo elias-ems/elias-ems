@@ -426,9 +426,15 @@ input {
     overflow-x: auto;
   }
 
-  /* Raised so the rows they slide over stay beneath. */
+  /*
+   * Raised so the rows they slide over stay beneath. `top` has to be reset
+   * with `position`: the sticky rule's 64px still applies to a relative box,
+   * where it pushes every heading 64px below its own row and on top of the
+   * first rows, with the pin's shift landing on top of that.
+   */
   .plan-table th {
     position: relative;
+    top: auto;
   }
 }
 
