@@ -30,7 +30,14 @@ describe.each([
     await writeFile(
       path.join(directory, "batteries.json"),
       JSON.stringify([
-        { ...chargeBatteryFixture, dischargeLimitSupported: true },
+        {
+          ...chargeBatteryFixture,
+          dischargeLimitSupported: true,
+          // This migration/publish/release test asserts balance commands.
+          // HiGHS now honours these modes; inheriting the shared fixture's
+          // direct modes makes its first command depend on prices and time.
+          controlModes: ["balance"],
+        },
       ]),
     );
     // An upgrade mid-plan: the version before the battery command event had
