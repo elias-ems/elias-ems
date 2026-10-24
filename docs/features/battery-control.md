@@ -207,20 +207,22 @@ step, after the automation handles `balance`
 
 ## Strategies
 
-What a strategy is, the contract every one implements, how both are scored and
+What a strategy is, the contract every one implements, how they are scored and
 how to add one: [strategies.md](strategies.md). In short:
 
 | Strategy | Plans for | Publishes in production |
 | --- | --- | --- |
 | **Evening target** (`evening-target`) | the battery's maximum charge by 18:00, even with 20% less solar, then savings — see [below](#evening-target) | `balance` with a charge ceiling, and an AC output ceiling when the battery can limit discharge |
-| **HiGHS cost optimizer** (`highs`) | the lowest mean cost over the forecast and reduced-solar scenarios, solved exactly; no evening target | the same |
+| **HiGHS cost optimizer** (`highs`) | the lowest mean cost over the forecast and reduced-solar scenarios, solved exactly; no evening target | the same, plus hold, charge and discharge setpoints where the battery's ticked modes allow them |
 | **Dynamic programming** (`dynamic-programming`) | the same mean cost plus a value for the terminal reserve, over a grid of battery levels | the same as HiGHS |
 
-Both run in the same planning loop
+All three run in the same planning loop
 ([charge-limit.md](charge-limit.md#control-lifecycle)): replan every five
 minutes or at the current interval's end, publish that interval, release the
 battery when a plan fails. HiGHS solves on a worker thread with a 20-second
-budget, so it never blocks the server.
+budget, so it never blocks the server. Dynamic programming runs on the server's
+own thread but yields between intervals, stops when a settings save cancels the
+plan, and treats overrunning the same 20 seconds as a failed plan.
 
 ## Publishing commands
 

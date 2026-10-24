@@ -455,6 +455,7 @@ export async function calculateChargePlan(
     capabilities: batteryCapabilities(battery),
     timeLimitSeconds: PRODUCTION_SOLVE_SECONDS,
     solveHighs: (input) => solveHighs(input, signal),
+    signal,
   });
   report(
     "algorithm",

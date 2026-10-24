@@ -45,6 +45,8 @@ const settings = ref({
   spikeBufferKwh: 0.54,
 });
 let worker: Worker | undefined;
+// The hovered interval on the chart, for its crosshair and readout.
+const hover = ref<number>();
 let importSequence = 0;
 let runSequence = 0;
 function stop() {
@@ -102,6 +104,8 @@ onBeforeUnmount(() => {
 function invalidate() {
   stop();
   comparison.value = undefined;
+  // The chart it pointed into is gone, and pointerleave never fires for it.
+  hover.value = undefined;
   error.value = "";
 }
 function load(parsed: PlannerDataset, name: string) {
@@ -300,14 +304,9 @@ const chart = computed(() => {
       byY[i].labelY,
       i === byY.length - 1 ? 204 : byY[i + 1].labelY - 14,
     );
-  // The unrestricted baseline is the same battery left alone, whoever plans.
-  const baseline = scored.value[0]?.result?.plan.points.map(
-    (p) => p.baselineSoc,
-  );
+  const baseline = comparison.value?.baseline.points.map((p) => p.soc);
   return { lines, baseline: baseline ? polyline(baseline) : "" };
 });
-// The hovered interval on the chart, for its crosshair and readout.
-const hover = ref<number>();
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 function track(event: PointerEvent) {
   const svg = event.currentTarget as SVGSVGElement;
@@ -352,14 +351,21 @@ const board = computed(() => {
 });
 /**
  * The interval table carries six columns per strategy, so past two it is a
- * wall. Two cheapest by default; any set can be ticked.
+ * wall. Two cheapest by default; any set can be ticked, and a rerun keeps the
+ * ticks that still have a schedule to show.
  */
 const tableIds = ref<string[]>([]);
 watch(comparison, () => {
-  tableIds.value = [...scored.value]
-    .sort((a, b) => (a.meanCost ?? 0) - (b.meanCost ?? 0))
-    .slice(0, 2)
-    .map((run) => run.id);
+  if (!comparison.value) return;
+  const kept = tableIds.value.filter((id) =>
+    scored.value.some((run) => run.id === id),
+  );
+  tableIds.value = kept.length
+    ? kept
+    : [...scored.value]
+        .sort((a, b) => (a.meanCost ?? 0) - (b.meanCost ?? 0))
+        .slice(0, 2)
+        .map((run) => run.id);
 });
 // biome-ignore lint/correctness/noUnusedVariables: Used by the Vue template.
 const tabled = computed(() =>

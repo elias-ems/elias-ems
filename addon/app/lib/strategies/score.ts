@@ -1,5 +1,6 @@
 import { evaluate } from "../../../../engine/src/physics.ts";
 import type { Command, Input } from "../../../../engine/src/types.ts";
+import { type ChargePlan, deviceLimit } from "../charge-plan.ts";
 import type { Capabilities, PlanningSnapshot } from "./types.ts";
 
 /** The engine input a snapshot describes, under the given capabilities. */
@@ -46,5 +47,67 @@ export function scoreCommands(
     meanCost:
       scenarios.reduce((sum, scenario) => sum + scenario.cost, 0) /
       scenarios.length,
+  };
+}
+
+/** The device's widest balance boundaries: the battery left to its own control. */
+export function widestBalance(model: Input["model"]) {
+  return {
+    mode: "balance" as const,
+    chargeLimitW: deviceLimit(model.maxW, model),
+    dischargeLimitW:
+      model.dischargeStepW === undefined
+        ? model.dischargeW
+        : deviceLimit(model.dischargeW, {
+            minW: model.dischargeMinW ?? 0,
+            maxW: model.dischargeW,
+            stepW: model.dischargeStepW,
+          }),
+  };
+}
+
+/**
+ * The unrestricted baseline every strategy is drawn against: widest balance in
+ * every interval, replayed by the engine at nominal solar. One definition, so
+ * the plan card and the sandbox's chart show the same battery left alone
+ * whichever strategy planned.
+ */
+export function baselineReplay(input: Input) {
+  const widest = widestBalance(input.model);
+  return evaluate(
+    { ...input, capabilities: { ...input.capabilities, modes: ["balance"] } },
+    input.slots.map((slot) => ({
+      start: slot.start,
+      end: slot.end,
+      ...widest,
+    })),
+  );
+}
+
+/**
+ * A strategy's replayed nominal scenario in the shape the dashboard's plan
+ * card draws, beside the unrestricted baseline.
+ */
+export function planFromReplay(
+  input: Input,
+  nominal: ReturnType<typeof evaluate>,
+  plan: Pick<ChargePlan, "terminalReserveKwh" | "reason">,
+): ChargePlan {
+  const baseline = baselineReplay(input);
+  return {
+    points: nominal.points.map((p, i) => ({
+      ...input.slots[i],
+      generatedSolarW: p.generatedSolarW,
+      curtailedW: p.curtailedW,
+      limitW: p.chargeLimitW,
+      dischargeLimitW: p.dischargeLimitW,
+      chargeW: p.chargeW,
+      dischargeW: p.dischargeW,
+      soc: p.soc,
+      baselineSoc: baseline.points[i].soc,
+    })),
+    cost: nominal.cost,
+    baselineCost: baseline.cost,
+    ...plan,
   };
 }

@@ -28,6 +28,9 @@ test("compares every registered strategy on one snapshot", async () => {
     comparison.runs.map((run) => run.id),
     ["evening-target", "highs", "dynamic-programming"],
   );
+  // One baseline for the chart, independent of which strategy succeeded.
+  assert.equal(comparison.baseline.points.length, fixture.slots.length);
+  assert.ok(comparison.baseline.points.every((p) => p.mode === "balance"));
   for (const run of comparison.runs) {
     assert.equal(run.error, undefined, `${run.id}: ${run.error}`);
     assert.equal(run.result.commands.length, fixture.slots.length);

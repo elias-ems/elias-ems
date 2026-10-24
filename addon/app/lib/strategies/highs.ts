@@ -1,7 +1,4 @@
-import { evaluate } from "../../../../engine/src/physics.ts";
-import type { Command } from "../../../../engine/src/types.ts";
-import { deviceLimit } from "../charge-plan.ts";
-import { engineInput } from "./score.ts";
+import { engineInput, planFromReplay } from "./score.ts";
 import type { Strategy } from "./types.ts";
 
 /**
@@ -31,44 +28,12 @@ export const highs: Strategy<"highs"> = {
     if (!result.commands)
       throw new Error(`HiGHS returned no schedule: ${result.status}.`);
     const [nominal] = result.scenarios;
-    const m = snapshot.model;
-    const baselineCommands: Command[] = snapshot.slots.map((slot) => ({
-      start: slot.start,
-      end: slot.end,
-      mode: "balance",
-      chargeLimitW: deviceLimit(m.maxW, m),
-      dischargeLimitW:
-        m.dischargeStepW === undefined
-          ? m.dischargeW
-          : deviceLimit(m.dischargeW, {
-              minW: m.dischargeMinW ?? 0,
-              maxW: m.dischargeW,
-              stepW: m.dischargeStepW,
-            }),
-    }));
-    const baseline = evaluate(
-      { ...input, capabilities: { ...input.capabilities, modes: ["balance"] } },
-      baselineCommands,
-    );
     return {
       commands: result.commands,
-      plan: {
-        points: nominal.points.map((p, i) => ({
-          ...snapshot.slots[i],
-          generatedSolarW: p.generatedSolarW,
-          curtailedW: p.curtailedW,
-          limitW: p.chargeLimitW,
-          dischargeLimitW: p.dischargeLimitW,
-          chargeW: p.chargeW,
-          dischargeW: p.dischargeW,
-          soc: p.soc,
-          baselineSoc: baseline.points[i].soc,
-        })),
-        cost: nominal.cost,
-        baselineCost: baseline.cost,
+      plan: planFromReplay(input, nominal, {
         terminalReserveKwh: 0,
         reason: `HiGHS: ${result.status}.`,
-      },
+      }),
       status: result.status,
       notes: [result.balancePreference],
       details: {

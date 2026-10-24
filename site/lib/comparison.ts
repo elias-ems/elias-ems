@@ -1,5 +1,6 @@
 import { batteryCapabilities } from "../../addon/app/lib/strategies/capabilities.ts";
 import {
+  baselineReplay,
   type Capabilities,
   engineInput,
   type PlanningSnapshot,
@@ -137,5 +138,6 @@ export async function compare(
       });
     }
   }
-  return { input, runs };
+  // The battery left to its own control, the same whoever planned.
+  return { input, runs, baseline: baselineReplay(input) };
 }
