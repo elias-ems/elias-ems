@@ -29,8 +29,8 @@ configured entirely from its own pages — no YAML.
 
 ## What works today
 
-- **Battery control** with two planning strategies, Evening target and the
-  HiGHS cost optimizer, compared side by side in the [Planner
+- **Battery control** with three planning strategies, Evening target, the
+  HiGHS cost optimizer and dynamic programming, compared side by side in the [Planner
   sandbox](/planner). It plans, publishes each battery's command as its own
   event — `elias_ems_home_battery_battery_command` for a battery called "Home
   battery" — and logs both halves. See [Battery control](/guide/battery-control).

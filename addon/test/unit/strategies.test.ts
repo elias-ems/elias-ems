@@ -47,10 +47,11 @@ const context = (
 });
 
 describe("the registry", () => {
-  it("holds exactly Evening target and HiGHS, with unique ids", () => {
+  it("holds exactly Evening target, HiGHS and dynamic programming", () => {
     expect(STRATEGY_REGISTRY.map((s) => s.id)).toEqual([
       "evening-target",
       "highs",
+      "dynamic-programming",
     ]);
   });
 
@@ -172,6 +173,109 @@ describe("HiGHS", () => {
     if (highs.status === "Optimal for modeled objective")
       expect(score(highs.commands).meanCost).toBeLessThanOrEqual(
         score(eveningTarget.commands).meanCost + 1e-6,
+      );
+  });
+});
+
+describe("Dynamic programming", () => {
+  const EXPANDED: Capabilities = {
+    modes: ["balance", "hold", "charge", "discharge"],
+    gridCharging: true,
+    batteryExport: true,
+    setpointStepW: 100,
+  };
+  const unused = context(() => Promise.reject(new Error("no solver")));
+  const plan = (capabilities: Capabilities, terminalReserveKwh: number) =>
+    strategyById("dynamic-programming").plan(
+      { ...snapshot, terminalReserveKwh },
+      { ...unused, capabilities },
+    );
+
+  it("issues only commands the replay accepts, within the capabilities", async () => {
+    for (const capabilities of [BALANCE, EXPANDED]) {
+      const result = await plan(capabilities, snapshot.terminalReserveKwh);
+      expect(result.commands).toHaveLength(snapshot.slots.length);
+      expect(
+        result.commands.every((c) => capabilities.modes.includes(c.mode)),
+      ).toBe(true);
+      // scoreCommands validates every command against the device first.
+      expect(() =>
+        scoreCommands(snapshot, result.commands, capabilities),
+      ).not.toThrow();
+    }
+  });
+
+  it("is deterministic and needs no solver", async () => {
+    const [first, again] = [
+      await plan(EXPANDED, snapshot.terminalReserveKwh),
+      await plan(EXPANDED, snapshot.terminalReserveKwh),
+    ];
+    expect(again.commands).toEqual(first.commands);
+  });
+
+  it("keeps energy back for the terminal reserve, at a price", async () => {
+    const kept = await plan(BALANCE, snapshot.terminalReserveKwh);
+    const spent = await plan(BALANCE, 0);
+    const score = (commands: typeof kept.commands) =>
+      scoreCommands(snapshot, commands, BALANCE).scenarios[0];
+    expect(score(kept.commands).finalSoc).toBeGreaterThan(
+      score(spent.commands).finalSoc,
+    );
+    expect(score(kept.commands).cost).toBeGreaterThan(
+      score(spent.commands).cost,
+    );
+  });
+
+  it("plans without balance when the capabilities leave it out", async () => {
+    const direct: Capabilities = {
+      ...EXPANDED,
+      modes: ["hold", "charge", "discharge"],
+    };
+    const result = await plan(direct, snapshot.terminalReserveKwh);
+    expect(result.commands.some((c) => c.mode === "balance")).toBe(false);
+    expect(() =>
+      scoreCommands(snapshot, result.commands, direct),
+    ).not.toThrow();
+  });
+
+  it("stops when the plan is cancelled, and fails past its budget", async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(
+      strategyById("dynamic-programming").plan(snapshot, {
+        ...unused,
+        signal: aborted.signal,
+      }),
+    ).rejects.toThrow("Planning cancelled");
+    await expect(
+      strategyById("dynamic-programming").plan(snapshot, {
+        ...unused,
+        timeLimitSeconds: 1e-6,
+      }),
+    ).rejects.toThrow("exceeded its");
+  });
+
+  it("comes within 1% of HiGHS's optimum when the end is not valued", {
+    timeout: 60_000,
+  }, async () => {
+    const free = { ...snapshot, terminalReserveKwh: 0 };
+    const real = context((engineInput) => solveHighs(engineInput));
+    const [highs, dp] = await Promise.all([
+      strategyById("highs").plan(free, real),
+      strategyById("dynamic-programming").plan(free, real),
+    ]);
+    const score = (commands: typeof dp.commands) =>
+      scoreCommands(free, commands, BALANCE).meanCost;
+    // Costs here are negative (net export revenue), so "within 1%" is of
+    // HiGHS's magnitude. Any schedule HiGHS returns is at least as costly as
+    // the optimum, so the gap holds whether or not it proved optimality; only
+    // a proven optimum is also a floor the DP cannot beat.
+    expect(score(dp.commands) - score(highs.commands)).toBeLessThanOrEqual(
+      Math.abs(score(highs.commands)) * 0.01,
+    );
+    if (highs.status === "Optimal for modeled objective")
+      expect(score(dp.commands)).toBeGreaterThanOrEqual(
+        score(highs.commands) - 1e-6,
       );
   });
 });

@@ -3,11 +3,16 @@
  * is a module implementing `Strategy` and a line here: Settings, the planning
  * loop, the Planner sandbox and the gym all read this list.
  */
+import { dynamicProgramming } from "./dynamic-programming.ts";
 import { eveningTarget } from "./evening-target.ts";
 import { highs } from "./highs.ts";
 import type { Strategy } from "./types.ts";
 
-export const STRATEGY_REGISTRY = [eveningTarget, highs] as const;
+export const STRATEGY_REGISTRY = [
+  eveningTarget,
+  highs,
+  dynamicProgramming,
+] as const;
 
 export type StrategyId = (typeof STRATEGY_REGISTRY)[number]["id"];
 
@@ -17,5 +22,9 @@ export function strategyById(id: StrategyId): Strategy<StrategyId> {
   return strategy;
 }
 
-export { engineInput, scoreCommands } from "./score.ts";
+export {
+  baselineReplay,
+  engineInput,
+  scoreCommands,
+} from "./score.ts";
 export type * from "./types.ts";

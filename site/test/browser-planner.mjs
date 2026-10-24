@@ -79,13 +79,15 @@ try {
     await page
       .getByLabel("Comparison capabilities", { exact: true })
       .inputValue(),
-    "true",
+    // The fixture records no battery modes, so there is no "as in Home
+    // Assistant" option and the sandbox starts from all four modes.
+    "expanded",
   );
   assert.equal(await page.getByLabel("Permit grid charging").count(), 0);
   assert.equal(await page.getByLabel("Permit battery export").count(), 0);
   await page
     .getByLabel("Comparison capabilities", { exact: true })
-    .selectOption({ label: "Equivalent: balance + existing boundaries" });
+    .selectOption({ label: "Balance + existing boundaries" });
   await page.getByRole("button", { name: "Compare strategies" }).click();
   await page
     .getByText("Optimal for modeled objective", { exact: false })
@@ -105,9 +107,20 @@ try {
       console.error(await page.locator("body").innerText());
       throw error;
     });
-  // One SoC chart per calculated strategy.
-  for (const name of ["Evening target", "HiGHS cost optimizer"])
-    await page.getByRole("img", { name: `${name}: end-of-interval` }).waitFor();
+  // One SoC chart for every strategy, and a scoreboard row for each.
+  const strategies = [
+    "Evening target",
+    "HiGHS cost optimizer",
+    "Dynamic programming",
+  ];
+  await page
+    .getByRole("img", {
+      name: `End-of-interval battery state of charge for ${strategies.join(", ")}`,
+    })
+    .waitFor();
+  const scoreboard = page.getByRole("region", { name: "Strategy scoreboard" });
+  for (const name of strategies)
+    await scoreboard.getByRole("rowheader", { name }).waitFor();
   assert.ok(
     (await page
       .getByRole("cell")
@@ -129,7 +142,11 @@ try {
   for await (const chunk of stream) content += chunk.toString();
   const exported = JSON.parse(content);
   assert.equal(exported.dataset.schemaVersion, 1);
-  assert.deepEqual(exported.strategies, ["evening-target", "highs"]);
+  assert.deepEqual(exported.strategies, [
+    "evening-target",
+    "highs",
+    "dynamic-programming",
+  ]);
   const run = (id) => exported.comparison.runs.find((r) => r.id === id);
   assert.equal(
     run("evening-target").result.plan.points.length,
@@ -168,7 +185,7 @@ try {
   );
   await page
     .getByLabel("Comparison capabilities", { exact: true })
-    .selectOption({ label: "Equivalent: balance + existing boundaries" });
+    .selectOption({ label: "Balance + existing boundaries" });
   await page.getByRole("button", { name: "Compare strategies" }).click();
   await page
     .getByText("Optimal for modeled objective", { exact: false })
