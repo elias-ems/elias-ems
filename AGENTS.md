@@ -299,9 +299,10 @@ the planning loop, the Planner sandbox (`site/lib/comparison.ts`) and the gym
 see [docs/features/strategies.md](docs/features/strategies.md). Keep strategy
 modules pure and import with `.ts` extensions: Node runs them directly in the
 gym and site tests. The HiGHS solver is injected through the strategy context,
-never imported by a strategy. Production runs every strategy with balance-only
-capabilities (`PRODUCTION_CAPABILITIES` in `charge-planner.server.ts`); direct
-modes stay in the sandbox until the user approves them.
+never imported by a strategy. Production plans every strategy with the battery's own
+capabilities (`batteryCapabilities` in `strategies/capabilities.ts`): the modes
+ticked for it in Settings, so a direct mode reaches production only when the
+user ticks it for that battery.
 
 `engine/` is a separate npm project using HiGHS/WASM. It calculates plans only;
 the add-on runs it for the HiGHS strategy through

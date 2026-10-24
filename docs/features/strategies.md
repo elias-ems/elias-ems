@@ -61,6 +61,7 @@ parse it from a file. The `StrategyContext` carries what is platform-specific:
 | `capabilities` | the battery's ticked control modes (`batteryCapabilities`) | the exported battery's modes, balance only, or expanded (all four modes) | balance, or `--expanded` |
 | `timeLimitSeconds` | 20 | the form's solver budget | 30 |
 | `solveHighs` | a worker thread via `engine/node.mjs` | the sandbox's browser worker | a worker thread via `engine/node.mjs` |
+| `signal` | aborted by a settings save mid-plan | none; the worker is terminated instead | none |
 
 **Outputs.** A `StrategyResult` is one engine `Command` per slot — mode,
 charge and discharge boundaries, setpoint — plus the same plan in the
@@ -134,7 +135,10 @@ engine's own `step` ([engine/src/physics.ts](../../engine/src/physics.ts)), so
 what it plans is what `scoreCommands` replays: there is no second battery
 model to drift from the first. It needs no solver and runs in a fraction of a
 second to a couple of seconds, on the add-on's thread, yielding between
-intervals.
+intervals. After each one it checks the context's `signal`, rejecting with
+"Planning cancelled" when a settings save has aborted the plan, and its own
+deadline: overrunning `timeLimitSeconds` is a planning failure, as it is for
+HiGHS.
 
 Three choices define it:
 

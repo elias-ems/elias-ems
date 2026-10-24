@@ -6,7 +6,7 @@ import type {
   Input,
 } from "../../../../engine/src/types.ts";
 import { deviceLimit } from "../charge-plan.ts";
-import { engineInput } from "./score.ts";
+import { engineInput, planFromReplay, widestBalance } from "./score.ts";
 import type { Strategy } from "./types.ts";
 
 /** Energy states the value function is tabulated at, between floor and ceiling. */
@@ -46,7 +46,8 @@ function ladder(from: number, to: number, snap: (w: number) => number) {
 function actions(input: Input, slot: ChargeInterval): Action[] {
   const m = input.model;
   const caps = input.capabilities;
-  const chargeMax = deviceLimit(m.maxW, m);
+  const { chargeLimitW: chargeMax, dischargeLimitW: dischargeMax } =
+    widestBalance(m);
   const dischargeSnap = (w: number) =>
     m.dischargeStepW === undefined
       ? m.dischargeW
@@ -55,7 +56,6 @@ function actions(input: Input, slot: ChargeInterval): Action[] {
           maxW: m.dischargeW,
           stepW: m.dischargeStepW,
         });
-  const dischargeMax = dischargeSnap(m.dischargeW);
   const chargeLevels = ladder(m.maxW, m.minW, (w) => deviceLimit(w, m));
   const dischargeLevels = ladder(
     m.dischargeW,
@@ -67,9 +67,10 @@ function actions(input: Input, slot: ChargeInterval): Action[] {
   const surplus = coupled || slot.solarW > slot.loadW;
   const deficit = coupled || reduced < slot.loadW;
   const result: Action[] = [];
-  for (const chargeLimitW of surplus ? chargeLevels : [chargeMax])
-    for (const dischargeLimitW of deficit ? dischargeLevels : [dischargeMax])
-      result.push({ mode: "balance", chargeLimitW, dischargeLimitW });
+  if (caps.modes.includes("balance"))
+    for (const chargeLimitW of surplus ? chargeLevels : [chargeMax])
+      for (const dischargeLimitW of deficit ? dischargeLevels : [dischargeMax])
+        result.push({ mode: "balance", chargeLimitW, dischargeLimitW });
   const setpoints = (max: number) => {
     const stepW = caps.setpointStepW ?? max;
     return ladder(max, stepW, (w) =>
@@ -168,44 +169,52 @@ export const dynamicProgramming: Strategy<"dynamic-programming"> = {
       const j = Math.min(STATES - 1, Math.floor(position));
       return row[j] + (row[j + 1] - row[j]) * (position - j);
     };
-    const menus = slots.map((slot) => actions(input, slot));
-    const outcome = (i: number, energy: number, stepped: number, u: Action) => {
-      const nominal = step(
-        numeric,
-        input,
-        slots[i],
-        energy,
-        stepped,
-        controls(u),
-        0,
+    // Each entry's engine controls are built once, not at every state.
+    const menus = slots.map((slot) =>
+      actions(input, slot).map((action) => ({ action, u: controls(action) })),
+    );
+    if (menus.some((menu) => !menu.length))
+      throw new Error(
+        "Dynamic programming has no command to plan with under these capabilities.",
       );
-      const reduced = step(
-        numeric,
-        input,
-        slots[i],
-        energy,
-        stepped,
-        controls(u),
-        input.solarHaircut,
-      );
-      const next = values[i + 1][nominal.stepped];
-      return {
-        nominal,
-        total: (nominal.cost + reduced.cost) / 2 + future(next, nominal.energy),
-      };
-    };
+    /** The cheapest entry from one state, and where it leads at nominal solar. */
     const choose = (i: number, energy: number, stepped: number) => {
-      let best = outcome(i, energy, stepped, menus[i][0]);
-      let action = menus[i][0];
-      for (const u of menus[i].slice(1)) {
-        const candidate = outcome(i, energy, stepped, u);
-        if (candidate.total < best.total - TIE) {
-          best = candidate;
-          action = u;
+      const menu = menus[i];
+      let best = 0;
+      let bestTotal = Number.POSITIVE_INFINITY;
+      let bestNext = energy;
+      let bestStepped = stepped;
+      for (let k = 0; k < menu.length; k++) {
+        const { u } = menu[k];
+        const nominal = step(numeric, input, slots[i], energy, stepped, u, 0);
+        const reduced = step(
+          numeric,
+          input,
+          slots[i],
+          energy,
+          stepped,
+          u,
+          input.solarHaircut,
+        );
+        const total =
+          (nominal.cost + reduced.cost) / 2 +
+          future(values[i + 1][nominal.stepped], nominal.energy);
+        if (total < bestTotal - TIE) {
+          best = k;
+          bestTotal = total;
+          bestNext = nominal.energy;
+          bestStepped = nominal.stepped;
         }
       }
-      return { ...best, action };
+      return {
+        action: menu[best].action,
+        total: bestTotal,
+        energy: bestNext,
+        stepped: bestStepped,
+      };
     };
+    // Its own budget, like HiGHS's: overrunning it is a planning failure.
+    const deadline = performance.now() + context.timeLimitSeconds * 1000;
     for (let i = slots.length - 1; i >= 0; i--) {
       values[i] = flags.map((stepped) =>
         Float64Array.from(
@@ -213,49 +222,33 @@ export const dynamicProgramming: Strategy<"dynamic-programming"> = {
           (_, j) => choose(i, low + j * width, stepped).total,
         ),
       );
-      // Yield between intervals so the add-on's event loop keeps running.
+      // Yield between intervals so the add-on's event loop keeps running, and
+      // so a settings save can cancel a plan nobody wants any more.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (context.signal?.aborted) throw new Error("Planning cancelled");
+      if (performance.now() > deadline)
+        throw new Error(
+          `Dynamic programming exceeded its ${context.timeLimitSeconds} s budget.`,
+        );
     }
     // Forward, from the exact energy: the grid only ever shapes the decisions.
     let energy = start;
     let stepped = 0;
     const commands: Command[] = slots.map((slot, i) => {
       const chosen = choose(i, energy, stepped);
-      energy = chosen.nominal.energy;
-      stepped = chosen.nominal.stepped;
+      energy = chosen.energy;
+      stepped = chosen.stepped;
       return { start: slot.start, end: slot.end, ...chosen.action };
     });
     const nominal = evaluate(input, commands);
-    const baseline = evaluate(
-      { ...input, capabilities: { ...input.capabilities, modes: ["balance"] } },
-      slots.map((slot) => ({
-        start: slot.start,
-        end: slot.end,
-        // The first action on every menu is balance at the widest boundaries.
-        ...menus[0][0],
-      })),
-    );
     const shortfall = Math.max(0, floor + reserve - energy);
     const balance = commands.filter((u) => u.mode === "balance").length;
     return {
       commands,
-      plan: {
-        points: nominal.points.map((p, i) => ({
-          ...slots[i],
-          generatedSolarW: p.generatedSolarW,
-          curtailedW: p.curtailedW,
-          limitW: p.chargeLimitW,
-          dischargeLimitW: p.dischargeLimitW,
-          chargeW: p.chargeW,
-          dischargeW: p.dischargeW,
-          soc: p.soc,
-          baselineSoc: baseline.points[i].soc,
-        })),
-        cost: nominal.cost,
-        baselineCost: baseline.cost,
+      plan: planFromReplay(input, nominal, {
         terminalReserveKwh: reserve,
         reason: `Dynamic programming over ${STATES + 1} battery levels; ${balance} of ${commands.length} intervals in balance.`,
-      },
+      }),
       status:
         shortfall > 1e-6
           ? `Planned; ${shortfall.toFixed(2)} kWh short of the terminal reserve`

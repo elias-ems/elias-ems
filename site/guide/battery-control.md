@@ -18,10 +18,13 @@ Under **Settings → Battery control**, pick one of three strategies:
 | **HiGHS cost optimizer** | the lowest expected cost over the forecast and a 20%-less-solar scenario, solved exactly; it has no evening target, so it may leave the battery emptier |
 | **Dynamic programming** | the same low expected cost, searched over the battery's levels interval by interval, while keeping enough charge at the end to cover demand until solar recovers |
 
-Both keep the battery in its **own self-consumption mode** and only move two
-limits: its maximum charging power and, if your automation can apply it, its
-maximum AC output. Neither charges from the grid or exports from the battery.
-Switching between them takes effect at the next plan, and the Home page's
+With only `balance` ticked for the battery, all three keep it in its **own
+self-consumption mode** and only move two limits: its maximum charging power
+and, if your automation can apply it, its maximum AC output; none of them
+charges from the grid or exports from the battery. HiGHS and dynamic
+programming can also send hold, charge and discharge setpoints — charging from
+the grid or exporting when that is cheaper — but only for the modes you tick
+for that battery. Switching between them takes effect at the next plan, and the Home page's
 **Battery plan** card says which one produced the plan it shows.
 
 Not sure which? Export your planner data from **Plans** and import it into the

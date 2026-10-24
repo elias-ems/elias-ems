@@ -226,6 +226,35 @@ describe("Dynamic programming", () => {
     );
   });
 
+  it("plans without balance when the capabilities leave it out", async () => {
+    const direct: Capabilities = {
+      ...EXPANDED,
+      modes: ["hold", "charge", "discharge"],
+    };
+    const result = await plan(direct, snapshot.terminalReserveKwh);
+    expect(result.commands.some((c) => c.mode === "balance")).toBe(false);
+    expect(() =>
+      scoreCommands(snapshot, result.commands, direct),
+    ).not.toThrow();
+  });
+
+  it("stops when the plan is cancelled, and fails past its budget", async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(
+      strategyById("dynamic-programming").plan(snapshot, {
+        ...unused,
+        signal: aborted.signal,
+      }),
+    ).rejects.toThrow("Planning cancelled");
+    await expect(
+      strategyById("dynamic-programming").plan(snapshot, {
+        ...unused,
+        timeLimitSeconds: 1e-6,
+      }),
+    ).rejects.toThrow("exceeded its");
+  });
+
   it("comes within 1% of HiGHS's optimum when the end is not valued", {
     timeout: 60_000,
   }, async () => {
@@ -237,16 +266,17 @@ describe("Dynamic programming", () => {
     ]);
     const score = (commands: typeof dp.commands) =>
       scoreCommands(free, commands, BALANCE).meanCost;
-    // Costs here are negative (net export revenue), so "within 1%" is of the
-    // optimum's magnitude, and HiGHS's proven optimum is a floor for both.
-    if (highs.status === "Optimal for modeled objective") {
+    // Costs here are negative (net export revenue), so "within 1%" is of
+    // HiGHS's magnitude. Any schedule HiGHS returns is at least as costly as
+    // the optimum, so the gap holds whether or not it proved optimality; only
+    // a proven optimum is also a floor the DP cannot beat.
+    expect(score(dp.commands) - score(highs.commands)).toBeLessThanOrEqual(
+      Math.abs(score(highs.commands)) * 0.01,
+    );
+    if (highs.status === "Optimal for modeled objective")
       expect(score(dp.commands)).toBeGreaterThanOrEqual(
         score(highs.commands) - 1e-6,
       );
-      expect(score(dp.commands) - score(highs.commands)).toBeLessThanOrEqual(
-        Math.abs(score(highs.commands)) * 0.01,
-      );
-    }
   });
 });
 

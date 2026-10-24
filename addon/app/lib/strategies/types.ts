@@ -46,6 +46,12 @@ export type StrategyContext = {
    * the sandbox, a worker thread in the add-on and the gym.
    */
   solveHighs: (input: Input) => Promise<HighsSolveResult>;
+  /**
+   * Aborted when the plan is no longer wanted, such as a settings save. A
+   * strategy that does its own work, rather than handing it to `solveHighs`,
+   * checks it and rejects with "Planning cancelled".
+   */
+  signal?: AbortSignal;
 };
 
 export type StrategyResult = {

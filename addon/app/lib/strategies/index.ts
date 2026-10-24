@@ -22,5 +22,9 @@ export function strategyById(id: StrategyId): Strategy<StrategyId> {
   return strategy;
 }
 
-export { engineInput, scoreCommands } from "./score.ts";
+export {
+  baselineReplay,
+  engineInput,
+  scoreCommands,
+} from "./score.ts";
 export type * from "./types.ts";
