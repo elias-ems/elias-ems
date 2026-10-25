@@ -4,6 +4,7 @@ import {
   type ChargeLimitsData,
   strategyLabel,
 } from "../../lib/charge-limit-status";
+import type { ChargePlanPoint } from "../../lib/charge-plan";
 import { usePolledJson } from "../../lib/json-fetch";
 import { hintStyle } from "../form";
 import { cardStyle, eyebrowStyle, monoStyle } from "./chrome";
@@ -60,6 +61,19 @@ function pinScheduleHeadings(box: HTMLDivElement | null) {
   };
 }
 
+/**
+ * What one interval asks of the battery: a direct mode by its setpoint, and
+ * balance by the limits it moves within, e.g. "balance, charge ≤ 2000 W, AC
+ * output ≤ 0 W".
+ */
+function describePoint(p: ChargePlanPoint) {
+  const mode = p.mode ?? "balance";
+  if (mode === "hold") return "hold";
+  if (mode !== "balance")
+    return `${mode} ${Math.abs(Math.round(p.setpointW ?? 0))} W`;
+  return `balance, charge ≤ ${Math.round(p.limitW)} W${p.dischargeLimitW === undefined ? "" : `, AC output ≤ ${Math.round(p.dischargeLimitW)} W`}`;
+}
+
 function BatteryPlan({
   status,
   now,
@@ -84,7 +98,9 @@ function BatteryPlan({
   const next = status.plan?.points.find(
     (p) =>
       p.limitW !== first?.limitW ||
-      p.dischargeLimitW !== first?.dischargeLimitW,
+      p.dischargeLimitW !== first?.dischargeLimitW ||
+      (p.mode ?? "balance") !== (first?.mode ?? "balance") ||
+      p.setpointW !== first?.setpointW,
   );
   const stamp = (t: number) => status.times[String(t)] || "";
   const generatedSolarKwh = status.plan
@@ -284,7 +300,7 @@ function BatteryPlan({
         <>
           <p style={hintStyle}>
             {next
-              ? `Next change: charge ${next.limitW} W${next.dischargeLimitW === undefined ? "" : `, AC output ${next.dischargeLimitW} W`} at ${stamp(next.start)}.`
+              ? `Next change: ${describePoint(next)} at ${stamp(next.start)}.`
               : "No further limit change within this plan."}{" "}
             {status.calculatedAt !== null &&
               `Calculated ${stamp(status.calculatedAt)}.`}
@@ -458,12 +474,17 @@ function BatteryPlan({
                               Math.round(p.generatedSolarW ?? p.solarW),
                             ],
                             ["curtailed", Math.round(p.curtailedW ?? 0)],
-                            ["mode", "balance"],
+                            ["mode", p.mode ?? "balance"],
                             [
                               "limits",
                               `${Math.round(p.limitW)} / ${p.dischargeLimitW === undefined ? "Native" : Math.round(p.dischargeLimitW)}`,
                             ],
-                            ["setpoint", "—"],
+                            [
+                              "setpoint",
+                              p.setpointW === undefined
+                                ? "—"
+                                : Math.round(p.setpointW),
+                            ],
                             ["battery", Math.round(p.chargeW - p.dischargeW)],
                             ["soc", p.soc.toFixed(1)],
                             ["cost", p.cost?.toFixed(3) ?? "—"],

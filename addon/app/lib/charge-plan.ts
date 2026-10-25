@@ -1,3 +1,5 @@
+import type { Mode } from "../../../engine/src/types.ts";
+
 /** Pure model: power ceilings bound native self-consumption in both directions. */
 export type ChargeInterval = {
   start: number;
@@ -55,6 +57,10 @@ export type ChargePlanPoint = ChargeInterval & {
   curtailedW?: number;
   limitW: number;
   dischargeLimitW?: number;
+  /** The command's mode; absent means balance, the only mode older plans use. */
+  mode?: Mode;
+  /** Signed AC setpoint, positive charging; absent in balance. */
+  setpointW?: number;
   chargeW: number;
   dischargeW: number;
   soc: number;

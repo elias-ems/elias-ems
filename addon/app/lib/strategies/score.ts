@@ -101,6 +101,8 @@ export function planFromReplay(
       curtailedW: p.curtailedW,
       limitW: p.chargeLimitW,
       dischargeLimitW: p.dischargeLimitW,
+      mode: p.mode,
+      ...(p.setpointW === undefined ? {} : { setpointW: p.setpointW }),
       chargeW: p.chargeW,
       dischargeW: p.dischargeW,
       soc: p.soc,
