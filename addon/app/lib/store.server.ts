@@ -1,12 +1,19 @@
-/**
- * Everything the add-on remembers lives as JSON under the add-on's data
- * directory — `/data` in Home Assistant, which Supervisor persists across
- * restarts and updates. One file per concern, so a corrupt or hand-edited file
- * can only take out the feature it belongs to.
- */
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+
+const SETTINGS_SNAPSHOT = "settings.json";
+const SETTINGS_FILES = [
+  "batteries.json",
+  "pv-entities.json",
+  "grid.json",
+  "prices.json",
+  "control.json",
+  "curtailment.json",
+] as const;
+type SettingsFile = (typeof SETTINGS_FILES)[number];
+type SettingsSnapshot = Record<SettingsFile, unknown>;
+const settingsFiles = new Set<string>(SETTINGS_FILES);
 
 /**
  * Resolved per call rather than at module load. The alternative bites in two
@@ -24,7 +31,7 @@ function dataDir(): string {
 }
 
 /** The stored contents of `fileName`, or `fallback` when it doesn't exist yet. */
-export async function readJson<T>(fileName: string, fallback: T): Promise<T> {
+async function readFileJson<T>(fileName: string, fallback: T): Promise<T> {
   try {
     const contents = await fs.readFile(path.join(dataDir(), fileName), "utf-8");
     return JSON.parse(contents) as T;
@@ -34,6 +41,48 @@ export async function readJson<T>(fileName: string, fallback: T): Promise<T> {
   }
 }
 
+export async function readJson<T>(fileName: string, fallback: T): Promise<T> {
+  if (settingsFiles.has(fileName)) {
+    const snapshot = await readFileJson<SettingsSnapshot | null>(
+      SETTINGS_SNAPSHOT,
+      null,
+    );
+    if (snapshot) return snapshot[fileName as SettingsFile] as T;
+  }
+  return readFileJson(fileName, fallback);
+}
+
+let settingsWrites = Promise.resolve();
+
+function queueSettingsWrite(write: () => Promise<void>): Promise<void> {
+  // An ordinary save also replaces the whole snapshot once one exists.
+  const result = settingsWrites.then(write);
+  settingsWrites = result.catch(() => undefined);
+  return result;
+}
+
+// The first restore switches all settings readers over in a single rename.
+export function replaceSettings(snapshot: SettingsSnapshot): Promise<void> {
+  return queueSettingsWrite(() => writeFileJson(SETTINGS_SNAPSHOT, snapshot));
+}
+
+export function writeJson(fileName: string, value: unknown): Promise<void> {
+  if (!settingsFiles.has(fileName)) return writeFileJson(fileName, value);
+
+  return queueSettingsWrite(async () => {
+    const snapshot = await readFileJson<SettingsSnapshot | null>(
+      SETTINGS_SNAPSHOT,
+      null,
+    );
+    if (snapshot) {
+      snapshot[fileName as SettingsFile] = value;
+      await writeFileJson(SETTINGS_SNAPSHOT, snapshot);
+    } else {
+      await writeFileJson(fileName, value);
+    }
+  });
+}
+
 /**
  * Written to a temporary file beside the target and renamed over it, which is
  * atomic on the same filesystem. A plain `writeFile` truncates first, so a
@@ -41,10 +90,7 @@ export async function readJson<T>(fileName: string, fallback: T): Promise<T> {
  * page load in CI once a read could trigger a write (a migration at boot), and
  * a power cut mid-write would leave the same empty file behind for good.
  */
-export async function writeJson(
-  fileName: string,
-  value: unknown,
-): Promise<void> {
+async function writeFileJson(fileName: string, value: unknown): Promise<void> {
   const directory = dataDir();
   await fs.mkdir(directory, { recursive: true });
   const target = path.join(directory, fileName);

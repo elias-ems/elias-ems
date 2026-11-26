@@ -1,4 +1,4 @@
-import { data } from "react-router";
+import { data, Link } from "react-router";
 import { pageTitleStyle } from "../components/form";
 import BatteriesSection from "../components/settings/BatteriesSection";
 import ControlSection from "../components/settings/ControlSection";
@@ -385,6 +385,9 @@ export default function Settings({
   return (
     <main className="page">
       <h1 style={pageTitleStyle}>Settings</h1>
+      <p>
+        <Link to="/settings/backup">Back up or restore settings</Link>
+      </p>
 
       {/* The cards flow into two or three columns once the panel has room for
           them; app.css owns where that happens and why. */}

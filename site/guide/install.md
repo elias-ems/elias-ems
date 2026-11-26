@@ -85,6 +85,20 @@ Stop the add-on and click **Uninstall**. Two things worth knowing:
 - **Your settings live in the add-on's data directory** and go with it when you
   uninstall. Nothing is written into Home Assistant's own configuration.
 
+## Back up settings before experimenting
+
+In the add-on, open **Settings → Back up or restore settings** and download the
+JSON backup. It includes batteries, PV arrays, grid and price settings, battery
+control and PV curtailment. Home Assistant credentials, automations and
+operating history stay in their original locations.
+
+To restore, select the file and choose **Preview backup**. Review the changes
+and the two control switches, then choose **Apply backup**. Applying a backup can
+release devices and start control with the restored settings. Entity IDs and
+companion automations need to match the Home Assistant installation receiving
+the restore. Use a Home Assistant add-on backup if you need to roll back to an
+older add-on version along with its data.
+
 ## Next
 
 [Configuring →](/guide/configure)

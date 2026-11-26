@@ -525,20 +525,20 @@ export async function releaseBatteries(
  * Unconditional, unlike `releaseBatteries`: settings is the one place that
  * knows the old name, so this is the one chance to say it.
  */
-export async function releaseBattery(battery: Battery): Promise<void> {
-  if (!isSteerable(battery)) return;
-  logRelease(
-    await releaseCommands(
-      [
-        {
-          batteryId: battery.id,
-          title: battery.title,
-          slug: batterySlug(battery),
-        },
-      ],
-      "unsteered",
-    ),
+export async function releaseBattery(battery: Battery): Promise<boolean> {
+  if (!isSteerable(battery)) return true;
+  const publishes = await releaseCommands(
+    [
+      {
+        batteryId: battery.id,
+        title: battery.title,
+        slug: batterySlug(battery),
+      },
+    ],
+    "unsteered",
   );
+  logRelease(publishes);
+  return publishes.every((publish) => publish.status === "published");
 }
 
 function logRelease(publishes: CommandPublish[]): void {
@@ -620,8 +620,8 @@ export async function releasePvArrays(): Promise<void> {
  * Nothing decides for it any more, so nothing would ever supersede it, and the
  * add-on would go on quietly costing its owner a slice of every sunny day.
  */
-export async function releasePvArray(array: PvEntity): Promise<void> {
-  if (!isCurtailable(array)) return;
+export async function releasePvArray(array: PvEntity): Promise<boolean> {
+  if (!isCurtailable(array)) return true;
 
   const [publish] = await publishPvLimits([
     {
@@ -647,6 +647,7 @@ export async function releasePvArray(array: PvEntity): Promise<void> {
       ? `${array.title} is no longer curtailable — released it to 100%.`
       : `${array.title} is no longer curtailable, but the release did not go out (${publish.detail ?? publish.status}) — check it is not still being held back.`,
   );
+  return publish.status === "published";
 }
 
 /**
