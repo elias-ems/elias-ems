@@ -17,14 +17,20 @@ const FILE_NAME = "control.json";
  */
 const migrations = new Map<string, Promise<void>>();
 
-export async function readControlConfig(): Promise<ControlConfig> {
+export async function readControlConfig({
+  migrate = true,
+} = {}): Promise<ControlConfig> {
   const stored = await readJson<Partial<ControlConfig>>(
     FILE_NAME,
     DEFAULT_CONTROL_CONFIG,
   );
   const config = normalizeControlConfig(stored);
   const removed: unknown = stored?.strategy;
-  if (typeof removed === "string" && REMOVED_STRATEGIES.has(removed)) {
+  if (
+    migrate &&
+    typeof removed === "string" &&
+    REMOVED_STRATEGIES.has(removed)
+  ) {
     // Written back so this is said once, not on every read: the strategy no
     // longer exists, and control stays off until someone picks one of the
     // registered strategies and writes the automation it needs.

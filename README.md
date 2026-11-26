@@ -42,6 +42,10 @@ cd addon && npm install && npm run dev:mock
 
 `npm install` is also what installs the git hooks. See [AGENTS.md](AGENTS.md) for the full command list, the ingress quirks worth knowing before touching `server.js`, and why this repo uses Biome rather than ESLint.
 
+### HA-MCP onboarding
+
+The [PV onboarding runbook](docs/ha-mcp-pv-onboarding.md) covers preview, apply, and stale-revision checks through Home Assistant ingress.
+
 ### Releasing
 
 A GitHub release is what publishes a new version — merging to `main` never does. Publishing one builds and pushes the `amd64`/`aarch64` image to GHCR and, once that succeeds, bumps `version` in [addon/config.yaml](addon/config.yaml) on `main` for you:
