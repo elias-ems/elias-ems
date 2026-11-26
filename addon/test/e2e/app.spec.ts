@@ -220,6 +220,134 @@ test("the curtailment form saves with the car fields left empty", async ({
   await expect(carSensor).toHaveValue("binary_sensor.grid_connected");
 });
 
+test("PV curtailment onboarding reviews live inputs and both automation actions before enabling", async ({
+  page,
+}) => {
+  await page.goto("./settings");
+  await page.setViewportSize({ width: 390, height: 844 });
+  const checklist = page.getByText("PV curtailment setup checklist", {
+    exact: true,
+  });
+  const enable = page.getByRole("checkbox", { name: "Enable PV curtailment" });
+  const review = page.getByRole("checkbox", {
+    name: /I reviewed the AC ratings/,
+  });
+  const save = page.getByRole("button", { name: "Save PV curtailment" });
+
+  await checklist.click();
+  await expect(
+    page.getByText("No curtailable arrays configured."),
+  ).toBeVisible();
+  await expect(page.getByText("Export price: Unavailable")).toBeVisible();
+  await expect(review).toBeDisabled();
+  await expect(enable).toBeDisabled();
+
+  await page.getByRole("button", { name: "Add PV entity" }).click();
+  await page.getByLabel("Title").fill("South Roof");
+  await page.getByLabel("Current power (W)").fill("sensor.inverter_power");
+  await page.getByRole("option", { name: /sensor\.inverter_power\b/ }).click();
+  await page
+    .getByLabel("Total energy generated (kWh)")
+    .fill("sensor.inverter_energy_total");
+  await page
+    .getByRole("option", { name: /sensor\.inverter_energy_total\b/ })
+    .click();
+  await page.getByLabel("Allow curtailing this array").check();
+  await page
+    .getByLabel("While curtailing, this inverter")
+    .selectOption("stepped");
+  await page.getByLabel("Fixed limit while curtailing (%)").fill("60");
+  await page.getByLabel("Inverter rated power (W)").fill("5000");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(
+    page.getByText("South Roof: 5000 W AC, One fixed step (60%)"),
+  ).toBeVisible();
+  await expect(page.getByText(/South Roof PV power: 1\D?234\D5 W/)).toBeVisible(
+    { timeout: 10_000 },
+  );
+
+  await page.getByLabel(/^Power — net grid/).fill("sensor.grid_power");
+  await page.getByRole("option", { name: /sensor\.grid_power\b/ }).click();
+  await page.getByRole("button", { name: "Save grid" }).click();
+  await expect(page.getByText(/Grid: Importing \(842 W\)/)).toBeVisible({
+    timeout: 10_000,
+  });
+
+  const source = page.getByLabel("Source", { exact: true });
+  await source.selectOption("home-assistant");
+  await page
+    .getByLabel("Prices — the day-ahead sensor")
+    .fill("sensor.energi_epex_spot");
+  await page
+    .getByRole("option", { name: /sensor\.energi_epex_spot\b/ })
+    .click();
+  await page.getByLabel(/^Production price/).fill("0.05");
+  await page.getByRole("button", { name: "Save prices" }).click();
+  await expect(page.getByText(/Export price: .*0[.,]05/)).toBeVisible({
+    timeout: 10_000,
+  });
+
+  await page.getByText("South Roof automation YAML", { exact: true }).click();
+  const yaml = page.getByRole("textbox", {
+    name: "South Roof automation YAML",
+  });
+  await expect(yaml).toHaveValue(/event_type: elias_ems_south_roof_pv_limit/);
+  await expect(yaml).toHaveValue(
+    /data.released[\s\S]*value: 100[\s\S]*data.limit_percent/,
+  );
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await expect(page.getByText(/The inverter readback confirms/)).toBeVisible();
+  await expect(enable).toBeDisabled();
+
+  const rejected = await page.evaluate(async () => {
+    const form = document.querySelector<HTMLInputElement>(
+      'input[value="curtailment-save"]',
+    )?.form;
+    if (!form) throw new Error("Curtailment form missing");
+    const body = new FormData(form);
+    body.set("enabled", "on");
+    return (await fetch(location.href, { method: "POST", body })).status;
+  });
+  expect(rejected).toBe(400);
+
+  await review.check();
+  await expect(enable).toBeEnabled();
+  await page
+    .locator("#pv-settings")
+    .getByRole("button", { name: "Edit" })
+    .click();
+  await page.getByLabel("Inverter rated power (W)").fill("5100");
+  await page
+    .locator("#pv-settings")
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
+  await expect(
+    page.getByText("South Roof: 5100 W AC, One fixed step (60%)"),
+  ).toBeVisible();
+  await expect(review).not.toBeChecked();
+  await expect(enable).toBeDisabled();
+
+  await review.check();
+  await enable.check();
+  await save.click();
+  await expect(review).toHaveCount(0);
+  await page.reload();
+  await expect(enable).toBeChecked();
+  await enable.uncheck();
+  await save.click();
+  await expect(enable).toBeDisabled();
+
+  await source.selectOption("none");
+  await page.getByRole("button", { name: "Save prices" }).click();
+  await page
+    .locator("li", { hasText: "sensor.inverter_power" })
+    .getByRole("button", { name: "Remove" })
+    .click();
+  await expect(page.getByText("No PV entities yet.")).toBeVisible();
+});
+
 /**
  * The whole feature end to end: configure it the way a user would, pick a
  * strategy from the registry, switch it on, and check the planning loop
@@ -348,8 +476,7 @@ test("readings keep updating without the page being reloaded", async ({
   page,
   request,
 }) => {
-  // `?snapshot` is the polling fallback and nothing else asks for it, so one
-  // of these requests means the stream stopped delivering. The decision feed's
+  // On the dashboard, a `?snapshot` request means the stream stopped delivering. The decision feed's
   // own two-second poll is a different route and is supposed to be there.
   const polls: string[] = [];
   page.on("request", (event) => {

@@ -21,6 +21,7 @@ export default function GridSection({
 
   return (
     <Section
+      id="grid-settings"
       title="Grid"
       description="One sensor, instantaneous power in W and signed: positive while the house draws from the grid, negative while it feeds back. That is the net exchange the strategies balance. If your meter publishes separate consumption and production sensors, subtract one from the other in a Home Assistant template sensor and point this at that."
     >

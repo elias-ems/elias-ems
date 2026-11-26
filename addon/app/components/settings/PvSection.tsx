@@ -36,6 +36,7 @@ export default function PvSection({
 
   return (
     <Section
+      id="pv-settings"
       title="PV entities"
       description="The readings come from Home Assistant. A curtailable array's generation limit goes out as an event named after its title, which is what PV curtailment steers it with."
       add={{

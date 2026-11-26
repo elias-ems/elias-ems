@@ -141,6 +141,7 @@ export default function PricesSection({
 
   return (
     <Section
+      id="price-settings"
       title="Prices"
       description="Where the day-ahead energy prices come from, and the arithmetic that turns a market price into what you actually pay and are paid. Nothing acts on them yet — this imports and shows them."
     >

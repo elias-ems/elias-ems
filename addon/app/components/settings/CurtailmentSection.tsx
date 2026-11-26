@@ -13,6 +13,8 @@ import {
   NO_CURTAILABLE_ARRAY_ERROR,
   NO_PRICES_ERROR,
 } from "../../lib/curtailment";
+import type { PvEntity } from "../../lib/pv-entities";
+import { pvReviewKey } from "../../lib/pv-onboarding";
 import type { SettingsActionData } from "../../lib/settings-form";
 import { failureFor } from "../../lib/settings-form";
 import EntityAutocomplete from "../EntityAutocomplete";
@@ -24,6 +26,7 @@ import {
   inputStyle,
   labelStyle,
 } from "../form";
+import PvCurtailmentChecklist from "./PvCurtailmentChecklist";
 import Section from "./Section";
 
 export default function CurtailmentSection({
@@ -37,10 +40,12 @@ export default function CurtailmentSection({
    */
   ready,
   actionData,
+  pvEntities,
 }: {
   config: CurtailmentConfig;
   ready: { grid: boolean; arrays: boolean; prices: boolean };
   actionData?: SettingsActionData;
+  pvEntities?: PvEntity[];
 }) {
   const navigation = useNavigation();
   const errors = failureFor(actionData, "curtailment")?.errors ?? {};
@@ -67,10 +72,16 @@ export default function CurtailmentSection({
     strategy === "graded-export" ? "exportPercent" : "ceilingPercent";
   const hidden = shown === "exportPercent" ? "ceilingPercent" : "exportPercent";
 
+  const [reviewedKey, setReviewedKey] = useState<string | null>(null);
+  const reviewKey = pvEntities ? pvReviewKey(pvEntities) : null;
+  const reviewed = reviewKey !== null && reviewKey === reviewedKey;
+
   // Left interactive while curtailment is already on, so that an array that
   // stopped being curtailable afterwards leaves a box that can still be
   // unticked rather than a switch stuck in the on position.
-  const canEnable = (ready.arrays && ready.prices) || config.enabled;
+  const canEnable =
+    (ready.arrays && ready.prices && (!pvEntities || reviewed)) ||
+    config.enabled;
 
   return (
     <Section
@@ -80,8 +91,23 @@ export default function CurtailmentSection({
       <Form method="post" style={{ ...formStyle, marginTop: "1rem" }}>
         <input type="hidden" name="intent" value="curtailment-save" />
 
+        {pvEntities && (
+          <PvCurtailmentChecklist
+            arrays={pvEntities}
+            enabled={config.enabled}
+            reviewed={reviewed}
+            onReview={(confirmed) =>
+              setReviewedKey(confirmed ? reviewKey : null)
+            }
+          />
+        )}
+        {reviewed && (
+          <input type="hidden" name="pvReview" value={reviewedKey ?? ""} />
+        )}
+
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <input
+            key={String(canEnable)}
             id={enabledId}
             type="checkbox"
             name="enabled"
@@ -93,15 +119,22 @@ export default function CurtailmentSection({
           </label>
         </div>
 
-        {!ready.arrays && (
-          <p style={errors.enabled ? errorStyle : hintStyle}>
-            {NO_CURTAILABLE_ARRAY_ERROR}
+        {pvEntities && !config.enabled && !reviewed && (
+          <p style={hintStyle}>
+            Complete the setup review above to enable PV curtailment.
           </p>
         )}
-        {!ready.prices && (
-          <p style={errors.enabled ? errorStyle : hintStyle}>
-            {NO_PRICES_ERROR}
+        {errors.enabled && (
+          <p style={errorStyle} role="alert">
+            {errors.enabled}
           </p>
+        )}
+
+        {!ready.arrays && !errors.enabled && (
+          <p style={hintStyle}>{NO_CURTAILABLE_ARRAY_ERROR}</p>
+        )}
+        {!ready.prices && !errors.enabled && (
+          <p style={hintStyle}>{NO_PRICES_ERROR}</p>
         )}
         {!ready.grid && (
           <p style={hintStyle}>

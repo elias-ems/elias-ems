@@ -14,6 +14,21 @@ inverter](#connecting-the-event-to-an-inverter).
 
 Tracked in [issue #2](https://github.com/elias-ems/elias-ems/issues/2).
 
+## Setup checklist
+
+Open **Settings → PV curtailment → PV curtailment setup checklist**. Check the
+signed grid reading, contract-adjusted export price and each array's live
+power. Save the rated AC output and write mode in **PV entities**, then adapt
+the automation YAML shown for each curtailable array.
+
+While curtailment is off, test the limit and release events in Home Assistant.
+Check both automation traces and separately confirm the inverter's applied
+limit or mode changed as expected. Trace success establishes that the
+automation ran. It takes independent inverter readback to verify the write.
+Confirm the review for the saved array settings, then select **Enable PV
+curtailment** and save. An installation that already has curtailment enabled
+continues running.
+
 ## What you configure
 
 ### The arrays — `pv-entities.json`
